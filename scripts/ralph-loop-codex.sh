@@ -23,6 +23,8 @@ CONSTITUTION="$PROJECT_DIR/.specify/memory/constitution.md"
 MAX_ITERATIONS=0  # 0 = unlimited
 MODE="build"
 CODEX_CMD="${CODEX_CMD:-codex}"
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"
+CODEX_REASONING_EFFORT="${CODEX_REASONING_EFFORT:-xhigh}"
 TAIL_LINES=5
 TAIL_RENDERED_LINES=0
 ROLLING_OUTPUT_LINES=5
@@ -233,7 +235,7 @@ When the plan is complete, output `<promise>DONE</promise>`.
 PLANEOF
 
 # Build Codex flags for exec mode
-CODEX_FLAGS="exec"
+CODEX_FLAGS="exec -m $CODEX_MODEL -c model_reasoning_effort=\"$CODEX_REASONING_EFFORT\""
 if [ "$YOLO_ENABLED" = true ]; then
     CODEX_FLAGS="$CODEX_FLAGS --dangerously-bypass-approvals-and-sandbox"
 fi
@@ -261,6 +263,7 @@ echo -e "${GREEN}              RALPH LOOP (Codex) STARTING                    ${
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "${BLUE}Mode:${NC}     $MODE"
+echo -e "${BLUE}Model:${NC}    $CODEX_MODEL ($CODEX_REASONING_EFFORT)"
 echo -e "${BLUE}Prompt:${NC}   $PROMPT_FILE"
 echo -e "${BLUE}Branch:${NC}   $CURRENT_BRANCH"
 echo -e "${YELLOW}YOLO:${NC}     $([ "$YOLO_ENABLED" = true ] && echo "ENABLED" || echo "DISABLED")"

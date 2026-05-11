@@ -17,7 +17,7 @@ The constitution is the single source of truth. Read it on every chat session.
 ## Quick Reference
 
 ### You're in a Ralph Loop if:
-- Started by `ralph-loop.sh` or `ralph-loop-codex.sh`
+- Started by `ralph-loop.sh`, `ralph-loop-codex.sh`, or their PowerShell `.ps1` equivalents
 - Prompt mentions "implement spec" or "work through all"
 - You see `<promise>` completion signals
 

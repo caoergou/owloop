@@ -20,6 +20,7 @@ If you prefer to install manually:
 mkdir -p .specify/memory
 mkdir -p specs
 mkdir -p scripts
+mkdir -p scripts/lib
 mkdir -p logs
 mkdir -p history
 mkdir -p .cursor/commands
@@ -31,13 +32,33 @@ mkdir -p .cursor/commands
 # Download ralph-loop.sh for Claude Code
 curl -o scripts/ralph-loop.sh \
   https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop.sh
+curl -o scripts/ralph-loop.ps1 \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop.ps1
 
 # Download ralph-loop-codex.sh for Codex
 curl -o scripts/ralph-loop-codex.sh \
   https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-codex.sh
+curl -o scripts/ralph-loop-codex.ps1 \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-codex.ps1
+
+# Optional Gemini and GitHub Copilot loops
+curl -o scripts/ralph-loop-gemini.sh \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-gemini.sh
+curl -o scripts/ralph-loop-gemini.ps1 \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-gemini.ps1
+curl -o scripts/ralph-loop-copilot.sh \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-copilot.sh
+curl -o scripts/ralph-loop-copilot.ps1 \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-copilot.ps1
+
+# Shared PowerShell helpers
+curl -o scripts/lib/RalphLoop.ps1 \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/lib/RalphLoop.ps1
+curl -o scripts/lib/SpecQueue.ps1 \
+  https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/lib/SpecQueue.ps1
 
 # Make executable
-chmod +x scripts/ralph-loop.sh scripts/ralph-loop-codex.sh
+chmod +x scripts/ralph-loop*.sh
 ```
 
 ### 3. Create Constitution
@@ -105,6 +126,15 @@ Build exactly what's needed, nothing more.
 ./scripts/ralph-loop.sh           # Build mode
 ./scripts/ralph-loop.sh 20        # Max 20 iterations
 ./scripts/ralph-loop-codex.sh     # Use Codex instead
+./scripts/ralph-loop-gemini.sh    # Use Gemini instead
+./scripts/ralph-loop-copilot.sh   # Use Copilot instead
+```
+
+PowerShell uses the same arguments:
+
+```powershell
+.\scripts\ralph-loop.ps1
+.\scripts\ralph-loop-codex.ps1 20
 ```
 
 ---

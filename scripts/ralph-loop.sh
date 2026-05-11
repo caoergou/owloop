@@ -36,6 +36,7 @@ CONSTITUTION="$PROJECT_DIR/.specify/memory/constitution.md"
 MAX_ITERATIONS=0  # 0 = unlimited
 MODE="build"
 CLAUDE_CMD="${CLAUDE_CMD:-claude}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-opus-4-7}"
 YOLO_FLAG="--dangerously-skip-permissions"
 TAIL_LINES=5
 TAIL_RENDERED_LINES=0
@@ -265,7 +266,7 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 # Build Claude flags
-CLAUDE_FLAGS="-p"
+CLAUDE_FLAGS="-p --model $CLAUDE_MODEL"
 if [ "$YOLO_ENABLED" = true ]; then
     CLAUDE_FLAGS="$CLAUDE_FLAGS $YOLO_FLAG"
 fi
@@ -295,6 +296,7 @@ echo -e "${GREEN}              RALPH LOOP (Claude Code) STARTING              ${
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "${BLUE}Mode:${NC}     $MODE"
+echo -e "${BLUE}Model:${NC}    $CLAUDE_MODEL"
 echo -e "${BLUE}Prompt:${NC}   $PROMPT_FILE"
 echo -e "${BLUE}Branch:${NC}   $CURRENT_BRANCH"
 echo -e "${YELLOW}YOLO:${NC}     $([ "$YOLO_ENABLED" = true ] && echo "ENABLED" || echo "DISABLED")"

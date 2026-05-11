@@ -40,8 +40,9 @@ CONSTITUTION="$PROJECT_DIR/.specify/memory/constitution.md"
 # Configuration
 MAX_ITERATIONS=0  # 0 = unlimited
 MODE="build"
-COPILOT_CMD="copilot"
-COPILOT_MODEL="claude-opus-4.6"  # Default model, can also use: claude-sonnet-4.5, claude-opus-4.5, gpt-5.2
+COPILOT_CMD="${COPILOT_CMD:-copilot}"
+COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.5}"
+COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 YOLO_FLAG="--allow-all-tools"
 TAIL_LINES=5
 TAIL_RENDERED_LINES=0
@@ -293,7 +294,7 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 # Build Copilot flags (note: -p "prompt" must be together, other flags come after)
-COPILOT_POST_FLAGS="--model $COPILOT_MODEL"
+COPILOT_POST_FLAGS="--model $COPILOT_MODEL --reasoning-effort $COPILOT_REASONING_EFFORT"
 if [ "$YOLO_ENABLED" = true ]; then
     COPILOT_POST_FLAGS="$COPILOT_POST_FLAGS $YOLO_FLAG"
 fi
@@ -325,7 +326,7 @@ echo -e "${GREEN}         RALPH LOOP (GitHub Copilot CLI) STARTING            ${
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "${BLUE}Mode:${NC}     $MODE"
-echo -e "${BLUE}Model:${NC}    $COPILOT_MODEL"
+echo -e "${BLUE}Model:${NC}    $COPILOT_MODEL ($COPILOT_REASONING_EFFORT)"
 echo -e "${BLUE}Prompt:${NC}   $PROMPT_FILE"
 echo -e "${BLUE}Branch:${NC}   $CURRENT_BRANCH"
 echo -e "${YELLOW}YOLO:${NC}     $([ "$YOLO_ENABLED" = true ] && echo "ENABLED" || echo "DISABLED")"

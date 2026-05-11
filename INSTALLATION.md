@@ -32,13 +32,23 @@ Fetch from GitHub raw URLs:
 | Script | URL | Save To |
 |--------|-----|---------|
 | ralph-loop.sh | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop.sh` | `scripts/ralph-loop.sh` |
+| ralph-loop.ps1 | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop.ps1` | `scripts/ralph-loop.ps1` |
 | ralph-loop-codex.sh | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-codex.sh` | `scripts/ralph-loop-codex.sh` |
+| ralph-loop-codex.ps1 | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-codex.ps1` | `scripts/ralph-loop-codex.ps1` |
 | ralph-loop-gemini.sh | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-gemini.sh` | `scripts/ralph-loop-gemini.sh` |
+| ralph-loop-gemini.ps1 | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-gemini.ps1` | `scripts/ralph-loop-gemini.ps1` |
 | ralph-loop-copilot.sh | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-copilot.sh` | `scripts/ralph-loop-copilot.sh` |
+| ralph-loop-copilot.ps1 | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/ralph-loop-copilot.ps1` | `scripts/ralph-loop-copilot.ps1` |
+| RalphLoop.ps1 | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/lib/RalphLoop.ps1` | `scripts/lib/RalphLoop.ps1` |
+| SpecQueue.ps1 | `https://raw.githubusercontent.com/fstandhartinger/ralph-wiggum/main/scripts/lib/SpecQueue.ps1` | `scripts/lib/SpecQueue.ps1` |
 
 ```bash
 chmod +x scripts/ralph-loop*.sh
 ```
+
+On Windows PowerShell, no executable bit is needed. Run the `.ps1` variant that
+matches your agent, for example `.\scripts\ralph-loop.ps1` or
+`.\scripts\ralph-loop-copilot.ps1 20`.
 
 ---
 
@@ -299,5 +309,8 @@ Same content as AGENTS.md.
 | Use Gemini | `./scripts/ralph-loop-gemini.sh` |
 | Use Copilot | `./scripts/ralph-loop-copilot.sh` |
 | Limit iterations | `./scripts/ralph-loop.sh 20` |
+
+PowerShell equivalents use the same arguments with `.ps1`, for example
+`.\scripts\ralph-loop.ps1 20`.
 
 Ready to create your first specification?

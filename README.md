@@ -80,7 +80,7 @@ The agent outputs `<promise>DONE</promise>` **ONLY** when:
 - Tests pass
 - Changes are committed and pushed
 
-The bash loop checks for this phrase. If not found, it retries.
+The shell or PowerShell loop checks for this phrase. If not found, it retries.
 
 ---
 
@@ -90,6 +90,9 @@ The bash loop checks for this phrase. If not found, it retries.
 |------|---------|---------|
 | **build** (default) | Pick spec/task, implement, test, commit | `./scripts/ralph-loop.sh` |
 | **plan** (optional) | Create detailed task breakdown from specs | `./scripts/ralph-loop.sh plan` |
+
+On Windows PowerShell, use the matching `.ps1` scripts, for example
+`.\scripts\ralph-loop.ps1` or `.\scripts\ralph-loop-codex.ps1 plan`.
 
 ### Planning is OPTIONAL
 
@@ -228,6 +231,13 @@ These provide a visual history of what was built.
 ./scripts/ralph-loop-codex.sh
 ```
 
+PowerShell:
+
+```powershell
+.\scripts\ralph-loop-codex.ps1 plan
+.\scripts\ralph-loop-codex.ps1
+```
+
 ---
 
 ## File Structure
@@ -241,9 +251,14 @@ project/
 │   └── NNN-feature-name.md       # Feature specifications
 ├── scripts/
 │   ├── ralph-loop.sh             # Claude Code loop
+│   ├── ralph-loop.ps1            # Claude Code loop for PowerShell
 │   ├── ralph-loop-codex.sh       # OpenAI Codex loop
+│   ├── ralph-loop-codex.ps1      # OpenAI Codex loop for PowerShell
 │   ├── ralph-loop-gemini.sh      # Google Gemini loop
-│   └── ralph-loop-copilot.sh     # GitHub Copilot loop
+│   ├── ralph-loop-gemini.ps1     # Google Gemini loop for PowerShell
+│   ├── ralph-loop-copilot.sh     # GitHub Copilot loop
+│   ├── ralph-loop-copilot.ps1    # GitHub Copilot loop for PowerShell
+│   └── lib/                      # Shared shell and PowerShell helpers
 ├── AGENTS.md                     # Points to constitution
 └── CLAUDE.md                     # Points to constitution
 ```
