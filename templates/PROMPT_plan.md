@@ -1,6 +1,6 @@
-# Ralph Loop — Planning Mode
+# Owloop — Planning Mode
 
-You are running inside a Ralph Wiggum autonomous loop in planning mode.
+You are running inside an Owloop autonomous loop in planning mode.
 
 Read `.specify/memory/constitution.md` for project principles.
 

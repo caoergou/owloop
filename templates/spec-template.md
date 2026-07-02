@@ -1,93 +1,34 @@
-# Specification: [FEATURE_NAME]
+# Feature: [name]
 
-## Feature: [Feature Title]
+## Priority: [1-5]
 
-### Overview
-[Brief description of the feature - what it does and why it matters]
+## Requirements
+[What to build — the functional description of the feature]
 
-### User Stories
-- As a [user type], I want to [action] so that [benefit]
-- As a [user type], I want to [action] so that [benefit]
+## Acceptance Criteria
+[Specific, testable criteria. Prefer exact shell commands with the expected output over vague statements.]
 
----
+- [ ] `[command]` → [expected output]
+- [ ] `[command]` → [expected output]
 
-## Functional Requirements
+## Exclusions
+[What NOT to do — be explicit. This is what keeps an autonomous run from wandering.]
 
-### FR-1: [Requirement Name]
-[Description of the requirement]
+- Do not modify [file/module]
+- Do not change [behavior]
 
-**Acceptance Criteria:**
-- [ ] [Specific, testable criterion]
-- [ ] [Specific, testable criterion]
+## Style
+[Coding conventions to follow so generated code matches the existing codebase]
 
-### FR-2: [Requirement Name]
-[Description of the requirement]
+- Follow the existing pattern in [file/module]
+- [Naming/formatting/library conventions]
 
-**Acceptance Criteria:**
-- [ ] [Specific, testable criterion]
-- [ ] [Specific, testable criterion]
+## Verification
+[Exact commands to run after each change, before claiming completion]
 
----
+```bash
+[test command]
+[lint command]
+```
 
-## Success Criteria
-
-[Measurable, technology-agnostic outcomes]
-
-- [Criterion 1 - e.g., "Users can complete the task in under 30 seconds"]
-- [Criterion 2 - e.g., "Error rate below 1%"]
-
----
-
-## Dependencies
-- [Dependency 1]
-- [Dependency 2]
-
-## Assumptions
-- [Assumption 1]
-- [Assumption 2]
-
----
-
-## Completion Signal
-
-### Implementation Checklist
-- [ ] [Deliverable 1]
-- [ ] [Deliverable 2]
-- [ ] [Deliverable 3]
-
-### Testing Requirements
-
-The agent MUST complete ALL before outputting the magic phrase:
-
-#### Code Quality
-- [ ] All existing unit tests pass
-- [ ] All existing integration tests pass
-- [ ] New tests added for new functionality
-- [ ] No lint errors
-
-#### Functional Verification
-- [ ] All acceptance criteria verified
-- [ ] Edge cases handled
-- [ ] Error handling in place
-
-#### Visual Verification (if UI)
-- [ ] Desktop view looks correct
-- [ ] Mobile view looks correct
-- [ ] Design matches style guide
-
-#### Console/Network Check (if web)
-- [ ] No JavaScript console errors
-- [ ] No failed network requests
-- [ ] No 4xx or 5xx errors
-
-### Iteration Instructions
-
-If ANY check fails:
-1. Identify the specific issue
-2. Fix the code
-3. Run tests again
-4. Verify all criteria
-5. Commit and push
-6. Check again
-
-**Only when ALL checks pass, output:** `<promise>DONE</promise>`
+Output when complete: `<promise>DONE</promise>`

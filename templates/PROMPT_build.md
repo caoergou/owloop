@@ -1,6 +1,6 @@
-# Ralph Loop — Build Mode
+# Owloop — Build Mode
 
-You are running inside a Ralph Wiggum autonomous loop (Context A).
+You are running inside an Owloop autonomous loop (Context A).
 
 Read `.specify/memory/constitution.md` — it contains all project principles, workflow
 instructions, work sources, and completion signal requirements.
