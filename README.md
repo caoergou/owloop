@@ -16,18 +16,32 @@ Each iteration: fresh context, one spec, verified completion, clean commit.
 ## Quick Start
 
 ```bash
-npx add-skill caoergou/owloop        # install the skill
-mkdir specs                           # create your spec folder
-# write a spec (see below), then:
-./scripts/owloop.sh                   # start the loop
-./scripts/owloop.sh 20                # or cap at 20 iterations
+# try it out (no install)
+uvx owloop init
+uvx owloop run
+
+# or install persistently
+uv tool install owloop
+owloop init
+owloop run
 ```
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `owloop init` | Initialize owloop in current project (creates specs/, templates) |
+| `owloop run` | Start the autonomous loop with TUI |
+| `owloop plan` | Generate implementation plan from specs |
+| `owloop status` | Show specs and completion progress |
+| `owloop version` | Show the installed owloop version |
+| `owloop new-spec` | Interactive spec creation wizard *(coming soon)* |
 
 ## How It Works
 
 ```
                 ┌─────────────────┐
-                │   owloop start  │
+                │    owloop run   │
                 └────────┬────────┘
                          ▼
               ┌──────────────────────┐

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "owloop"
+version = "0.1.0"
+description = "Your code evolves while you sleep. 🦉 Spec-driven autonomous coding loop."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Eric Cao", email = "itsericsmail@gmail.com" }]
+keywords = ["claude-code", "autonomous", "coding", "loop", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "rich>=13.0",
+    "click>=8.0",
+]
+
+[project.scripts]
+owloop = "owloop.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/caoergou/owloop"
+Repository = "https://github.com/caoergou/owloop"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/owloop"]

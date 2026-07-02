@@ -92,6 +92,7 @@ plan 模式是可选的，大多数项目可以直接从 specs 开始工作。
 Worktree:
   默认建议在独立 worktree 中运行，避免直接改动主仓库。
   首次运行会询问是否自动创建；创建后会 cd 进入该 worktree 再开始循环。
+  设置 OWLOOP_SKIP_WORKTREE=1 可跳过该询问，直接在当前目录运行。
 
 EOF
 }
@@ -179,6 +180,11 @@ watch_latest_output() {
 # Check whether we're already inside a linked git worktree, and if not,
 # offer to create one under ../<repo>-owloop-wt/ so the main checkout stays clean.
 setup_worktree() {
+    if [ "${OWLOOP_SKIP_WORKTREE:-}" = "1" ]; then
+        echo -e "${CYAN}○ 已跳过 worktree 隔离（OWLOOP_SKIP_WORKTREE=1），直接在当前目录运行${NC}"
+        return 0
+    fi
+
     if ! git rev-parse --is-inside-work-tree &>/dev/null; then
         echo -e "${YELLOW}⚠ 当前目录不是 git 仓库，跳过 worktree 检测${NC}"
         return 0
