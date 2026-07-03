@@ -166,6 +166,13 @@ def init(specs_dir: str, example: bool) -> None:
             target.chmod(0o755)
             created.append("scripts/owloop.sh")
 
+        lib_src = script.parent / "lib"
+        if lib_src.exists():
+            lib_target = target.parent / "lib"
+            if not lib_target.exists():
+                shutil.copytree(lib_src, lib_target)
+                created.append("scripts/lib/")
+
     console.print()
     console.print(OWLOOP_BANNER)
 

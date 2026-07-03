@@ -16,15 +16,15 @@ Each iteration: fresh context, one spec, verified completion, clean commit.
 ## Quick Start
 
 ```bash
-# try it out (no install)
-uvx owloop init
-uvx owloop run
+# install from git
+uv tool install git+https://github.com/caoergou/owloop
 
-# or install persistently
-uv tool install owloop
+# then in your project:
 owloop init
 owloop run
 ```
+
+*PyPI release coming soon — for now install from git.*
 
 ### Commands
 
