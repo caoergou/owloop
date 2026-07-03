@@ -1,53 +1,48 @@
-# Owloop vs Other Loop Tools
+# Task Routing Guide
 
-## Detailed Comparison
+When a user asks for help with autonomous/overnight coding, use this guide to decide whether owloop is the right tool, or recommend an alternative.
 
-| Feature | owloop | /goal | gnhf | roborev |
-|---|---|---|---|---|
-| **Completion check** | grep `<promise>DONE</promise>` (deterministic) | Haiku model judgment (probabilistic) | grep | AI review |
-| **Context management** | Fresh `claude -p` per iteration | Same session accumulates | Fresh per iteration | Fresh per iteration |
-| **Spec format** | Constraint-oriented (Exclusions + shell criteria) | Free-form prompt | Free-form prompt | Review guidelines |
-| **Install footprint** | Zero (`uvx`) | Built-in to Claude Code | `npm -g` | `brew`/`go install` |
-| **Worktree isolation** | Built-in (default on) | No | No | N/A |
-| **Permission model** | `--permission-mode auto` | Interactive | YOLO / configurable | N/A |
-| **Stuck detection** | 3 consecutive failures | Model decides | Configurable | N/A |
-| **Fix-loop detection** | Same files modified 3+ rounds | None | None | N/A |
-| **Duration cap** | `--max-duration` flag | None | None | N/A |
-| **TUI** | Full-screen Rich TUI with owl animation | None | Terminal output | None |
-| **Multi-agent** | Claude Code only (adapters planned) | Claude Code only | Agent-agnostic | Agent-agnostic |
+## Decision Tree
 
-## When to Use Which
+```
+Is "done" expressible as a shell command (pass/fail)?
+├── NO → Not suitable for owloop
+│   ├── Single task, user is present → suggest interactive session
+│   └── Subjective/design task → do it manually
+│
+├── YES → Is it one task or a backlog?
+│   ├── ONE task, user is present → suggest `/goal`
+│   │   (built-in, no install, same session)
+│   │
+│   └── BACKLOG (multiple independent tasks) → owloop ✓
+│       ├── All tasks are Claude Code? → `owloop run`
+│       └── Need multiple agents (Codex, OpenCode)? → suggest gnhf
+```
 
-### Use owloop when:
-- You have a **backlog** of well-defined tasks (not just one)
-- Each task can be independently verified with shell commands
-- You want to run **unattended for hours** (overnight, weekend)
-- You need **worktree isolation** (main checkout stays clean)
-- You want **deterministic completion** (grep, not AI judgment)
+## Quick Reference
 
-### Use `/goal` when:
-- You have **one focused task** in the current sitting
-- You're present to monitor and redirect
-- The task is interactive or exploratory
-- You don't want to install anything extra
-
-### Use gnhf when:
-- You need **multi-agent support** (Codex, Gemini, Copilot, OpenCode)
-- You want shared `notes.md` memory across iterations
-- You prefer agent-agnostic tooling
-
-### Use roborev when:
-- You want **continuous review** of every commit (complementary to any loop tool)
-- You're catching issues in agent-written commits after the fact
-
-## Upstream Differences
-
-owloop is forked from [fstandhartinger/ralph-wiggum](https://github.com/fstandhartinger/ralph-wiggum):
-
-| | ralph-wiggum (upstream) | owloop |
+| Scenario | Recommended | Why |
 |---|---|---|
-| Permission model | `--dangerously-skip-permissions` (YOLO) | `--permission-mode auto` |
-| Repo safety | Runs on your checkout directly | Worktree isolation (default) |
-| Spec format | Requirements + manual checklists | Constraint-oriented (Exclusions + shell-verifiable criteria) |
-| Engine | Bash only | Python (click + rich) with TUI |
-| Run report | Terminal + logs | TUI + plain reporter |
+| Fix 20 lint categories overnight | **owloop** | Backlog of verifiable tasks, unattended |
+| Add type annotations to a module | **owloop** | Mechanical, shell-verifiable |
+| "Make the API faster" (no metric) | **Not owloop** | No shell-checkable exit condition |
+| One bug fix while I watch | **`/goal`** | Single task, user present, built-in |
+| Recurring check every 20min | **`/loop`** | Built-in, session-scoped |
+| Multi-agent (Claude + Codex) overnight | **gnhf** | Agent-agnostic orchestrator |
+| Optimize a metric continuously | **goal-md** | Fitness function approach |
+| Design a new feature | **Interactive** | Requires judgment, not automation |
+
+## owloop's Strengths (vs alternatives)
+
+- **Spec queue with priorities** — processes `001-foo.md` before `002-bar.md`
+- **Constraint-oriented specs** — explicit Exclusions prevent scope creep
+- **Deterministic completion** — `grep` for `<promise>DONE</promise>`, not AI judgment
+- **Fix-loop detection** — catches death spirals (same files modified 3+ rounds)
+- **Worktree isolation** — main checkout never touched
+- **Rich TUI** — full-screen progress with owl animation
+
+## owloop's Limitations
+
+- Claude Code only (no Codex/OpenCode/Copilot adapters yet)
+- No cross-iteration memory (each iteration starts fresh — learns nothing from previous failures)
+- No token-based cost tracking (only wall-clock `--max-duration`)

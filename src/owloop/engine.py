@@ -29,10 +29,11 @@ from owloop.adapters import AgentAdapter
 BUILD_PROMPT = """\
 # Owloop — Build Mode
 
-You are running inside an Owloop autonomous loop (Context A).
+You are running inside an Owloop autonomous loop.
 
-If a CLAUDE.md file exists in this project, read it first — it contains coding
-conventions, architecture rules, and tool commands specific to this codebase.
+Read these files if they exist (in order):
+1. `AGENTS.md` — agent instructions for this project
+2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
 Find the highest-priority incomplete work item in specs/, implement it completely,
 verify all acceptance criteria by running the shell commands specified in the spec,
@@ -41,8 +42,12 @@ add a `**Status**: COMPLETE` line near the top of that spec's markdown file
 loop will pick the same spec again), commit and push, then output
 `<promise>DONE</promise>`.
 
-Important: ONLY modify files within the scope described in the spec's Requirements
-section. Do NOT touch files listed in the spec's Exclusions section.
+Before implementing, search the codebase for existing implementations — do not
+assume something doesn't exist without checking.
+
+ONLY modify files within the scope described in the spec's Requirements section.
+Do NOT touch files listed in the spec's Exclusions section.
+Do NOT modify, delete, or comment out existing tests.
 """
 
 PLAN_PROMPT = """\
@@ -50,7 +55,9 @@ PLAN_PROMPT = """\
 
 You are running inside an Owloop autonomous loop in planning mode.
 
-If a CLAUDE.md file exists in this project, read it first.
+Read these files if they exist (in order):
+1. `AGENTS.md` — agent instructions for this project
+2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
 Study `specs/` and compare against the current codebase (gap analysis).
 Create or update `IMPLEMENTATION_PLAN.md` with a prioritized task breakdown.

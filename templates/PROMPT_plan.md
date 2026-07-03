@@ -2,7 +2,9 @@
 
 You are running inside an Owloop autonomous loop in planning mode.
 
-If a CLAUDE.md file exists in this project, read it first.
+Read these files if they exist (in order):
+1. `AGENTS.md` — agent instructions for this project
+2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
 Study `specs/` and compare against the current codebase (gap analysis).
 Create or update `IMPLEMENTATION_PLAN.md` with a prioritized task breakdown.
