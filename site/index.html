@@ -102,42 +102,52 @@
             <!-- Branch -->
             <line x1="60" y1="315" x2="340" y2="315" stroke="#6b5a3e" stroke-width="10" stroke-linecap="round"/>
 
-            <!-- Body -->
-            <ellipse cx="200" cy="245" rx="70" ry="82" fill="#d4a025"/>
+            <g class="owl-tilt">
+              <!-- Body -->
+              <ellipse cx="200" cy="245" rx="70" ry="82" fill="#d4a025"/>
 
-            <!-- Wing suggestion -->
-            <path d="M145 225 Q132 255 148 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
-            <path d="M255 225 Q268 255 252 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
+              <!-- Wing suggestion -->
+              <path d="M145 225 Q132 255 148 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
+              <path d="M255 225 Q268 255 252 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
 
-            <!-- Feet -->
-            <ellipse cx="175" cy="318" rx="11" ry="5" fill="#b5851b"/>
-            <ellipse cx="225" cy="318" rx="11" ry="5" fill="#b5851b"/>
+              <!-- Feet -->
+              <ellipse cx="175" cy="318" rx="11" ry="5" fill="#b5851b"/>
+              <ellipse cx="225" cy="318" rx="11" ry="5" fill="#b5851b"/>
 
-            <!-- Head -->
-            <circle cx="200" cy="170" r="60" fill="#d4a025"/>
+              <!-- Head -->
+              <circle cx="200" cy="170" r="60" fill="#d4a025"/>
 
-            <!-- Ear tufts -->
-            <path d="M150 130 L145 100 L162 122 Z" fill="#d4a025"/>
-            <path d="M250 130 L255 100 L238 122 Z" fill="#d4a025"/>
+              <!-- Ear tufts -->
+              <path d="M150 130 L145 100 L162 122 Z" fill="#d4a025"/>
+              <path d="M250 130 L255 100 L238 122 Z" fill="#d4a025"/>
 
-            <!-- Face disc -->
-            <ellipse cx="200" cy="178" rx="42" ry="34" fill="#f0c563" opacity="0.35"/>
+              <!-- Face disc -->
+              <ellipse cx="200" cy="178" rx="42" ry="34" fill="#f0c563" opacity="0.35"/>
 
-            <!-- Round glasses (subtle Harry Potter nod) -->
-            <circle cx="177" cy="168" r="22" fill="none" stroke="#1a1e33" stroke-width="2"/>
-            <circle cx="223" cy="168" r="22" fill="none" stroke="#1a1e33" stroke-width="2"/>
-            <line x1="199" y1="168" x2="201" y2="168" stroke="#1a1e33" stroke-width="2"/>
+              <!-- Round glasses -->
+              <circle cx="177" cy="168" r="22" fill="none" stroke="#1a1e33" stroke-width="2"/>
+              <circle cx="223" cy="168" r="22" fill="none" stroke="#1a1e33" stroke-width="2"/>
+              <line x1="199" y1="168" x2="201" y2="168" stroke="#1a1e33" stroke-width="2"/>
 
-            <!-- Eyes -->
-            <circle cx="177" cy="168" r="18" fill="#f4f1e8"/>
-            <circle cx="223" cy="168" r="18" fill="#f4f1e8"/>
-            <circle cx="180" cy="168" r="7" fill="#080c1d"/>
-            <circle cx="226" cy="168" r="7" fill="#080c1d"/>
-            <circle cx="182" cy="164" r="2.5" fill="#ffffff" opacity="0.95"/>
-            <circle cx="228" cy="164" r="2.5" fill="#ffffff" opacity="0.95"/>
+              <!-- Left eye -->
+              <g class="owl-eye-wrap">
+                <circle cx="177" cy="168" r="18" fill="#f4f1e8"/>
+                <circle class="owl-pupil" cx="180" cy="168" r="7" fill="#080c1d"/>
+                <circle cx="182" cy="164" r="2.5" fill="#ffffff" opacity="0.95"/>
+                <ellipse class="owl-eyelid" cx="177" cy="168" rx="19" ry="19" fill="#d4a025"/>
+              </g>
 
-            <!-- Beak -->
-            <path d="M193 185 L200 198 L207 185 Z" fill="#b5851b"/>
+              <!-- Right eye -->
+              <g class="owl-eye-wrap">
+                <circle cx="223" cy="168" r="18" fill="#f4f1e8"/>
+                <circle class="owl-pupil" cx="226" cy="168" r="7" fill="#080c1d"/>
+                <circle cx="228" cy="164" r="2.5" fill="#ffffff" opacity="0.95"/>
+                <ellipse class="owl-eyelid" cx="223" cy="168" rx="19" ry="19" fill="#d4a025"/>
+              </g>
+
+              <!-- Beak -->
+              <path d="M193 185 L200 198 L207 185 Z" fill="#b5851b"/>
+            </g>
           </svg>
         </div>
 
