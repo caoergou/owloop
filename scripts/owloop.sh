@@ -307,7 +307,10 @@ Read `.specify/memory/constitution.md` — it contains all project principles, w
 instructions, work sources, and completion signal requirements.
 
 Find the highest-priority incomplete work item, implement it completely, verify all
-acceptance criteria, commit and push, then output `<promise>DONE</promise>`.
+acceptance criteria, add a `**Status**: COMPLETE` line near the top of that spec's
+markdown file (this is how the next iteration knows to skip it — omitting this step
+means the loop will pick the same spec again), commit and push, then output
+`<promise>DONE</promise>`.
 BUILDEOF
 
 cat > "PROMPT_plan.md" << 'PLANEOF'

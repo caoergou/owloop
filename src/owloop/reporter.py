@@ -39,6 +39,8 @@ class ConsoleReporter:
             c.print("[cyan]○ 未使用 worktree 隔离，直接在当前目录运行[/]")
         elif kind == "worktree_prompt":
             c.print("[yellow]建议在独立 worktree 中运行以保护主仓库。是否自动创建？(Y/n)[/]")
+        elif kind == "worktree_auto_created":
+            c.print("[cyan]非交互环境，自动创建独立 worktree 以保护主仓库[/]")
         elif kind in ("worktree_created", "worktree_branch_reused"):
             c.print(f"[green]✓ 已创建并切换到 worktree: {data['path']}[/]")
         elif kind == "worktree_reused":

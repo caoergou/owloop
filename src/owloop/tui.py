@@ -210,6 +210,8 @@ class OwloopTUI:
             self._log("未使用 worktree 隔离，直接在当前目录运行")
         elif kind == "worktree_prompt":
             self._log("建议创建独立 worktree（等待终端输入...）")
+        elif kind == "worktree_auto_created":
+            self._log("非交互环境，自动创建独立 worktree 以保护主仓库")
         elif kind == "worktree_created" or kind == "worktree_branch_reused":
             s.cwd = data["path"]
             self._log(f"✓ 已创建并切换到 worktree: {data['path']}")

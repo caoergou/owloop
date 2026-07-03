@@ -35,7 +35,10 @@ Read `.specify/memory/constitution.md` — it contains all project principles, w
 instructions, work sources, and completion signal requirements.
 
 Find the highest-priority incomplete work item, implement it completely, verify all
-acceptance criteria, commit and push, then output `<promise>DONE</promise>`.
+acceptance criteria, add a `**Status**: COMPLETE` line near the top of that spec's
+markdown file (this is how the next iteration knows to skip it — omitting this step
+means the loop will pick the same spec again), commit and push, then output
+`<promise>DONE</promise>`.
 """
 
 PLAN_PROMPT = """\
@@ -189,19 +192,22 @@ class OwloopEngine:
             else:
                 self._emit("dirty_workspace_noninteractive_continue")
 
-        if not sys.stdin.isatty():
-            self._emit("worktree_skipped", reason="non_interactive")
-            return True
+        if sys.stdin.isatty():
+            self._emit("worktree_prompt")
+            try:
+                reply = input("> ").strip() or "Y"
+            except EOFError:
+                reply = "Y"
 
-        self._emit("worktree_prompt")
-        try:
-            reply = input("> ").strip() or "Y"
-        except EOFError:
-            reply = "Y"
-
-        if not reply.lower().startswith("y"):
-            self._emit("worktree_declined")
-            return True
+            if not reply.lower().startswith("y"):
+                self._emit("worktree_declined")
+                return True
+        else:
+            # Headless/CI/agent invocation: there's no one to answer the prompt, and
+            # skipping isolation here is the one outcome that defeats the whole point
+            # of an *unattended* loop. Default to creating the worktree rather than
+            # falling through to the (possibly dirty) main repo.
+            self._emit("worktree_auto_created", reason="non_interactive")
 
         wt_date = datetime.now().strftime("%Y%m%d")
         wt_branch = f"owloop/{wt_date}"
