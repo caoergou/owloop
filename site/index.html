@@ -47,8 +47,7 @@
       </a>
       <div class="nav-links">
         <a href="#how">How it works</a>
-        <a href="#night">Overnight</a>
-        <a href="#quality">Quality</a>
+        <a href="#features">Features</a>
         <a href="#compare">Compare</a>
         <a class="nav-cta" href="https://github.com/caoergou/owloop" target="_blank" rel="noopener">GitHub</a>
       </div>
@@ -218,108 +217,48 @@
       </div>
     </section>
 
-    <section class="section timeline-section" id="night">
+    <section class="section section-dark" id="features">
       <div class="container">
-        <p class="section-overline">A night with owloop</p>
-        <h2 class="section-title">Leave work with specs. Come back to commits.</h2>
+        <p class="section-overline">Features</p>
+        <h2 class="section-title">Built for reliable overnight progress.</h2>
 
-        <div class="timeline">
-          <div class="timeline-track" aria-hidden="true">
-            <svg class="timeline-moon" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" fill="var(--dim-2)"/>
-              <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 16a7 7 0 1 1 0-14 7 7 0 0 1 0 14z" fill="var(--moon-dim)"/>
-            </svg>
-            <div class="timeline-progress"></div>
-            <svg class="timeline-moon" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" fill="var(--amber-bright)"/>
-              <circle cx="12" cy="12" r="6" fill="var(--amber)"/>
-            </svg>
-          </div>
-
-          <div class="timeline-events">
-            <div class="timeline-event">
-              <div class="timeline-time">17:00</div>
-              <div class="timeline-card">
-                <h3>Describe the goal</h3>
-                <p>Type a vague goal in plain English. The agent studies the codebase, asks 1–3 clarifying questions, and drafts a spec.</p>
-                <code class="timeline-code">owloop spec "refactor error handling"</code>
-              </div>
-            </div>
-
-            <div class="timeline-event">
-              <div class="timeline-time">17:30</div>
-              <div class="timeline-card">
-                <h3>Review & queue specs</h3>
-                <p>Edit the generated spec if needed, then queue it. Add more specs for the backlog.</p>
-                <code class="timeline-code">owloop run --max-tokens 200000 --max-duration 480</code>
-              </div>
-            </div>
-
-            <div class="timeline-event">
-              <div class="timeline-time">22:00</div>
-              <div class="timeline-card">
-                <h3>Animated TUI loop</h3>
-                <p>The full-screen TUI shows Ollie working: current spec, iteration count, token usage, and what the agent is doing — not raw command scrollback.</p>
-              </div>
-            </div>
-
-            <div class="timeline-event">
-              <div class="timeline-time">03:00</div>
-              <div class="timeline-card">
-                <h3>Commit only on green</h3>
-                <p>Green acceptance criteria → commit + push. Failure → retry with exponential backoff. Same files flapping → fix-loop warning.</p>
-              </div>
-            </div>
-
-            <div class="timeline-event">
-              <div class="timeline-time">09:00</div>
-              <div class="timeline-card highlight">
-                <h3>Review & merge</h3>
-                <p>Open the HTML report, inspect the worktree diff, run your own sanity checks, then merge. Your main branch stayed clean all night.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section section-dark quality-section" id="quality">
-      <div class="container">
-        <p class="section-overline">Quality you can verify</p>
-        <h2 class="section-title">No trust required. Only green checks count.</h2>
-
-        <div class="quality-grid">
-          <div class="quality-card">
-            <div class="quality-check">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <h3>Shell-verified acceptance</h3>
             <p>The spec defines the exact commands that must pass. The agent does not decide for itself whether it is done.</p>
-          </div>
-
-          <div class="quality-card">
-            <div class="quality-check">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 21h5v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h3>Fresh context per iteration</h3>
+            <p>Each task starts clean. No accumulated context drift, no accidental side effects.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <h3>Worktree isolation</h3>
             <p>Everything happens in a disposable git worktree. Your main checkout is never touched until you choose to merge.</p>
-          </div>
-
-          <div class="quality-card">
-            <div class="quality-check">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h3>Deterministic completion</h3>
+            <p>Completion is a grep-able <code>&lt;promise&gt;DONE&lt;/promise&gt;</code>, not a model guess.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <h3>Fix-loop detection</h3>
-            <p>If the same files keep changing without the spec closing, the loop warns instead of burning tokens forever.</p>
-          </div>
-
-          <div class="quality-card">
-            <div class="quality-check">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="12 6 12 12 16 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <h3>Budget caps & run notes</h3>
-            <p><code>--max-tokens</code> and <code>--max-duration</code> stop the run before costs spiral. Cross-iteration notes prevent the agent from repeating the same mistake.</p>
-          </div>
+            <p>Catches death spirals when the same files are edited repeatedly without progress.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h3>Token budget cap</h3>
+            <p>Set <code>--max-tokens</code> and <code>--max-duration</code>. The loop stops before your wallet does.</p>
+          </article>
         </div>
 
         <div class="report-preview">
@@ -349,52 +288,6 @@
       </div>
     </section>
 
-    <section class="section section-dark" id="features">
-      <div class="container">
-        <p class="section-overline">Why owloop</p>
-        <h2 class="section-title">Built for reliable overnight progress.</h2>
-
-        <div class="feature-grid">
-          <article class="feature-card">
-            <div class="feature-glow"></div>
-            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            <h3>Spec-driven queue</h3>
-            <p>Prioritized markdown specs with explicit exclusions keep the agent from wandering.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-glow"></div>
-            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 21h5v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            <h3>Fresh context per iteration</h3>
-            <p>Each task starts clean. No accumulated context drift, no accidental side effects.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-glow"></div>
-            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M12 3v2M12 19v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M3 12h2M19 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
-            <h3>Git worktree isolation</h3>
-            <p>Main checkout stays untouched until you review and merge the worktree branch.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-glow"></div>
-            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            <h3>Deterministic completion</h3>
-            <p>Completion is a grep-able <code>&lt;promise&gt;DONE&lt;/promise&gt;</code>, not a model guess.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-glow"></div>
-            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            <h3>Fix-loop detection</h3>
-            <p>Catches death spirals when the same files are edited repeatedly without progress.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-glow"></div>
-            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-            <h3>Token budget cap</h3>
-            <p>Set <code>--max-tokens</code> and <code>--max-duration</code>. The loop stops before your wallet does.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
     <section class="section" id="compare">
       <div class="container">
         <p class="section-overline">Compared to</p>
@@ -407,7 +300,6 @@
                 <th></th>
                 <th class="col-owloop">owloop</th>
                 <th><code>/goal</code></th>
-                <th>gnhf</th>
               </tr>
             </thead>
             <tbody>
@@ -415,30 +307,25 @@
                 <td>Completion check</td>
                 <td class="col-owloop">grep <code>&lt;promise&gt;</code></td>
                 <td>Haiku judgment</td>
-                <td>grep</td>
               </tr>
               <tr>
                 <td>Best for</td>
                 <td class="col-owloop">Backlog of verifiable tasks</td>
                 <td>One focused task, user present</td>
-                <td>Multi-agent overnight</td>
               </tr>
               <tr>
                 <td>Spec format</td>
                 <td class="col-owloop">Constraint-oriented</td>
-                <td>Free-form</td>
                 <td>Free-form</td>
               </tr>
               <tr>
                 <td>Context</td>
                 <td class="col-owloop">Fresh per iteration</td>
                 <td>Same session</td>
-                <td>Fresh per iteration</td>
               </tr>
               <tr>
                 <td>Isolation</td>
                 <td class="col-owloop">Worktree</td>
-                <td>None</td>
                 <td>None</td>
               </tr>
             </tbody>
@@ -493,6 +380,5 @@
     </div>
   </footer>
 
-  <script src="/owloop/terminal-demo.js"></script>
 </body>
 </html>
