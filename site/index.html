@@ -106,11 +106,11 @@
             <div class="terminal-output" id="terminal-output" aria-live="polite">
               <noscript>
                 <span class="line"><span class="prompt">$</span> <span class="cmd">owloop run</span></span>
-                <span class="line dim">🦉 Ollie is waking up...</span>
+                <span class="line dim">Ollie is waking up...</span>
                 <span class="line"><span class="success">✓</span> Iteration 1 · 001-fix-lint.md → committed</span>
                 <span class="line"><span class="success">✓</span> Iteration 2 · 002-add-types.md → committed</span>
                 <span class="line"><span class="success">✓</span> Iteration 3 · 003-unify-errors.md → committed</span>
-                <span class="line dawn">🌅 Complete. 3 specs done · 0 failures · 12.4k tokens</span>
+                <span class="line dawn">Complete. 3 specs done · 0 failures · 12.4k tokens</span>
               </noscript>
             </div>
             <div class="terminal-input-line" id="terminal-input-line" style="display: none;">
@@ -140,25 +140,35 @@
             <div class="step-header">
               <span class="step-number">01</span>
               <div class="step-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </div>
             </div>
-            <h3>Write a spec</h3>
-            <p>Requirements, shell-verifiable acceptance criteria, exclusions, and a stuck-behavior plan.</p>
+            <h3>Describe your goal</h3>
+            <p>Start with a vague goal. <code>owloop spec</code> reads your codebase, asks clarifying questions, and drafts a concrete spec.</p>
           </div>
           <div class="step">
             <div class="step-header">
               <span class="step-number">02</span>
               <div class="step-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </div>
             </div>
-            <h3>Start the loop</h3>
-            <p><code>owloop run</code> picks the highest-priority spec and enters a fresh agent context.</p>
+            <h3>Review the spec</h3>
+            <p>Edit the generated spec: requirements, shell-verifiable acceptance criteria, exclusions, and stuck behavior.</p>
           </div>
           <div class="step">
             <div class="step-header">
               <span class="step-number">03</span>
+              <div class="step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
+            <h3>Start the loop</h3>
+            <p><code>owloop run</code> opens a full-screen TUI with an animated owl, iteration counter, token budget, and real-time status.</p>
+          </div>
+          <div class="step">
+            <div class="step-header">
+              <span class="step-number">04</span>
               <div class="step-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </div>
@@ -168,9 +178,9 @@
           </div>
           <div class="step">
             <div class="step-header">
-              <span class="step-number">04</span>
+              <span class="step-number">05</span>
               <div class="step-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </div>
             </div>
             <h3>Review in the morning</h3>
@@ -200,10 +210,19 @@
 
           <div class="timeline-events">
             <div class="timeline-event">
+              <div class="timeline-time">17:00</div>
+              <div class="timeline-card">
+                <h3>Describe the goal</h3>
+                <p>Type a vague goal in plain English. The agent studies the codebase, asks 1–3 clarifying questions, and drafts a spec.</p>
+                <code class="timeline-code">owloop spec "refactor error handling"</code>
+              </div>
+            </div>
+
+            <div class="timeline-event">
               <div class="timeline-time">17:30</div>
               <div class="timeline-card">
-                <h3>Write & queue specs</h3>
-                <p>Break the backlog into small, verifiable specs with acceptance criteria and exclusions.</p>
+                <h3>Review & queue specs</h3>
+                <p>Edit the generated spec if needed, then queue it. Add more specs for the backlog.</p>
                 <code class="timeline-code">owloop run --max-tokens 200000 --max-duration 480</code>
               </div>
             </div>
@@ -211,8 +230,8 @@
             <div class="timeline-event">
               <div class="timeline-time">22:00</div>
               <div class="timeline-card">
-                <h3>Fresh agent iterations</h3>
-                <p>Each spec spawns a clean context. The agent reads <code>AGENTS.md</code>, searches the codebase, implements, then runs the shell checks you defined.</p>
+                <h3>Animated TUI loop</h3>
+                <p>The full-screen TUI shows Ollie working: current spec, iteration count, token usage, and what the agent is doing — not raw command scrollback.</p>
               </div>
             </div>
 

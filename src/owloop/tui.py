@@ -1,7 +1,10 @@
 """Rich full-screen TUI for `owloop run` — driven by OwloopEngine events.
 
-Visual design based on prototypes/tui_concept.py, but wired to real engine
-state instead of a scripted timeline.
+The TUI is brand-first: a large animated owl (Ollie) shows the loop's mood,
+a status panel surfaces iteration/token/spec state, and a "What Ollie is doing"
+panel translates raw agent activity into human-readable intent. Raw command
+output is intentionally de-emphasized in full-screen mode and only surfaced in
+the compact fallback or in the session log file.
 """
 
 from __future__ import annotations
@@ -48,7 +51,7 @@ from owloop._brand import (
 )
 from owloop.engine import RunSummary
 
-SCENE_W, SCENE_H = 28, 9
+SCENE_W, SCENE_H = 36, 13
 MIN_WIDTH, MIN_HEIGHT = 80, 24
 _star_rng = random.Random(7)
 STAR_CHARS = "·∗✦⋆˙"
@@ -59,7 +62,20 @@ STAR_FIELD = [
         _star_rng.choice(STAR_CHARS),
         _star_rng.uniform(0, math.tau),
     )
-    for _ in range(18)
+    for _ in range(28)
+]
+
+# Human-readable translations of agent activity.
+ACTIVITY_HINTS = [
+    (re.compile(r"ruff\b", re.IGNORECASE), "Running lint checks"),
+    (re.compile(r"pytest\b", re.IGNORECASE), "Running tests"),
+    (re.compile(r"pyright\b", re.IGNORECASE), "Running type checks"),
+    (re.compile(r"mypy\b", re.IGNORECASE), "Running type checks"),
+    (re.compile(r"git\s+commit", re.IGNORECASE), "Committing changes"),
+    (re.compile(r"git\s+push", re.IGNORECASE), "Pushing commits"),
+    (re.compile(r"<promise>DONE</promise>", re.IGNORECASE), "Finishing iteration"),
+    (re.compile(r"<promise>BLOCKED", re.IGNORECASE), "Stopped: external blocker"),
+    (re.compile(r"<promise>DECIDE", re.IGNORECASE), "Waiting for human decision"),
 ]
 
 
@@ -84,6 +100,7 @@ class AppState:
     blink: bool = False
     next_blink: float = 0.0
     phase: str = "starting"  # starting|working|stuck|done_signal|complete|error
+    current_action: str = ""
     flash: tuple[str, str, float] | None = None
     done: bool = False
     stopped_reason: str = ""
@@ -131,25 +148,16 @@ class OwloopTUI:
         frames = [
             (OWL_SLEEP, "Ollie is asleep...", DIM_BLUE),
             (OWL_BLINK, "Ollie is waking up...", DIM_BLUE),
-            (OWL_MEDIUM, "Ollie is awake", AMBER),
+            (OWL_MEDIUM, "Ollie is awake and ready", AMBER),
         ]
         for art, caption, border in frames:
-            owl_text = Text("\n".join(art), style=f"bold {AMBER}", justify="center")
-            caption_text = Text(caption, style=f"italic {MOON_WHITE}", justify="center")
-            body = Group(Text(""), owl_text, Text(""), caption_text)
-            panel = Panel(body, border_style=border, style=f"on {NIGHT}", width=40, padding=(1, 2))
-            if self._compact:
-                self.layout["activity"].update(panel)
-            else:
-                self.layout["owl"].update(panel)
+            self._update_owl_panel(art, caption, border)
             self.live.refresh()
-            time.sleep(0.5)
+            time.sleep(0.55)
 
     def __enter__(self) -> OwloopTUI:
         self.live.__enter__()
         self._live_started = True
-        # SIGWINCH is not available on Windows; the ticker loop will still
-        # poll console.size to react to resizes.
         if hasattr(signal, "SIGWINCH"):
             self._original_sigwinch = signal.signal(signal.SIGWINCH, self._on_sigwinch)
         self._render()
@@ -174,11 +182,9 @@ class OwloopTUI:
         while not self._stop_ticker.wait(0.25):
             with self._lock:
                 now = time.monotonic()
-                # owl blink animation
                 if now >= self.state.next_blink:
                     self.state.blink = not self.state.blink
-                    self.state.next_blink = now + (0.3 if self.state.blink else random.uniform(3, 7))
-                # working spinner — show elapsed time so user knows it's alive
+                    self.state.next_blink = now + (0.25 if self.state.blink else random.uniform(3, 7))
                 if self.state.phase == "working":
                     frame_idx = (frame_idx + 1) % len(SPINNER_FRAMES)
                     self.state._spinner = SPINNER_FRAMES[frame_idx]
@@ -186,9 +192,6 @@ class OwloopTUI:
 
     # ── engine event handling ──
 
-    # Events after which the engine may call the blocking input() — the Live
-    # full-screen display must be torn down first or the prompt is invisible
-    # (and its echo fights the next screen refresh).
     PROMPT_MESSAGES = {
         "worktree_prompt": "It is recommended to run in an isolated git worktree to protect the main repository. Create one automatically? (Y/n)",
         "dirty_workspace_warning": (
@@ -220,6 +223,13 @@ class OwloopTUI:
     def _flash(self, text: str, style: str, seconds: float = 3.0) -> None:
         self.state.flash = (text, style, time.monotonic() + seconds)
 
+    def _update_action(self, line: str) -> None:
+        """Translate a raw agent output line into a human-readable activity."""
+        for pattern, action in ACTIVITY_HINTS:
+            if pattern.search(line):
+                self.state.current_action = action
+                return
+
     def _handle(self, kind: str, data: dict) -> None:
         s = self.state
 
@@ -233,10 +243,6 @@ class OwloopTUI:
             s.max_tokens = data.get("max_tokens", 0)
             s.specs = data["specs"]
             self._log(f"{wake_message()} — mode {s.mode} · model {s.model} · branch {s.branch}")
-            if data["has_plan"]:
-                self._log("Found IMPLEMENTATION_PLAN.md, will use it preferentially")
-            elif data["first_incomplete"]:
-                self._log(f"Next incomplete spec: {data['first_incomplete']}")
         elif kind == "worktree_already_active":
             self._log(f"Running in isolated worktree: {data['path']}")
         elif kind == "worktree_skipped":
@@ -245,7 +251,7 @@ class OwloopTUI:
             self._log("Recommended to create isolated worktree (waiting for terminal input...)")
         elif kind == "worktree_auto_created":
             self._log("Non-interactive environment, automatically creating isolated worktree to protect main repository")
-        elif kind == "worktree_created" or kind == "worktree_branch_reused":
+        elif kind in ("worktree_created", "worktree_branch_reused"):
             s.cwd = data["path"]
             self._log(f"✓ created and switched to worktree: {data['path']}")
         elif kind == "worktree_reused":
@@ -258,41 +264,49 @@ class OwloopTUI:
         elif kind == "all_specs_complete":
             s.phase = "complete"
             s.done = True
+            s.current_action = "All specs already complete"
             self._log(f"all {data['spec_count']} specs complete, nothing to do")
         elif kind == "iteration_start":
             s.iteration = data["iteration"]
             s.phase = "working"
+            s.current_action = "Reading the spec and codebase"
             self._log(f"── iteration {s.iteration} started ──")
         elif kind == "output_line":
-            line = data["line"].strip()
+            line = data["line"].rstrip()
             if line:
                 self._log(line)
+                self._update_action(line)
         elif kind == "tokens_update":
             s.tokens_used = data["total_tokens"]
-            self._log(f"Tokens this round: {data['tokens_used']:,} · total: {s.tokens_used:,}")
         elif kind == "max_tokens_reached":
             s.phase = "complete"
             s.done = True
+            s.current_action = "Token budget reached"
             self._log(f"⏱ token budget reached ({data['tokens']:,} / {data['limit']:,}), stopping loop")
             self._flash("⏱ token budget reached", f"bold {AMBER}")
         elif kind == "done_signal":
             s.phase = "done_signal"
+            s.current_action = "Committing changes"
             self._log(f"✓ done signal detected: {data['signal']}")
             self._log(f"🌙 Loop closed on iteration {s.iteration}")
             self._flash(f"🌙 Loop closed on iteration {s.iteration}", f"bold {MOON_WHITE}")
         elif kind == "blocked":
             s.phase = "stuck"
+            s.current_action = f"Blocked: {data['payload']}"
             self._log(f"✗ blocked: {data['payload']}")
             self._flash(f"✗ blocked: {data['payload']}", f"bold {RED}")
         elif kind == "decide":
             s.phase = "stuck"
+            s.current_action = f"Decision needed: {data['payload']}"
             self._log(f"❓ decision needed: {data['payload']}")
             self._flash(f"❓ decision needed: {data['payload']}", f"bold {AMBER}")
         elif kind == "no_done_signal":
             self._log("⚠ no done signal detected, will retry in the next iteration")
         elif kind == "agent_failed":
+            s.current_action = "Agent iteration failed"
             self._log(f"✗ agent failed (returncode={data['returncode']})")
         elif kind == "agent_timeout":
+            s.current_action = "Agent timed out"
             self._log(f"⏱ iteration {data['iteration']} idle timeout, agent may be hung, terminated")
         elif kind == "preflight_failed":
             s.phase = "error"
@@ -318,6 +332,7 @@ class OwloopTUI:
         elif kind == "max_duration_reached":
             s.done = True
             s.phase = "complete"
+            s.current_action = "Maximum run time reached"
             self._log(f"⏱ reached maximum run time ({data['minutes']} min), stopping loop")
             self._flash("⏱ time up", f"bold {AMBER}")
         elif kind == "push_retry":
@@ -326,9 +341,11 @@ class OwloopTUI:
             if "specs" in data:
                 s.specs = data["specs"]
             s.phase = "working"
+            s.current_action = "Preparing next iteration"
         elif kind == "plan_complete":
             s.done = True
             s.phase = "complete"
+            s.current_action = "Planning complete"
             self._log("planning complete! run 'owloop run' to start building")
             self._flash("🌅 planning complete", f"bold {AMBER}")
         elif kind == "interrupted":
@@ -339,15 +356,10 @@ class OwloopTUI:
 
     @staticmethod
     def _is_done(spec: dict) -> bool:
-        """Whether a spec dict represents a completed spec.
-
-        Supports both the newer `status` key and the legacy `done` boolean.
-        """
         status = spec.get("status")
         return status == "done" or (status is None and bool(spec.get("done")))
 
     def _current_spec_name(self) -> str:
-        """Name of the first incomplete spec (the one currently being worked on)."""
         for spec in self.state.specs:
             if not self._is_done(spec):
                 return str(spec.get("name", ""))
@@ -394,7 +406,10 @@ class OwloopTUI:
         table.add_column()
         table.add_row("Mode", Text(s.mode, style=f"bold {MOON_WHITE}"))
         table.add_row("Model", Text(s.model or "—", style=CYAN))
-        table.add_row("Iteration", Text(f"#{s.iteration}" + (f" / {s.max_iterations}" if s.max_iterations else ""), style=f"bold {MOON_WHITE}"))
+        table.add_row(
+            "Iteration",
+            Text(f"#{s.iteration}" + (f" / {s.max_iterations}" if s.max_iterations else ""), style=f"bold {MOON_WHITE}"),
+        )
         table.add_row("Branch", Text(s.branch or "—", style=GREEN))
         if s.tokens_used:
             token_text = f"{s.tokens_used:,}"
@@ -408,6 +423,36 @@ class OwloopTUI:
             table.add_row("Current Spec", Text(current_spec, style=f"bold {AMBER}"))
         table.add_row("Status", self._status_text())
         return Panel(table, title="Status", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
+
+    def _render_activity(self) -> Panel:
+        """Show what Ollie is doing instead of raw command output."""
+        s = self.state
+        rows: list[RenderableType] = []
+
+        if s.phase == "working" and s.iteration > 0:
+            spinner = getattr(s, "_spinner", "⠋")
+            action = s.current_action or "Working on the current spec"
+            rows.append(Text(f"{spinner} {action}", style=f"bold {AMBER}"))
+        elif s.current_action:
+            rows.append(Text(s.current_action, style=f"bold {MOON_WHITE}"))
+        else:
+            rows.append(Text("Ready to start", style=f"dim {GRAY}"))
+
+        # Show the most recent meaningful log line as context.
+        recent = [self._clean_log_line(line) for line in s.logs[-6:]]
+        recent = [line for line in recent if line]
+        if recent:
+            rows.append(Text(""))
+            for line in recent[-3:]:
+                rows.append(Text(f"  · {line}", style=f"dim {GRAY}", no_wrap=True, overflow="ellipsis"))
+
+        return Panel(
+            Group(*rows),
+            title="What Ollie is doing",
+            title_align="left",
+            border_style=DIM_BLUE,
+            style=f"on {NIGHT}",
+        )
 
     def _render_specs(self) -> Panel:
         s = self.state
@@ -428,6 +473,27 @@ class OwloopTUI:
             body = Group(*rows)
         return Panel(body, title="Specs", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
 
+    def _owl_art_for_phase(self) -> list[str]:
+        s = self.state
+        if s.phase in ("complete", "error"):
+            return OWL_SLEEP
+        if s.phase == "stuck":
+            return OWL_BLINK
+        return OWL_BLINK if s.blink else OWL_MEDIUM
+
+    def _update_owl_panel(self, art: list[str], caption: str, border: str) -> None:
+        panel = self._build_owl_panel(art, caption, border)
+        if self._compact:
+            self.layout["activity"].update(panel)
+        else:
+            self.layout["owl"].update(panel)
+
+    def _build_owl_panel(self, art: list[str], caption: str, border: str) -> Panel:
+        owl_text = Text("\n".join(art), style=f"bold {AMBER}", justify="center")
+        caption_text = Text(caption, style=f"italic {MOON_WHITE}", justify="center")
+        body = Group(Text(""), owl_text, Text(""), caption_text)
+        return Panel(body, border_style=border, style=f"on {NIGHT}", padding=(1, 2))
+
     def _render_owl_scene(self) -> Panel:
         s = self.state
         grid = [[" "] * SCENE_W for _ in range(SCENE_H)]
@@ -440,10 +506,7 @@ class OwloopTUI:
                 grid[y][x] = ch
                 styles[y][x] = STAR_STYLE
 
-        if s.phase == "complete" or s.phase == "error":
-            art = OWL_SLEEP
-        else:
-            art = OWL_BLINK if s.blink else OWL_MEDIUM
+        art = self._owl_art_for_phase()
         top = (SCENE_H - len(art)) // 2
         left = (SCENE_W - len(art[0])) // 2
         for dy, row in enumerate(art):
@@ -462,7 +525,7 @@ class OwloopTUI:
 
         return Panel(
             Align.center(text, vertical="middle"),
-            title="🦉",
+            title="Ollie",
             border_style=DIM_BLUE,
             style=f"on {NIGHT}",
             height=SCENE_H + 2,
@@ -474,7 +537,8 @@ class OwloopTUI:
         line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
         return " ".join(line.split())
 
-    def _render_activity(self) -> Panel:
+    def _render_log(self) -> Panel:
+        """Compact-mode log panel (raw output is only shown here)."""
         recent = [self._clean_log_line(line) for line in self.state.logs[-12:]]
         recent = [line for line in recent if line]
         rows = []
@@ -483,20 +547,25 @@ class OwloopTUI:
             prefix = "▸" if is_latest else " "
             style = f"bold {MOON_WHITE}" if is_latest else GRAY
             rows.append(Text(f"{prefix} {line}", style=style, no_wrap=True, overflow="ellipsis"))
-        # When working but no recent output, show a reassuring spinner message
         if self.state.phase == "working" and self.state.iteration > 0 and not recent:
-            spinner = getattr(self.state, '_spinner', '⠋')
+            spinner = getattr(self.state, "_spinner", "⠋")
             rows.append(Text(
                 f"  {spinner} claude -p running, output will appear when this iteration ends...",
                 style=f"dim italic {GRAY}", no_wrap=True
             ))
-        return Panel(Group(*rows) if rows else Text(""), title="Activity", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
+        return Panel(
+            Group(*rows) if rows else Text(""),
+            title="Activity Log",
+            title_align="left",
+            border_style=DIM_BLUE,
+            style=f"on {NIGHT}",
+        )
 
     def _render_footer(self) -> Panel:
         s = self.state
         done = sum(1 for spec in s.specs if self._is_done(spec))
         total = len(s.specs) or 1
-        width = 30
+        width = 40
         filled = int(width * done / total)
         bar = Text()
         bar.append("█" * filled, style=AMBER)
@@ -515,8 +584,8 @@ class OwloopTUI:
             Layout(name="body", ratio=1),
             Layout(name="footer", size=3),
         )
-        layout["body"].split_row(Layout(name="left"), Layout(name="right"))
-        layout["left"].split(Layout(name="status", size=9), Layout(name="specs", ratio=1))
+        layout["body"].split_row(Layout(name="left", ratio=2), Layout(name="right", ratio=3))
+        layout["left"].split(Layout(name="status", size=10), Layout(name="specs", ratio=1))
         layout["right"].split(Layout(name="owl", size=SCENE_H + 2), Layout(name="activity", ratio=1))
         return layout
 
@@ -526,7 +595,8 @@ class OwloopTUI:
         layout.split(
             Layout(name="header", size=3),
             Layout(name="status", size=8),
-            Layout(name="activity", ratio=1),
+            Layout(name="activity", size=12),
+            Layout(name="log", ratio=1),
             Layout(name="footer", size=3),
         )
         return layout
@@ -555,6 +625,7 @@ class OwloopTUI:
         if self._compact:
             self.layout["status"].update(self._render_status())
             self.layout["activity"].update(self._render_activity())
+            self.layout["log"].update(self._render_log())
         else:
             self.layout["status"].update(self._render_status())
             self.layout["specs"].update(self._render_specs())
@@ -562,7 +633,7 @@ class OwloopTUI:
             self.layout["activity"].update(self._render_activity())
         self.live.refresh()
 
-    # ── exit summary (printed to normal scrollback, after Live has closed) ──
+    # ── exit summary ──
 
     FAILED_REASONS = {"preflight_failed", "dirty_workspace_declined"}
 

@@ -60,3 +60,18 @@ def test_init_requires_git_repo():
         result = runner.invoke(main, ["init"])
         assert result.exit_code == 1
         assert "Not a git repository" in result.output
+
+
+def test_spec_help():
+    runner = CliRunner()
+    result = runner.invoke(main, ["spec", "--help"])
+    assert result.exit_code == 0
+    assert "Turn a vague goal" in result.output
+
+
+def test_spec_requires_git_repo():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["spec", "refactor error handling"])
+        assert result.exit_code == 1
+        assert "Not a git repository" in result.output

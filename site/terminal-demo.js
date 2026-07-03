@@ -9,9 +9,9 @@
 
   if (!output || !inputLine || !typed) return;
 
-  const typeSpeed = 20;
-  const linePause = 380;
-  const fastPause = 120;
+  const typeSpeed = 18;
+  const linePause = 360;
+  const fastPause = 100;
 
   let timeoutId = null;
   let running = false;
@@ -27,8 +27,8 @@
     typed.textContent = "";
     inputLine.style.display = "none";
     if (status) {
-      status.textContent = "● running";
-      status.style.color = "var(--success)";
+      status.textContent = "● clarifying";
+      status.style.color = "var(--amber-bright)";
     }
   }
 
@@ -88,51 +88,56 @@
     appendPrompt(cmd);
   }
 
+  async function typeAnswer(text) {
+    inputLine.style.display = "flex";
+    typed.textContent = "";
+    await sleep(fastPause);
+    for (let i = 0; i < text.length; i++) {
+      typed.textContent += text[i];
+      await sleep(typeSpeed);
+    }
+    await sleep(fastPause);
+    inputLine.style.display = "none";
+    appendLine(`<span class="prompt">&gt;</span> ${escapeHtml(text)}`, "answer-line");
+  }
+
   const tuiFrames = [
-`┌─────────────────────────────────────────────┐
-│  🦉 owloop  ·  build mode                   │
-│                                             │
-│     ▄▄████▄▄                                │
-│    ██ ◉  ◉ ██  ∞                            │
-│   ███  ╰▽╯  ███                             │
-│                                             │
-│  Specs: 3      Done: 0      Iteration: 1    │
-│  Current: 001-fix-lint.md                   │
-│  [⠋] running acceptance criteria...         │
-└─────────────────────────────────────────────┘`,
-`┌─────────────────────────────────────────────┐
-│  🦉 owloop  ·  build mode                   │
-│                                             │
-│     ▄▄████▄▄                                │
-│    ██ ◉  ◉ ██  ∞                            │
-│   ███  ╰▽╯  ███                             │
-│                                             │
-│  Specs: 3      Done: 1      Iteration: 2    │
-│  Current: 002-add-types.md                  │
-│  [⠙] running acceptance criteria...         │
-└─────────────────────────────────────────────┘`,
-`┌─────────────────────────────────────────────┐
-│  🦉 owloop  ·  build mode                   │
-│                                             │
-│     ▄▄████▄▄                                │
-│    ██ ◉  ◉ ██  ∞                            │
-│   ███  ╰▽╯  ███                             │
-│                                             │
-│  Specs: 3      Done: 2      Iteration: 3    │
-│  Current: 003-unify-errors.md               │
-│  [⠹] running acceptance criteria...         │
-└─────────────────────────────────────────────┘`,
-`┌─────────────────────────────────────────────┐
-│  🦉 owloop  ·  build mode                   │
-│                                             │
-│     ▄▄████▄▄                                │
-│    ██ ◉  ◉ ██  ∞                            │
-│   ███  ╰▽╯  ███                             │
-│                                             │
-│  Specs: 3      Done: 3      Iteration: 3    │
-│                                             │
-│  🌅 Complete. 3 specs done · 0 failures     │
-└─────────────────────────────────────────────┘`,
+`┌─ owloop build ─────────────────────────┐
+│ Specs: 3   Done: 0   Iter: 1            │
+│                                         │
+│ ▶ 001-fix-lint.md                       │
+│   [⠋] uv run ruff check src/            │
+│   [⠙] uv run pytest -q                  │
+│                                         │
+│ Queue: 002-add-types  003-unify-errors  │
+└─────────────────────────────────────────┘`,
+`┌─ owloop build ─────────────────────────┐
+│ Specs: 3   Done: 1   Iter: 2            │
+│                                         │
+│ ▶ 002-add-types.md                      │
+│   [⠸] uv run pyright src/owloop         │
+│   [⠴] uv run pytest -q                  │
+│                                         │
+│ Queue: 003-unify-errors                 │
+└─────────────────────────────────────────┘`,
+`┌─ owloop build ─────────────────────────┐
+│ Specs: 3   Done: 2   Iter: 3            │
+│                                         │
+│ ▶ 003-unify-errors.md                   │
+│   [⠦] uv run pytest tests/test_errors   │
+│   [⠇] uv run ruff check src/            │
+│                                         │
+│ Queue: —                                │
+└─────────────────────────────────────────┘`,
+`┌─ owloop build ─────────────────────────┐
+│ Specs: 3   Done: 3   Iter: 3            │
+│                                         │
+│ ✓ All acceptance criteria passed        │
+│ ✓ 3 commits pushed                      │
+│                                         │
+│ Complete · 0 failures · 12.4k tokens    │
+│                                         │
+└─────────────────────────────────────────┘`,
   ];
 
   async function showTuiFrame(idx) {
@@ -149,28 +154,48 @@
     running = true;
     clearTerminal();
 
-    // 1. Project context
-    await typeCommand("cd ~/projects/legacy-api");
+    // 1. Clarify goal with owloop spec
+    await typeCommand('owloop spec "refactor error handling"');
     await sleep(linePause);
 
-    await typeCommand("ls specs/");
-    appendPlain("001-fix-lint.md      002-add-types.md     003-unify-errors.md", "output");
+    appendPlain("Reading AGENTS.md and codebase...", "dim");
+    await sleep(linePause);
+
+    appendLine(
+      `<span class="code">&lt;promise&gt;DECIDE:&lt;/promise&gt;</span>`,
+      "promise-line"
+    );
+    appendPlain("Need clarification (2 questions):", "dim");
+    appendPlain("1. Should the public API signatures stay unchanged?");
+    appendPlain("2. Which test command proves the refactor is correct?");
+
+    await typeAnswer("yes | uv run pytest tests/test_errors.py -q");
+    await sleep(linePause);
+
+    appendPlain("Generating spec...", "dim");
+    await sleep(linePause * 1.5);
+
+    appendLine(
+      `<span class="success">✓</span> <span class="dim">Spec generated:</span> specs/001-refactor-error-handling.md`,
+      "output"
+    );
     await sleep(linePause);
 
     // 2. Start the loop
+    appendPlain("", "blank");
     await typeCommand("owloop run");
     await sleep(fastPause);
 
-    appendPlain("🦉 Ollie is waking up...", "dim");
+    appendPlain("Ollie is waking up...", "dim");
     appendPlain("→ worktree: /project-owloop-wt/owloop-2026-07-03", "dim");
     appendPlain("→ model: claude-sonnet-5", "dim");
     await sleep(linePause);
 
-    // 3. TUI frames with iteration detail
+    // 3. TUI frames
     await showTuiFrame(0);
     await sleep(900);
     appendLine(
-      `<span class="success">✓</span> <span class="dim">001-fix-lint.md</span> · ruff + pytest passed · committed`,
+      `<span class="success">✓</span> <span class="dim">001-refactor-error-handling.md</span> · tests pass · committed`,
       "output"
     );
     await sleep(linePause);
@@ -208,7 +233,7 @@
     await sleep(linePause);
 
     await typeCommand("owloop report");
-    appendPlain("🌅 Report generated: logs/owloop_report.html", "dawn");
+    appendPlain("Report generated: logs/owloop_report.html", "dawn");
 
     if (status) {
       status.textContent = "● complete";

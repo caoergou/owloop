@@ -46,3 +46,18 @@ def count_incomplete_root_specs(specs_dir: Path) -> int:
 def get_first_incomplete_root_spec(specs_dir: Path) -> Path | None:
     incomplete = get_incomplete_root_specs(specs_dir)
     return incomplete[0] if incomplete else None
+
+
+def find_next_spec_number(specs_dir: Path) -> int:
+    """Return the next available spec number (1, 2, 3...).
+
+    Finds the highest existing numeric prefix in specs/*.md and adds one.
+    Non-numeric filenames are ignored.
+    """
+    max_num = 0
+    for path in get_root_specs(specs_dir):
+        stem = path.stem
+        prefix = stem.split("-", 1)[0] if "-" in stem else stem
+        if prefix.isdigit():
+            max_num = max(max_num, int(prefix))
+    return max_num + 1

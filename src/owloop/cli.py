@@ -18,6 +18,7 @@ from owloop.engine import EngineConfig, OwloopEngine
 from owloop.report import ReportGenerator
 from owloop.reporter import ConsoleReporter
 from owloop.spec_from_issue import IssueToSpecConverter
+from owloop.spec_generator import SpecGenerationError, SpecGenerator
 from owloop.spec_linter import LintReport, SpecLinter
 from owloop.tui import OwloopTUI
 
@@ -237,6 +238,50 @@ def init(specs_dir: str, example: bool) -> None:
     console.print(f"[bold {_brand.AMBER}]Next steps:[/]")
     console.print(f"  1. Edit [bold]{specs_dir}/01-example.md[/] with your task")
     console.print("  2. Run [bold]owloop run[/]")
+    console.print()
+
+
+@main.command()
+@click.argument("goal")
+@click.option(
+    "--model", default=DEFAULT_MODEL,
+    help="Claude model to use (or set CLAUDE_MODEL).", show_default=True,
+)
+@click.option(
+    "--max-rounds", type=int, default=3,
+    help="Maximum clarification rounds.", show_default=True,
+)
+def spec(goal: str, model: str, max_rounds: int) -> None:
+    """Turn a vague goal into a concrete spec via agent clarification."""
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
+    project_dir = Path.cwd()
+
+    if not (project_dir / ".git").exists():
+        console.print("[red]Error:[/] Not a git repository. Run [bold]git init[/] first.")
+        raise SystemExit(1)
+
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[dim]Goal:[/] {goal}\n")
+
+    adapter = get_adapter(
+        "claude",
+        model=model,
+        claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+        idle_timeout=3600,
+    )
+    generator = SpecGenerator(project_dir, adapter)
+
+    try:
+        spec_path = generator.generate(goal, max_rounds=max_rounds)
+    except SpecGenerationError as exc:
+        console.print(f"\n[red]Error:[/] {exc}")
+        raise SystemExit(1) from None
+
+    console.print()
+    console.print(f"[{_brand.GREEN}]✓ Spec generated:[/] {spec_path}")
+    console.print("[dim]Review it, then run[/] [bold]owloop run[/]")
     console.print()
 
 
