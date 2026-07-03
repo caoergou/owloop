@@ -98,6 +98,7 @@ OWL_FACE = _normalize([
 
 # ── progress / status ──
 MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕"]
+MOON_PHASES_FULL = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"]
 
 
 def moon_for_progress(done: int, total: int) -> str:
