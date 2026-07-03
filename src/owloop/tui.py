@@ -32,6 +32,7 @@ from rich.text import Text
 from owloop._brand import (
     AMBER,
     BRAND_BAR,
+    BRAND_BAR_ASCII,
     CYAN,
     DIM_BLUE,
     GRAY,
@@ -39,7 +40,6 @@ from owloop._brand import (
     MOON_WHITE,
     NIGHT,
     OWL_BLINK,
-    OWL_EMOJI,
     OWL_MEDIUM,
     OWL_SLEEP,
     RED,
@@ -491,11 +491,10 @@ class OwloopTUI:
             self.layout["owl"].update(panel)
 
     def _build_owl_panel(self, art: list[str], caption: str, border: str) -> Panel:
-        if not self.ascii:
-            art = ["", OWL_EMOJI, ""]
-        owl_text = Text("\n".join(art), style=f"bold {AMBER}", justify="center")
+        brand = BRAND_BAR_ASCII if self.ascii else BRAND_BAR
+        brand_text = Text(brand, style=f"bold {AMBER}", justify="center")
         caption_text = Text(caption, style=f"italic {MOON_WHITE}", justify="center")
-        body = Group(Text(""), owl_text, Text(""), caption_text)
+        body = Group(Text(""), brand_text, Text(""), caption_text)
         return Panel(body, border_style=border, style=f"on {NIGHT}", padding=(1, 2))
 
     def _render_owl_scene(self) -> Panel:
@@ -510,19 +509,6 @@ class OwloopTUI:
                 grid[y][x] = ch
                 styles[y][x] = STAR_STYLE
 
-        if self.ascii:
-            art = self._owl_art_for_phase()
-            top = (SCENE_H - len(art)) // 2
-            left = (SCENE_W - len(art[0])) // 2
-            for dy, row in enumerate(art):
-                for dx, ch in enumerate(row):
-                    if ch != " ":
-                        grid[top + dy][left + dx] = ch
-                        styles[top + dy][left + dx] = f"bold {AMBER}"
-        else:
-            grid[SCENE_H // 2][SCENE_W // 2] = OWL_EMOJI
-            styles[SCENE_H // 2][SCENE_W // 2] = f"bold {AMBER}"
-
         text = Text(justify="center")
         for y in range(SCENE_H):
             for style, group in itertools.groupby(range(SCENE_W), key=lambda x: styles[y][x]):
@@ -533,8 +519,8 @@ class OwloopTUI:
 
         return Panel(
             Align.center(text, vertical="middle"),
-            title="Ollie",
-            subtitle=BRAND_BAR,
+            title="Owloop",
+            subtitle=BRAND_BAR_ASCII if self.ascii else BRAND_BAR,
             subtitle_align="center",
             border_style=DIM_BLUE,
             style=f"on {NIGHT}",

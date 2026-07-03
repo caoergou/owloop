@@ -66,19 +66,8 @@ def classify_spec(content: str) -> str:
 
 
 def _banner_text(ascii: bool = False, no_color: bool = False) -> Text | str:
-    """Return the owloop banner using brand owl art."""
-    if ascii:
-        art = _brand.ASCII_OWL_SMALL
-        lines = list(art)
-        # Place the product name next to the owl's eyes.
-        if len(lines) > 1:
-            lines[1] = f"{lines[1]}   OWLOOP"
-        joined = "\n".join(lines)
-        if no_color:
-            return joined
-        return Text.from_markup(f"[bold {_brand.AMBER}]{joined}[/]")
-    # Use emoji owl + brand bar for normal terminals.
-    joined = f"{_brand.OWL_EMOJI}  { _brand.BRAND_BAR}"
+    """Return the owloop banner."""
+    joined = _brand.BRAND_BAR_ASCII if ascii else _brand.BRAND_BAR
     if no_color:
         return joined
     return Text.from_markup(f"[bold {_brand.AMBER}]{joined}[/]")

@@ -22,9 +22,12 @@ STAR_STYLE = "dim #6b74a8"
 # ── mascot ──
 OLLIE_NAME = "Ollie"
 TAGLINE = "Your code evolves while you sleep."
-OWL_EMOJI = "🦉"
 
-# ── owl art (normalised to consistent width) ──
+# ── brand bar ──
+BRAND_BAR = "✦  O W L O O P  ✦"
+BRAND_BAR_ASCII = "  O W L O O P  "
+
+# ── owl art (kept for --ascii compatibility) ──
 
 def _normalize(art: list[str]) -> list[str]:
     width = max(len(row) for row in art)
@@ -92,8 +95,6 @@ OWL_FACE = _normalize([
     " █(o)(o)█ ",
     "  █ ▼ █   ",
 ])
-
-BRAND_BAR = "✦  O W L O O P  ✦"
 
 # ── progress / status ──
 MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕"]
