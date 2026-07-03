@@ -37,7 +37,6 @@ from owloop._brand import (
     DIM_BLUE,
     GRAY,
     GREEN,
-    MOON_PHASES,
     MOON_PHASES_FULL,
     MOON_WHITE,
     NIGHT,

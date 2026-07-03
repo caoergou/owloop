@@ -1,8 +1,18 @@
 """Tests for the owloop CLI entry points."""
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
+
 from click.testing import CliRunner
 
 from owloop.cli import main
+
+
+def _installed_version() -> str:
+    try:
+        return pkg_version("owloop")
+    except PackageNotFoundError:  # pragma: no cover - fallback for editable runs
+        return "0.0.0"
 
 
 def test_banner_and_command_list():
@@ -21,7 +31,7 @@ def test_version_flag():
     runner = CliRunner()
     result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
-    assert "0.2.0" in result.output
+    assert _installed_version() in result.output
 
 
 def test_version_command():
