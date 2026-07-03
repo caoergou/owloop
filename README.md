@@ -28,7 +28,9 @@ owloop run → pick spec → fresh claude -p → verify with shell commands → 
 ## 🚀 Quick Start
 
 ```bash
-uv tool install git+https://github.com/caoergou/owloop
+# Install from PyPI
+uv tool install owloop
+# or: pip install owloop
 
 owloop init        # creates specs/ and templates
 # edit specs/01-example.md with your task
