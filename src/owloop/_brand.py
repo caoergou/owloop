@@ -35,14 +35,14 @@ OWL_SMALL = _normalize([
     " ██ ◉  ◉ ██ ",
     "███  ╰▽╯  ███",
     " ██ ╭──╮ ██ ",
-    "  ▀█ ║║║ █▀ ",
+    "  ▀█ ║║║ █▀∞",
     "   ▀██▄▄██▀ ",
     "    ╱╲  ╱╲  ",
 ])
 
 OWL_MEDIUM = _normalize([
     "     ▄▄████▄▄     ",
-    "    ██ ◉  ◉ ██    ",
+    "    ██ ◉  ◉ ██  ∞ ",
     "   ███  ╰▽╯  ███   ",
     "    ██ ╭──╮ ██    ",
     "     ▀█ ║║║ █▀     ",
@@ -52,7 +52,7 @@ OWL_MEDIUM = _normalize([
 
 OWL_BLINK = _normalize([
     "     ▄▄████▄▄     ",
-    "    ██ ─  ─ ██    ",
+    "    ██ ─  ─ ██  ∞ ",
     "   ███  ╰▽╯  ███   ",
     "    ██ ╭──╮ ██    ",
     "     ▀█ ║║║ █▀     ",
@@ -93,15 +93,15 @@ SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇",
 
 def status_message(phase: str, iteration: int = 0, spec_name: str = "") -> str:
     if phase == "complete":
-        return f"🌅 {OLLIE_NAME}'s night shift is complete"
+        return f"🌅 {OLLIE_NAME} is done — time for coffee"
     if phase == "error":
-        return f"✗ {OLLIE_NAME} hit a snag"
+        return f"✗ {OLLIE_NAME} hit a snag and stopped"
     if phase == "stuck":
-        return f"💤 {OLLIE_NAME} is confused, but still trying..."
+        return f"💤 {OLLIE_NAME} is scratching his head, but still trying..."
     if phase == "done_signal":
         return f"🌙 Iteration {iteration} closed the loop"
     if iteration:
-        base = f"{OLLIE_NAME} is on iteration {iteration}"
+        base = f"{OLLIE_NAME} is hunting bugs on iteration {iteration}"
         if spec_name:
             return f"🦉 {base} · {spec_name}"
         return f"🦉 {base}..."

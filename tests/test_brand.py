@@ -53,11 +53,11 @@ def test_ascii_moon_for_progress_phases(done, total, expected):
 @pytest.mark.parametrize(
     ("phase", "iteration", "spec_name", "expected_substring"),
     [
-        ("complete", 0, "", "night shift is complete"),
+        ("complete", 0, "", "done — time for coffee"),
         ("error", 0, "", "hit a snag"),
-        ("stuck", 0, "", "confused"),
+        ("stuck", 0, "", "scratching his head"),
         ("done_signal", 3, "", "Iteration 3 closed the loop"),
-        ("working", 2, "", "on iteration 2"),
+        ("working", 2, "", "hunting bugs on iteration 2"),
         ("working", 2, "fix-thing.md", "fix-thing.md"),
         ("starting", 0, "", "waking up"),
     ],

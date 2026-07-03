@@ -124,6 +124,25 @@ class OwloopTUI:
             self._update_layout_for_size()
             self._render()
 
+    def _play_wake_animation(self) -> None:
+        """Show Ollie waking up when the TUI starts."""
+        frames = [
+            (OWL_SLEEP, "Ollie is asleep...", DIM_BLUE),
+            (OWL_BLINK, "Ollie is waking up...", DIM_BLUE),
+            (OWL_MEDIUM, "Ollie is awake", AMBER),
+        ]
+        for art, caption, border in frames:
+            owl_text = Text("\n".join(art), style=f"bold {AMBER}", justify="center")
+            caption_text = Text(caption, style=f"italic {MOON_WHITE}", justify="center")
+            body = Group(Text(""), owl_text, Text(""), caption_text)
+            panel = Panel(body, border_style=border, style=f"on {NIGHT}", width=40, padding=(1, 2))
+            if self._compact:
+                self.layout["activity"].update(panel)
+            else:
+                self.layout["owl"].update(panel)
+            self.live.refresh()
+            time.sleep(0.5)
+
     def __enter__(self) -> OwloopTUI:
         self.live.__enter__()
         self._live_started = True
@@ -132,6 +151,7 @@ class OwloopTUI:
         if hasattr(signal, "SIGWINCH"):
             self._original_sigwinch = signal.signal(signal.SIGWINCH, self._on_sigwinch)
         self._render()
+        self._play_wake_animation()
         self._ticker = threading.Thread(target=self._tick_loop, daemon=True)
         self._ticker.start()
         return self
@@ -247,7 +267,8 @@ class OwloopTUI:
         elif kind == "done_signal":
             s.phase = "done_signal"
             self._log(f"✓ done signal detected: {data['signal']}")
-            self._flash(f"🌙 iteration {s.iteration} complete!", f"bold {MOON_WHITE}")
+            self._log(f"🌙 Loop closed on iteration {s.iteration}")
+            self._flash(f"🌙 Loop closed on iteration {s.iteration}", f"bold {MOON_WHITE}")
         elif kind == "no_done_signal":
             self._log("⚠ no done signal detected, will retry in the next iteration")
         elif kind == "agent_failed":
