@@ -105,15 +105,15 @@ Focus: **close the two biggest gaps vs gnhf** — cross-iteration learning and t
 
 Focus: **the bottleneck is spec quality, not loop mechanics**. Pre-flight spec validation is a blue ocean — `spec-kit` only offers it opt-in, and the community is asking for it to be mandatory. owloop can be the first loop runner that refuses to start a bad spec.
 
-- [ ] Spec pre-flight linter (`owloop check`): run before loop starts
+- [x] Spec pre-flight linter (`owloop check`): run before loop starts
   - Verify all acceptance criteria are executable shell commands
   - Check Exclusions section is non-empty
   - Detect internal contradictions
   - Run baseline commands and confirm they execute without error
-- [ ] Community spec template library (legacy refactor, ML hygiene, API migration, etc.)
-- [ ] Spec-from-issue — convert Jira/GitHub issues to specs
+- [x] Community spec template library (legacy refactor, ML hygiene, API migration, etc.)
+- [x] Spec-from-issue — convert GitHub issues to specs
 - [ ] Spec-from-review — convert code review findings to specs
-- [ ] Promise protocol: support `<promise>BLOCKED:reason</promise>` and `<promise>DECIDE:question</promise>` in addition to `DONE` (inspired by ralphloop.sh)
+- [x] Promise protocol: support `<promise>BLOCKED:reason</promise>` and `<promise>DECIDE:question</promise>` in addition to `DONE` (inspired by ralphloop.sh)
 
 ## v0.5 — Multi-Agent
 
