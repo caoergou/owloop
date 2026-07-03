@@ -37,6 +37,7 @@ from owloop._brand import (
     DIM_BLUE,
     GRAY,
     GREEN,
+    MOON_PHASES,
     MOON_WHITE,
     NIGHT,
     OWL_BLINK,
@@ -107,6 +108,7 @@ class AppState:
     done: bool = False
     stopped_reason: str = ""
     tokens_used: int = 0
+    moon_frame: int = 0
     _spinner: str = "⠋"
 
 
@@ -190,6 +192,7 @@ class OwloopTUI:
                 if self.state.phase == "working":
                     frame_idx = (frame_idx + 1) % len(SPINNER_FRAMES)
                     self.state._spinner = SPINNER_FRAMES[frame_idx]
+                    self.state.moon_frame = (self.state.moon_frame + 1) % len(MOON_PHASES)
                 self._render()
 
     # ── engine event handling ──
@@ -390,7 +393,10 @@ class OwloopTUI:
         s = self.state
         done = sum(1 for spec in s.specs if self._is_done(spec))
         total = len(s.specs) or 1
-        moon = moon_for_progress(done, total)
+        if s.phase == "working":
+            moon = MOON_PHASES[s.moon_frame]
+        else:
+            moon = moon_for_progress(done, total)
         grid = Table.grid(expand=True)
         grid.add_column(ratio=1)
         grid.add_column(justify="right")
