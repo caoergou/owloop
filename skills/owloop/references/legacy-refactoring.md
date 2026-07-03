@@ -2,6 +2,30 @@
 
 Target: read this when a spec involves refactoring old/legacy code.
 
+## Sources & Confidence
+
+- **Foundational (high confidence, cite as authority):**
+  - Michael Feathers, *Working Effectively with Legacy Code* — characterization tests, seams, legacy code definition
+  - Martin Fowler, *Refactoring* — safe mechanical patterns, strangler fig
+  - Matthias Noback, Mikado Method articles
+- **Validated production practice (high confidence):**
+  - Shopify Engineering strangler-fig pattern case study
+- **Empirical / community reports (medium confidence, use as supporting evidence):**
+  - getunblocked.com/blog/refactoring-legacy-code/
+  - codegeeks.solutions/blog/best-practices-for-ai-refactoring-legacy-code
+  - arXiv studies on AI-assisted refactoring (cite as "empirical, mixed")
+- **Prompt-engineering / skill catalogs (medium confidence, tactical phrases):**
+  - antonioagudo.com/blog/the-magic-words-that-make-ai-code-better/
+  - wondelai/skills (GitHub)
+
+## Guidance Levels
+
+Advice in this document is marked by strength:
+
+- **Hard constraint** — do not override without explicit user approval.
+- **Strong recommendation** — follow unless you have a clear, documented reason not to.
+- **Heuristic** — a rule of thumb; adapt to the project context.
+
 ## When It Is Safe
 
 - Tests pin the current behavior (characterization tests or existing regression tests).
@@ -11,10 +35,16 @@ Target: read this when a spec involves refactoring old/legacy code.
 
 ## Required Prep Steps
 
-1. Add characterization tests that capture current behavior before changing code.
+1. **Strong recommendation:** add characterization tests that capture current behavior before changing code.
 2. Identify seams: interfaces, dependency injection points, or modules that can change in isolation.
 3. Define blast radius: list the exact files and public symbols the spec may touch.
 4. Record a baseline so progress can be measured.
+
+## Heuristics for Targets
+
+- Long files (>300 lines) are candidates for extraction, not automatic targets.
+- Modules with high churn or many imports are often better split candidates than rarely touched code.
+- Files with no test coverage should be treated as higher risk regardless of apparent simplicity.
 
 ## Safe Mechanical Patterns
 
@@ -35,7 +65,7 @@ Target: read this when a spec involves refactoring old/legacy code.
 - Security-sensitive code (auth, crypto, payments).
 - Big-bang rewrites.
 
-If a spec asks for any of these, stop and ask the user for a blueprint or explicit approval before proceeding.
+**Hard constraint:** if a spec asks for any of these, stop and ask the user for a blueprint or explicit approval before proceeding.
 
 ## Techniques
 
@@ -50,7 +80,7 @@ If a spec asks for any of these, stop and ask the user for a blueprint or explic
 
 Use these phrases in specs to keep the run bounded:
 
-- "Add characterization tests before changing behavior."
-- "Do not change public interfaces."
-- "Keep blast radius to N files."
-- "Roll back must be one revert."
+- **Strong recommendation:** "Add characterization tests before changing behavior."
+- **Hard constraint:** "Do not change public interfaces without explicit approval."
+- **Heuristic:** "Keep blast radius to N files."
+- **Hard constraint:** "Roll back must be one revert."

@@ -2,6 +2,24 @@
 
 Target: read this when a spec touches ML/DS code.
 
+## Sources & Confidence
+
+- **Foundational / canonical:**
+  - Andrej Karpathy's autoresearch pattern
+  - The New Stack coverage of autoresearch
+- **Better tools for continuous optimization (cite as alternatives, not competing advice):**
+  - `goal-md` fitness-function approach
+  - Optuna, FLAML, Ray Tune for hyperparameter search
+  - Braintrust, MLflow, DeepEval, LangSmith for eval-driven development
+- **Empirical:**
+  - arXiv "Agentic Refactoring" study (AI-generated refactoring commits)
+  - arXiv "A Multi-Agent System for Notebooks Transformation"
+
+Distinction:
+
+- **High confidence recommendation:** owloop is NOT for model training/tuning.
+- **Medium/high confidence, based on task type matching:** owloop IS for notebook-to-script conversion, data pipeline refactoring, type annotations, tests for utilities, dependency/import updates, logging standardization, and dead experiment code removal.
+
 ## What owloop Is NOT For
 
 Do not use the autonomous loop for:

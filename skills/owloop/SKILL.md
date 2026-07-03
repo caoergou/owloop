@@ -95,6 +95,10 @@ See [references/loop-engineering-guide.md](references/loop-engineering-guide.md)
 
 ## Scenario References
 
+> These references summarize established practices and community experience.
+> Hard constraints are marked explicitly; heuristic advice should be adapted to your project.
+> See [references/SOURCES.md](references/SOURCES.md) for evidence levels.
+
 When the user's task matches one of these scenarios, read the corresponding reference before writing or executing a spec:
 
 - **Legacy refactoring** → read [references/legacy-refactoring.md](references/legacy-refactoring.md)
