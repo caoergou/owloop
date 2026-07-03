@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from owloop.adapters import get_adapter
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.reporter import ConsoleReporter
 from owloop.tui import OwloopTUI
@@ -47,10 +48,9 @@ Output when complete: `<promise>DONE</promise>`
 """
 
 OWLOOP_BANNER = Text.from_markup(
-    "[bold #d4a025]     ◉ ◉\n"
-    "   ╭( ᵒ̴̶̷̤ ᴗ ᵒ̴̶̷̤ )╮\n"
-    "   │ owloop  │\n"
-    "   ╰────────╯[/]\n"
+    "[bold #d4a025]  ▄▄████▄▄\n"
+    " ██ ◉  ◉ ██   owloop\n"
+    "███ ╰▽╯ ███[/]\n"
 )
 
 
@@ -226,21 +226,27 @@ def _run_legacy_script(mode: str, max_iterations: int, worktree: bool) -> None:
         raise SystemExit(0)
 
 
-def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str) -> None:
+STOPPED_REASON_EXIT_1 = {"preflight_failed", "dirty_workspace_declined"}
+
+
+def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str, agent: str) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
         mode=mode,
         max_iterations=max_iterations,
+        worktree=worktree,
+    )
+    adapter = get_adapter(
+        agent,
         model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
-        worktree=worktree,
     )
 
     if sys.stdout.isatty():
         tui = OwloopTUI()
         try:
             with tui:
-                engine = OwloopEngine(config, on_event=tui.on_event)
+                engine = OwloopEngine(config, adapter, on_event=tui.on_event)
                 summary = engine.run()
         except KeyboardInterrupt:
             console.print("\n[dim]owloop stopped.[/]")
@@ -251,7 +257,7 @@ def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str) -> N
         console.print(OWLOOP_BANNER)
         console.print("[#d4a025]Starting autonomous loop...[/]" if mode == "build" else "[#d4a025]Planning mode — analyzing specs...[/]")
         reporter = ConsoleReporter(console)
-        engine = OwloopEngine(config, on_event=reporter.on_event)
+        engine = OwloopEngine(config, adapter, on_event=reporter.on_event)
         try:
             summary = engine.run()
         except KeyboardInterrupt:
@@ -259,7 +265,7 @@ def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str) -> N
             raise SystemExit(0)
         reporter.print_summary(summary)
 
-    if summary.stopped_reason == "claude_cli_missing":
+    if summary.stopped_reason in STOPPED_REASON_EXIT_1:
         raise SystemExit(1)
 
 
@@ -284,12 +290,19 @@ def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str) -> N
     show_default=True,
 )
 @click.option(
+    "--agent",
+    type=click.Choice(["claude"]),
+    default="claude",
+    help="Coding agent adapter to drive the loop with.",
+    show_default=True,
+)
+@click.option(
     "--legacy",
     is_flag=True,
     default=False,
     help="Use the legacy bash loop engine (scripts/owloop.sh) instead of the built-in Python engine.",
 )
-def run(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
+def run(max_iterations: int, worktree: bool, model: str, agent: str, legacy: bool) -> None:
     """Start the autonomous coding loop."""
     specs_dir = Path.cwd() / "specs"
     if not specs_dir.exists() or not list(specs_dir.glob("*.md")):
@@ -305,7 +318,7 @@ def run(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
         _run_legacy_script("build", max_iterations, worktree)
         return
 
-    _run_engine("build", max_iterations, worktree, model)
+    _run_engine("build", max_iterations, worktree, model, agent)
 
 
 @main.command()
@@ -329,12 +342,19 @@ def run(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
     show_default=True,
 )
 @click.option(
+    "--agent",
+    type=click.Choice(["claude"]),
+    default="claude",
+    help="Coding agent adapter to drive the loop with.",
+    show_default=True,
+)
+@click.option(
     "--legacy",
     is_flag=True,
     default=False,
     help="Use the legacy bash loop engine (scripts/owloop.sh) instead of the built-in Python engine.",
 )
-def plan(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
+def plan(max_iterations: int, worktree: bool, model: str, agent: str, legacy: bool) -> None:
     """Generate an implementation plan from specs."""
     if legacy:
         console.print()
@@ -344,7 +364,7 @@ def plan(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
         _run_legacy_script("plan", max_iterations, worktree)
         return
 
-    _run_engine("plan", max_iterations, worktree, model)
+    _run_engine("plan", max_iterations, worktree, model, agent)
 
 
 @main.command()

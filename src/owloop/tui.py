@@ -41,30 +41,33 @@ def _normalize(art: list[str]) -> list[str]:
 
 
 OWL_OPEN = _normalize([
-    " ╭─────╮ ",
-    "╱ ◉   ◉ ╲",
-    "│  ╰▽╯  │",
-    "╰╮     ╭╯",
-    " │ ║║║ │ ",
-    " ╰─────╯ ",
+    "    ▄▄████▄▄   ",
+    "   ██ ◉  ◉ ██  ",
+    "  ███  ╰▽╯  ███",
+    "   ██ ╭──╮ ██  ",
+    "    ▀█ ║║║ █▀  ",
+    "     ▀██▄▄██▀  ",
+    "      ╱╲  ╱╲   ",
 ])
 
 OWL_BLINK = _normalize([
-    " ╭─────╮ ",
-    "╱ ─   ─ ╲",
-    "│  ╰▽╯  │",
-    "╰╮     ╭╯",
-    " │ ║║║ │ ",
-    " ╰─────╯ ",
+    "    ▄▄████▄▄   ",
+    "   ██ ─  ─ ██  ",
+    "  ███  ╰▽╯  ███",
+    "   ██ ╭──╮ ██  ",
+    "    ▀█ ║║║ █▀  ",
+    "     ▀██▄▄██▀  ",
+    "      ╱╲  ╱╲   ",
 ])
 
 OWL_SLEEP = _normalize([
-    " ╭─────╮    ",
-    "╱ ─   ─ ╲ z ",
-    "│  ╰▽╯  │z  ",
-    "╰╮     ╭╯   ",
-    " │ ║║║ │    ",
-    " ╰─────╯    ",
+    "    ▄▄████▄▄  z ",
+    "   ██ ─  ─ ██ Z ",
+    "  ███  ╰▽╯  ███ ",
+    "   ██ ╭──╮ ██   ",
+    "    ▀█ ║║║ █▀   ",
+    "     ▀██▄▄██▀   ",
+    "      ╱╲  ╱╲    ",
 ])
 
 SCENE_W, SCENE_H = 28, 9
@@ -120,6 +123,7 @@ class OwloopTUI:
         self._stop_ticker = threading.Event()
         self._ticker: threading.Thread | None = None
         self._live_started = False
+        self._paused = False
 
     # ── lifecycle ──
 
@@ -150,10 +154,31 @@ class OwloopTUI:
 
     # ── engine event handling ──
 
+    # Events after which the engine may call the blocking input() — the Live
+    # full-screen display must be torn down first or the prompt is invisible
+    # (and its echo fights the next screen refresh).
+    PROMPT_MESSAGES = {
+        "worktree_prompt": "建议在独立 worktree 中运行以保护主仓库。是否自动创建？(Y/n)",
+        "dirty_workspace_warning": (
+            "⚠ 工作区有未提交的修改，这些修改不会出现在 worktree 中。\n"
+            "   建议先 commit 或 stash 后再运行 owloop。\n"
+            "   继续运行？(y/N)"
+        ),
+    }
+
     def on_event(self, kind: str, data: dict) -> None:
+        if self._paused:
+            self.live.start()
+            self._paused = False
+
         with self._lock:
             self._handle(kind, data)
             self._render()
+
+        if kind in self.PROMPT_MESSAGES:
+            self.live.stop()
+            self._paused = True
+            self.console.print(self.PROMPT_MESSAGES[kind])
 
     def _log(self, line: str) -> None:
         self.state.logs.append(line)
@@ -213,14 +238,23 @@ class OwloopTUI:
             self._flash(f"🌙 第 {s.iteration} 轮完成！", f"bold {MOON_WHITE}")
         elif kind == "no_done_signal":
             self._log("⚠ 未检测到完成信号，将在下一轮重试")
-        elif kind == "claude_failed":
-            self._log(f"✗ Claude 执行失败（returncode={data['returncode']}）")
-        elif kind == "claude_not_found":
+        elif kind == "agent_failed":
+            self._log(f"✗ Agent 执行失败（returncode={data['returncode']}）")
+        elif kind == "agent_timeout":
+            self._log(f"⏱ 第 {data['iteration']} 轮空闲超时，Agent 可能挂起，已终止")
+        elif kind == "preflight_failed":
             s.phase = "error"
-            self._log(f"✗ 未找到 Claude CLI: {data['cmd']}")
-        elif kind == "claude_cli_missing":
+            for issue in data["issues"]:
+                self._log(f"✗ {issue}")
+        elif kind == "dirty_workspace_warning":
+            self._log("⚠ 工作区有未提交的修改，这些修改不会出现在 worktree 中")
+        elif kind == "dirty_workspace_declined":
             s.phase = "error"
-            self._log(f"✗ 未找到 Claude CLI: {data['cmd']}")
+            self._log("已取消 — 请先 commit 或 stash 后再运行 owloop")
+        elif kind == "dirty_workspace_noninteractive_continue":
+            self._log("非交互环境，忽略未提交修改警告，继续运行")
+        elif kind == "claude_config_copied":
+            self._log(f"已复制 .claude/ 配置到 worktree: {data['path']}")
         elif kind == "stuck_warning":
             s.phase = "stuck"
             self._log(f"💤 已连续 {data['consecutive_failures']} 轮未完成，Agent 可能卡住了")
@@ -384,6 +418,8 @@ class OwloopTUI:
         return layout
 
     def _render(self) -> None:
+        if self._paused:
+            return
         self.layout["header"].update(self._render_header())
         self.layout["status"].update(self._render_status())
         self.layout["specs"].update(self._render_specs())
@@ -394,8 +430,21 @@ class OwloopTUI:
 
     # ── exit summary (printed to normal scrollback, after Live has closed) ──
 
+    FAILED_REASONS = {"preflight_failed", "dirty_workspace_declined"}
+
     def print_exit_summary(self, summary: RunSummary) -> None:
         s = self.state
+        failed = summary.stopped_reason in self.FAILED_REASONS
+
+        if failed:
+            owl = Text("\n".join(OWL_SLEEP), style=f"dim {RED}", justify="center")
+            lines = [Align.center(Text("✗ owloop 未启动", style=f"bold {RED}")), Text("")]
+            for issue in summary.issues or []:
+                lines.append(Align.center(Text(f"· {issue}", style=f"dim {GRAY}")))
+            body = Group(owl, Text(""), *lines)
+            self.console.print(Panel(body, border_style=RED, style=f"on {NIGHT}", padding=(1, 4), width=56))
+            return
+
         elapsed = time.monotonic() - s.start_time
         owl = Text("\n".join(OWL_SLEEP), style=f"dim {AMBER}", justify="center")
 

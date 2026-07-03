@@ -60,10 +60,24 @@ class ConsoleReporter:
             c.print("[green]✓ 任务成功完成！[/]")
         elif kind == "no_done_signal":
             c.print("[yellow]⚠ 未检测到完成信号，将在下一轮重试...[/]")
-        elif kind == "claude_failed":
-            c.print(f"[red]✗ Claude 执行失败（returncode={data['returncode']}）[/]")
-        elif kind in ("claude_not_found", "claude_cli_missing"):
-            c.print(f"[red]错误: 未找到 Claude CLI ({data['cmd']})[/]")
+        elif kind == "agent_failed":
+            c.print(f"[red]✗ Agent 执行失败（returncode={data['returncode']}）[/]")
+        elif kind == "agent_timeout":
+            c.print(f"[red]⏱ 第 {data['iteration']} 轮空闲超时，Agent 可能挂起，已终止[/]")
+        elif kind == "preflight_failed":
+            c.print("[red]环境检查未通过：[/]")
+            for issue in data["issues"]:
+                c.print(f"  [red]✗[/] {issue}")
+        elif kind == "dirty_workspace_warning":
+            c.print("[yellow]⚠ 工作区有未提交的修改，这些修改不会出现在 worktree 中。[/]")
+            c.print("[yellow]   建议先 commit 或 stash 后再运行 owloop。[/]")
+            c.print("[yellow]   继续运行？(y/N)[/]")
+        elif kind == "dirty_workspace_declined":
+            c.print("[red]已取消 — 请先 commit 或 stash 后再运行 owloop。[/]")
+        elif kind == "dirty_workspace_noninteractive_continue":
+            c.print("[cyan]非交互环境，忽略未提交修改警告，继续运行[/]")
+        elif kind == "claude_config_copied":
+            c.print(f"[cyan]已复制 .claude/ 配置到 worktree: {data['path']}[/]")
         elif kind == "stuck_warning":
             c.print(f"[red]⚠ 已连续 {data['consecutive_failures']} 轮未完成，Agent 可能卡住了[/]")
         elif kind == "push_retry":
@@ -75,8 +89,15 @@ class ConsoleReporter:
         elif kind == "interrupted":
             c.print("\n[dim]owloop 已停止[/]")
 
+    FAILED_REASONS = {"preflight_failed", "dirty_workspace_declined"}
+
     def print_summary(self, summary: RunSummary) -> None:
         c = self.console
+        if summary.stopped_reason in self.FAILED_REASONS:
+            c.print()
+            c.print("[bold red]═══ OWLOOP 未启动 ═══[/]")
+            c.print()
+            return
         c.print()
         c.print("[bold green]═══ OWLOOP 完成 ═══[/]")
         c.print(f"[blue]分支:[/] {summary.branch}")

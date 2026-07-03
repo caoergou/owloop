@@ -1,20 +1,20 @@
 """Python port of scripts/owloop.sh — the autonomous build/plan loop engine.
 
-The engine spawns one fresh ``claude -p`` process per iteration, watches its
-output for the ``<promise>DONE</promise>`` completion signal, commits/pushes
-on success, and retries (up to a consecutive-failure limit) otherwise.
+The engine spawns one fresh agent iteration (via an `AgentAdapter`) per round,
+watches its output for the ``<promise>DONE</promise>`` completion signal,
+commits/pushes on success, and retries (up to a consecutive-failure limit)
+otherwise.
 
 All UI concerns (TUI, plain console) live outside this module: the engine
 only reports progress through the ``on_event(kind, data)`` callback so it can
-be driven headless (tests, CI) or rendered any way the caller likes.
+be driven headless (tests, CI) or rendered any way the caller likes. Talking
+to the underlying coding agent goes through `AgentAdapter` (see adapters.py)
+so the engine itself never shells out to `claude` directly.
 """
 
 from __future__ import annotations
 
-import os
-import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import Callable
 
 from owloop import spec_queue
-
-DONE_SIGNAL_RE = re.compile(r"<promise>(?:ALL_)?DONE</promise>")
+from owloop.adapters import AgentAdapter
 
 BUILD_PROMPT = """\
 # Owloop — Build Mode
@@ -69,8 +68,6 @@ class EngineConfig:
     project_dir: Path
     mode: str = "build"  # "build" | "plan"
     max_iterations: int = 0  # 0 = unlimited
-    model: str = "claude-sonnet-5"
-    claude_cmd: str = "claude"
     worktree: bool = True
     max_consecutive_failures: int = 3
     tail_lines: int = 5
@@ -82,6 +79,7 @@ class IterationResult:
     success: bool
     done_signal: str | None
     returncode: int
+    timed_out: bool
     log_file: Path
 
 
@@ -92,11 +90,13 @@ class RunSummary:
     cwd: Path
     main_repo_dir: Path
     stopped_reason: str
+    issues: list[str] | None = None
 
 
 class OwloopEngine:
-    def __init__(self, config: EngineConfig, on_event: EventCallback | None = None):
+    def __init__(self, config: EngineConfig, adapter: AgentAdapter, on_event: EventCallback | None = None):
         self.config = config
+        self.adapter = adapter
         self.on_event = on_event or (lambda *_args: None)
         self.cwd = config.project_dir
         self.main_repo_dir = config.project_dir
@@ -123,6 +123,9 @@ class OwloopEngine:
     def _is_git_repo(self) -> bool:
         return self._run_git("rev-parse", "--is-inside-work-tree").returncode == 0
 
+    def _is_dirty(self) -> bool:
+        return bool(self._run_git("status", "--porcelain").stdout.strip())
+
     def _resolve_main_repo_dir(self) -> Path:
         if not self._is_git_repo():
             return self.config.project_dir
@@ -132,23 +135,63 @@ class OwloopEngine:
                 return Path(line[len("worktree ") :])
         return self.config.project_dir
 
-    def setup_worktree(self) -> None:
-        """Create/enter an isolated git worktree unless disabled or already inside one."""
+    def preflight_check(self) -> list[str]:
+        """Environment sanity checks that must pass before the loop may start."""
+        issues: list[str] = self.adapter.preflight()
+
+        if not self._is_git_repo():
+            issues.append("当前目录不是 git 仓库")
+
+        specs_dir = self.cwd / "specs"
+        has_plan = (self.cwd / "IMPLEMENTATION_PLAN.md").is_file()
+        if not has_plan and not spec_queue.get_root_specs(specs_dir):
+            issues.append("specs/ 目录下没有 .md 文件，且没有 IMPLEMENTATION_PLAN.md")
+
+        return issues
+
+    def _copy_claude_config(self, worktree_path: Path) -> None:
+        """Copy the main repo's .claude/ into a new worktree so project-level
+        permissions/settings still apply there."""
+        claude_dir = self.main_repo_dir / ".claude"
+        target = worktree_path / ".claude"
+        if claude_dir.is_dir() and not target.exists():
+            shutil.copytree(claude_dir, target)
+            self._emit("claude_config_copied", path=str(target))
+
+    def setup_worktree(self) -> bool:
+        """Create/enter an isolated git worktree unless disabled or already inside one.
+
+        Returns False if the run should abort entirely (user declined to
+        continue against a dirty main-repo workspace).
+        """
         if not self.config.worktree:
             self._emit("worktree_skipped", reason="disabled")
-            return
+            return True
 
         if not self._is_git_repo():
             self._emit("worktree_skipped", reason="not_a_git_repo")
-            return
+            return True
 
         if self.cwd != self.main_repo_dir:
             self._emit("worktree_already_active", path=str(self.cwd))
-            return
+            return True
+
+        if self._is_dirty():
+            self._emit("dirty_workspace_warning")
+            if sys.stdin.isatty():
+                try:
+                    reply = input("> ").strip().lower() or "n"
+                except EOFError:
+                    reply = "n"
+                if not reply.startswith("y"):
+                    self._emit("dirty_workspace_declined")
+                    return False
+            else:
+                self._emit("dirty_workspace_noninteractive_continue")
 
         if not sys.stdin.isatty():
             self._emit("worktree_skipped", reason="non_interactive")
-            return
+            return True
 
         self._emit("worktree_prompt")
         try:
@@ -158,7 +201,7 @@ class OwloopEngine:
 
         if not reply.lower().startswith("y"):
             self._emit("worktree_declined")
-            return
+            return True
 
         wt_date = datetime.now().strftime("%Y%m%d")
         wt_branch = f"owloop/{wt_date}"
@@ -173,21 +216,25 @@ class OwloopEngine:
         if wt_path.is_dir():
             self.cwd = wt_path
             self._emit("worktree_reused", path=str(wt_path))
-            return
+            self._copy_claude_config(wt_path)
+            return True
 
         created = self._run_git("worktree", "add", str(wt_path), "-b", wt_branch)
         if created.returncode == 0:
             self.cwd = wt_path
             self._emit("worktree_created", path=str(wt_path), branch=wt_branch)
-            return
+            self._copy_claude_config(wt_path)
+            return True
 
         reused = self._run_git("worktree", "add", str(wt_path), wt_branch)
         if reused.returncode == 0:
             self.cwd = wt_path
             self._emit("worktree_branch_reused", path=str(wt_path), branch=wt_branch)
-            return
+            self._copy_claude_config(wt_path)
+            return True
 
         self._emit("worktree_failed", stderr=created.stderr)
+        return True
 
     def _write_prompt_files(self) -> None:
         (self.cwd / "PROMPT_build.md").write_text(BUILD_PROMPT)
@@ -221,66 +268,6 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
-    def _run_claude(self, prompt_file: Path, log_file: Path) -> tuple[int, str]:
-        cmd = [
-            self.config.claude_cmd,
-            "-p",
-            "--model",
-            self.config.model,
-            "--permission-mode",
-            "auto",
-        ]
-        prompt_text = prompt_file.read_text()
-
-        output_lines: list[str] = []
-        with log_file.open("w") as log_f:
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    cwd=self.cwd,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    start_new_session=True,
-                )
-            except FileNotFoundError:
-                self._emit("claude_not_found", cmd=self.config.claude_cmd)
-                return 127, ""
-
-            try:
-                assert proc.stdin is not None and proc.stdout is not None
-                proc.stdin.write(prompt_text)
-                proc.stdin.close()
-
-                for line in proc.stdout:
-                    line = line.rstrip("\n")
-                    output_lines.append(line)
-                    log_f.write(line + "\n")
-                    self._log_line(line)
-                    self._emit("output_line", line=line)
-
-                proc.wait()
-            except KeyboardInterrupt:
-                # start_new_session=True put claude (and any children it spawns) in
-                # its own process group, so kill that whole group rather than just
-                # the direct child — otherwise grandchildren can be orphaned.
-                try:
-                    os.killpg(proc.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                raise
-
-            return proc.returncode, "\n".join(output_lines)
-
     def run_iteration(self, iteration: int) -> IterationResult:
         prompt_file = self.cwd / (
             "PROMPT_plan.md" if self.config.mode == "plan" else "PROMPT_build.md"
@@ -291,34 +278,36 @@ class OwloopEngine:
 
         self._emit("iteration_start", iteration=iteration, timestamp=_timestamp())
 
-        returncode, output = self._run_claude(prompt_file, log_file)
+        prompt_text = prompt_file.read_text()
 
-        done_signal = None
-        success = False
+        with log_file.open("w") as log_f:
 
-        if returncode == 0:
-            match = DONE_SIGNAL_RE.search(output)
-            if match:
-                done_signal = match.group(0)
-                success = True
-                self._emit("done_signal", signal=done_signal)
-            else:
-                self._emit(
-                    "no_done_signal",
-                    tail="\n".join(output.splitlines()[-self.config.tail_lines :]),
-                )
+            def _on_line(line: str) -> None:
+                log_f.write(line + "\n")
+                self._log_line(line)
+                self._emit("output_line", line=line)
+
+            result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
+
+        tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
+
+        if result.timed_out:
+            self._emit("agent_timeout", iteration=iteration)
+        elif not result.success:
+            self._emit("agent_failed", returncode=result.returncode, tail=tail)
+        elif result.has_completion_signal:
+            self._emit("done_signal", signal=result.done_signal)
         else:
-            self._emit(
-                "claude_failed",
-                returncode=returncode,
-                tail="\n".join(output.splitlines()[-self.config.tail_lines :]),
-            )
+            self._emit("no_done_signal", tail=tail)
+
+        success = result.success and result.has_completion_signal
 
         return IterationResult(
             iteration=iteration,
             success=success,
-            done_signal=done_signal,
-            returncode=returncode,
+            done_signal=result.done_signal,
+            returncode=result.returncode,
+            timed_out=result.timed_out,
             log_file=log_file,
         )
 
@@ -327,17 +316,27 @@ class OwloopEngine:
         self.main_repo_dir = self._resolve_main_repo_dir()
         self.session_log = self.log_dir / f"owloop_{self.config.mode}_session_{_file_timestamp()}.log"
 
-        if shutil.which(self.config.claude_cmd) is None:
-            self._emit("claude_cli_missing", cmd=self.config.claude_cmd)
+        issues = self.preflight_check()
+        if issues:
+            self._emit("preflight_failed", issues=issues)
             return RunSummary(
                 iterations=0,
                 branch="",
                 cwd=self.cwd,
                 main_repo_dir=self.main_repo_dir,
-                stopped_reason="claude_cli_missing",
+                stopped_reason="preflight_failed",
+                issues=issues,
             )
 
-        self.setup_worktree()
+        if not self.setup_worktree():
+            return RunSummary(
+                iterations=0,
+                branch=self._current_branch(),
+                cwd=self.cwd,
+                main_repo_dir=self.main_repo_dir,
+                stopped_reason="dirty_workspace_declined",
+            )
+
         self._write_prompt_files()
 
         branch = self._current_branch()
@@ -346,7 +345,7 @@ class OwloopEngine:
         self._emit(
             "session_info",
             mode=self.config.mode,
-            model=self.config.model,
+            model=self.adapter.name,
             branch=branch,
             cwd=str(self.cwd),
             main_repo_dir=str(self.main_repo_dir),
