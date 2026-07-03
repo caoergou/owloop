@@ -339,8 +339,12 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     )
     generator = SpecGenerator(project_dir, adapter)
 
+    def _on_spec_line(line: str) -> None:
+        if line.strip():
+            console.print(f"  [dim]{line}[/]")
+
     try:
-        spec_path = generator.generate(goal, max_rounds=max_rounds)
+        spec_path = generator.generate(goal, max_rounds=max_rounds, on_line=_on_spec_line)
     except SpecGenerationError as exc:
         console.print(f"\n[red]Error:[/] {exc}")
         raise SystemExit(1) from None

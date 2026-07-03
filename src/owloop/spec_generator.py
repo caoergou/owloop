@@ -201,6 +201,7 @@ class SpecGenerator:
         *,
         max_rounds: int = 3,
         ask_fn: Callable[[list[str]], list[str]] | None = None,
+        on_line: Callable[[str], None] | None = None,
     ) -> Path:
         """Run the clarification loop and write a spec file.
 
@@ -208,6 +209,7 @@ class SpecGenerator:
             goal: The user's vague natural-language goal.
             max_rounds: Maximum clarification rounds before giving up.
             ask_fn: Optional override for asking questions (used in tests).
+            on_line: Called for each line of agent output (live streaming).
 
         Returns:
             Path to the written spec file.
@@ -219,7 +221,7 @@ class SpecGenerator:
 
         for _round in range(max_rounds):
             prompt = self._build_prompt(goal)
-            result = self.adapter.run(prompt, cwd=self.project_dir)
+            result = self.adapter.run(prompt, cwd=self.project_dir, on_line=on_line)
             clean_output = result.stdout
 
             parsed = parse_promise_signal(clean_output)
