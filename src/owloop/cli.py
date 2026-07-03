@@ -14,6 +14,7 @@ from rich.text import Text
 
 from owloop import _brand
 from owloop.adapters import get_adapter
+from owloop.analyzer import Analyzer
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.report import ReportGenerator
 from owloop.reporter import ConsoleReporter
@@ -498,6 +499,30 @@ def report(output: Path | None) -> None:
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[{_brand.GREEN}]✓ Report generated:[/] {report_path}")
+    console.print()
+
+
+@main.command()
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output markdown report path.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON instead of Markdown.")
+def analyze(output: Path | None, as_json: bool) -> None:
+    """Scan the codebase and generate a problem report."""
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
+
+    report_path = output or Path("logs/owloop_analysis_latest.md")
+    analyzer = Analyzer(Path.cwd())
+    analyzer.analyze()
+    analyzer.write_report(report_path, as_json=as_json)
+
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[{_brand.GREEN}]✓ Analysis report written:[/] {report_path}")
     console.print()
 
 
