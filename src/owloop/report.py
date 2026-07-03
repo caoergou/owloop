@@ -1,7 +1,8 @@
-"""Generate an HTML summary report for the latest owloop run."""
+"""Generate a branded HTML summary report for the latest owloop run."""
 
 from __future__ import annotations
 
+import html
 import json
 import subprocess
 from dataclasses import dataclass
@@ -9,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from owloop._brand import AMBER, DIM_BLUE, MOON_WHITE, NIGHT, OWL_MEDIUM
+from owloop._brand import OWL_MEDIUM
+from owloop.report_design_system import base_styles, tailwind_cdn
 
 
 @dataclass
@@ -21,6 +23,24 @@ class CommitInfo:
     files_changed: int = 0
     insertions: int = 0
     deletions: int = 0
+
+
+@dataclass
+class ReportInsights:
+    """Optional AI-generated content slots.
+
+    These are intentionally separate from the raw data so that:
+    - The report generator can render without any LLM call (fast, free, offline).
+    - An external caller (e.g. the engine or a future `--report-ai` flag) can
+      fill the slots with natural-language analysis when desired.
+    """
+
+    summary: str = ""
+    risks: list[str] | None = None
+    review_focus: list[str] | None = None
+
+    def has_content(self) -> bool:
+        return bool(self.summary or self.risks or self.review_focus)
 
 
 class ReportGenerator:
@@ -92,7 +112,12 @@ class ReportGenerator:
         total_del = sum(c.deletions for c in commits)
         return total_files, total_ins, total_del
 
-    def generate(self, output_path: Path | None = None) -> Path:
+    def generate(
+        self,
+        output_path: Path | None = None,
+        insights: ReportInsights | None = None,
+        use_tailwind: bool = False,
+    ) -> Path:
         summary = self._load_summary()
         branch = summary.get("branch", "unknown")
         iterations = summary.get("iterations", 0)
@@ -113,6 +138,8 @@ class ReportGenerator:
             total_files=total_files,
             total_ins=total_ins,
             total_del=total_del,
+            insights=insights or ReportInsights(),
+            use_tailwind=use_tailwind,
         )
         report_file.write_text(html, encoding="utf-8")
         return report_file
@@ -127,34 +154,25 @@ class ReportGenerator:
         total_files: int,
         total_ins: int,
         total_del: int,
+        insights: ReportInsights,
+        use_tailwind: bool,
     ) -> str:
         owl = "<br>".join(OWL_MEDIUM).replace(" ", "&nbsp;")
         rows = "\n".join(self._commit_row(c) for c in commits)
-        token_line = f"<p><strong>Tokens used:</strong> {tokens_used:,}</p>" if tokens_used else ""
+        status_badge = self._status_badge(stopped_reason)
+        token_card = self._token_card(tokens_used)
+        insights_section = self._insights_section(insights)
+        tailwind = tailwind_cdn() if use_tailwind else ""
 
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>owloop report — {branch}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>owloop report — {html.escape(branch)}</title>
+{tailwind}
 <style>
-  :root {{ --night: {NIGHT}; --amber: {AMBER}; --moon: {MOON_WHITE}; --dim: {DIM_BLUE}; }}
-  body {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-         background: var(--night); color: var(--moon); margin: 0; padding: 2rem; }}
-  .container {{ max-width: 900px; margin: 0 auto; }}
-  header {{ text-align: center; border-bottom: 2px solid var(--amber); padding-bottom: 1rem; margin-bottom: 2rem; }}
-  .owl {{ color: var(--amber); font-size: 0.9rem; line-height: 1.1; white-space: pre; }}
-  h1 {{ color: var(--amber); margin: 0.5rem 0; }}
-  .meta {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 2rem 0; }}
-  .card {{ background: rgba(255,255,255,0.03); border: 1px solid var(--dim); border-radius: 8px; padding: 1rem; }}
-  .card h3 {{ color: var(--amber); margin-top: 0; }}
-  table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
-  th, td {{ text-align: left; padding: 0.6rem; border-bottom: 1px solid var(--dim); }}
-  th {{ color: var(--amber); }}
-  .stats {{ color: #8fd19e; }}
-  .del {{ color: #e0777d; }}
-  footer {{ margin-top: 3rem; text-align: center; color: var(--dim); font-size: 0.85rem; }}
-  code {{ background: rgba(255,255,255,0.08); padding: 0.2rem 0.4rem; border-radius: 4px; }}
+{base_styles()}
 </style>
 </head>
 <body>
@@ -166,12 +184,14 @@ class ReportGenerator:
   </header>
 
   <section class="meta">
-    <div class="card"><h3>Branch</h3><p><code>{branch}</code></p></div>
+    <div class="card"><h3>Branch</h3><p><code>{html.escape(branch)}</code></p></div>
     <div class="card"><h3>Iterations</h3><p>{iterations}</p></div>
-    <div class="card"><h3>Status</h3><p>{stopped_reason}</p></div>
+    <div class="card"><h3>Status</h3><p>{status_badge}</p></div>
     <div class="card"><h3>Total diff</h3><p>{total_files} files · <span class="stats">+{total_ins}</span> · <span class="del">-{total_del}</span></p></div>
+    {token_card}
   </section>
-  {token_line}
+
+  {insights_section}
 
   <h2>Commits</h2>
   <table>
@@ -179,7 +199,7 @@ class ReportGenerator:
       <tr><th>Commit</th><th>Message</th><th>Author</th><th>Date</th><th>Changes</th></tr>
     </thead>
     <tbody>
-      {rows}
+      {rows if rows else '<tr><td colspan="5" class="empty">No commits recorded for this run.</td></tr>'}
     </tbody>
   </table>
 
@@ -191,15 +211,59 @@ class ReportGenerator:
 </body>
 </html>"""
 
+    @staticmethod
+    def _status_badge(stopped_reason: str) -> str:
+        reason = stopped_reason.lower()
+        if reason in {"completed", "done", "success"}:
+            css = "badge badge-success"
+            label = "Completed"
+        elif reason in {"blocked", "failure", "error"}:
+            css = "badge badge-danger"
+            label = "Blocked"
+        else:
+            css = "badge badge-info"
+            label = stopped_reason
+        return f'<span class="{css}">{html.escape(label)}</span>'
+
+    @staticmethod
+    def _token_card(tokens_used: int) -> str:
+        if not tokens_used:
+            return ""
+        return f'<div class="card"><h3>Tokens used</h3><p>{tokens_used:,}</p></div>'
+
+    def _insights_section(self, insights: ReportInsights) -> str:
+        if not insights.has_content():
+            return ""
+
+        parts = ['<section class="insights"><h2>Insights</h2>']
+        if insights.summary:
+            parts.append(
+                f'<div class="insight"><h4>Summary</h4><p>{html.escape(insights.summary)}</p></div>'
+            )
+        if insights.risks:
+            parts.append(self._insight_list("Risks to review", insights.risks, "del"))
+        if insights.review_focus:
+            parts.append(self._insight_list("Review focus", insights.review_focus, "stats"))
+        parts.append("</section>")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _insight_list(title: str, items: list[str], marker_class: str) -> str:
+        lines = [f'<div class="insight"><h4>{html.escape(title)}</h4><ul>']
+        for item in items:
+            lines.append(f'<li><span class="{marker_class}">•</span> {html.escape(item)}</li>')
+        lines.append("</ul></div>")
+        return "\n".join(lines)
+
     def _commit_row(self, commit: CommitInfo) -> str:
         return (
             f"<tr>"
-            f"<td><code>{commit.hash}</code></td>"
-            f"<td>{commit.message}</td>"
-            f"<td>{commit.author}</td>"
-            f"<td>{commit.date}</td>"
+            f"<td><code>{html.escape(commit.hash)}</code></td>"
+            f"<td>{html.escape(commit.message)}</td>"
+            f"<td>{html.escape(commit.author)}</td>"
+            f"<td>{html.escape(commit.date)}</td>"
             f"<td>{commit.files_changed} files · "
-            f"<span class=\"stats\">+{commit.insertions}</span> · "
-            f"<span class=\"del\">-{commit.deletions}</span></td>"
+            f'<span class="stats">+{commit.insertions}</span> · '
+            f'<span class="del">-{commit.deletions}</span></td>'
             f"</tr>"
         )
