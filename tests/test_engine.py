@@ -1,0 +1,207 @@
+"""Tests for the owloop engine loop and cross-iteration context features."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from owloop.adapters import AgentResult, MockAdapter
+from owloop.engine import EngineConfig, OwloopEngine
+
+
+def _git_init(repo: Path) -> None:
+    """Initialize a git repo with an initial commit so HEAD exists."""
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True)
+    (repo / "README.md").write_text("# test", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
+
+
+def _make_engine(repo: Path, adapter: MockAdapter, **kwargs) -> OwloopEngine:
+    kwargs.setdefault("mode", "plan")
+    config = EngineConfig(project_dir=repo, worktree=False, **kwargs)
+    return OwloopEngine(config=config, adapter=adapter)
+
+
+def test_build_prompt_with_context_prepends_steering_and_run_notes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / "STEERING.md").write_text("Focus on tests.", encoding="utf-8")
+    (repo / "run-notes.md").write_text("Watch out for X.", encoding="utf-8")
+
+    built = engine._build_prompt_with_context("PROMPT BODY")
+
+    assert "STEERING.md" in built
+    assert "Focus on tests." in built
+    assert "previous iterations of this run" in built
+    assert "Watch out for X." in built
+    assert built.endswith("PROMPT BODY")
+
+
+def test_build_prompt_with_context_no_files_returns_prompt_unchanged(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    assert engine._build_prompt_with_context("PROMPT BODY") == "PROMPT BODY"
+
+
+def test_build_prompt_with_context_emits_events(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    (repo / "STEERING.md").write_text("Steer", encoding="utf-8")
+    (repo / "run-notes.md").write_text("Note", encoding="utf-8")
+
+    engine._build_prompt_with_context("PROMPT")
+
+    kinds = [k for k, _ in events]
+    assert "steering_loaded" in kinds
+    assert "run_notes_loaded" in kinds
+
+
+def test_append_run_note_creates_file_and_formats_entry(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    engine._append_run_note(2, True, "fixed bug", "add tests")
+
+    path = repo / "run-notes.md"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "## Iteration 2" in text
+    assert "- Status: success" in text
+    assert "- Summary: fixed bug" in text
+    assert "- Learning: add tests" in text
+    assert any(k == "run_note_appended" for k, _ in events)
+
+
+def test_append_run_note_separates_entries_with_blank_line(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    engine._append_run_note(1, True, "first")
+    engine._append_run_note(2, False, "second")
+
+    text = (repo / "run-notes.md").read_text(encoding="utf-8")
+    # Two entries separated by a blank line.
+    assert text.count("## Iteration ") == 2
+
+
+def test_run_iteration_injects_context_and_logs_note(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, mode="build")
+    engine.log_dir.mkdir(parents=True, exist_ok=True)
+    engine.session_log = engine.log_dir / "session.log"
+    engine._write_prompt_files()
+
+    (repo / "STEERING.md").write_text("Steer here.", encoding="utf-8")
+    (repo / "run-notes.md").write_text("Note here.", encoding="utf-8")
+
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    result = engine.run_iteration(1)
+
+    assert result.success
+    prompt, _cwd = adapter.calls[0]
+    assert "Steer here." in prompt
+    assert "Note here." in prompt
+    assert "steering_loaded" in [k for k, _ in events]
+    assert "run_notes_loaded" in [k for k, _ in events]
+
+
+def test_run_appends_run_notes_after_iteration(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="plan done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, mode="plan", max_iterations=1)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    summary = engine.run()
+
+    assert summary.iterations == 1
+    run_notes = repo / "run-notes.md"
+    assert run_notes.is_file()
+    text = run_notes.read_text(encoding="utf-8")
+    assert "## Iteration 1" in text
+    assert "- Status: success" in text
+    assert "run_note_appended" in [k for k, _ in events]
+
+
+def test_run_uses_commit_message_as_summary_when_available(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    # Pre-seed a second commit so _check_fix_loop is safe even in build mode.
+    (repo / "dummy.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "agent commit message"], cwd=repo, check=True, capture_output=True)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, mode="plan", max_iterations=1)
+
+    engine.run()
+
+    text = (repo / "run-notes.md").read_text(encoding="utf-8")
+    assert "agent commit message" in text

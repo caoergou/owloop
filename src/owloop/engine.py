@@ -102,6 +102,7 @@ class IterationResult:
     timed_out: bool
     log_file: Path
     tokens_used: int = 0
+    summary: str = ""
 
 
 @dataclass
@@ -317,6 +318,68 @@ class OwloopEngine:
         if len(self._recent_file_sets) > threshold * 2:
             self._recent_file_sets = self._recent_file_sets[-threshold * 2:]
 
+    def _read_run_notes(self) -> str | None:
+        path = self.cwd / "run-notes.md"
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+        return None
+
+    def _read_steering(self) -> str | None:
+        path = self.cwd / "STEERING.md"
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+        return None
+
+    def _build_prompt_with_context(self, prompt_text: str) -> str:
+        """Prepend run-notes and STEERING.md context to the iteration prompt."""
+        sections: list[str] = []
+
+        steering = self._read_steering()
+        if steering is not None:
+            self._emit("steering_loaded", path=str(self.cwd / "STEERING.md"))
+            sections.append(
+                "The user has provided mid-flight guidance in STEERING.md. "
+                "Follow these instructions for this iteration.\n\n"
+                f"{steering}"
+            )
+
+        notes = self._read_run_notes()
+        if notes is not None:
+            self._emit("run_notes_loaded", path=str(self.cwd / "run-notes.md"))
+            sections.append(
+                "The following notes were recorded during previous iterations of this run. "
+                "Read them to avoid repeating mistakes.\n\n"
+                f"{notes}"
+            )
+
+        if not sections:
+            return prompt_text
+
+        context = "\n\n---\n\n".join(sections)
+        return f"{context}\n\n---\n\n{prompt_text}"
+
+    def _append_run_note(
+        self, iteration: int, success: bool, summary: str, learning: str = ""
+    ) -> None:
+        """Append a concise cross-iteration note to run-notes.md."""
+        run_notes_path = self.cwd / "run-notes.md"
+        status = "success" if success else "failure"
+        entry = (
+            f"## Iteration {iteration} — {_timestamp()}\n"
+            f"- Status: {status}\n"
+            f"- Summary: {summary}\n"
+            f"- Learning: {learning}\n"
+        )
+        prefix = "\n" if run_notes_path.is_file() and run_notes_path.stat().st_size > 0 else ""
+        with run_notes_path.open("a", encoding="utf-8") as f:
+            f.write(prefix + entry)
+        self._emit(
+            "run_note_appended",
+            path=str(run_notes_path),
+            iteration=iteration,
+            success=success,
+        )
+
     def _push(self, branch: str) -> None:
         pushed = self._run_git("push", "origin", branch)
         if pushed.returncode != 0:
@@ -335,7 +398,9 @@ class OwloopEngine:
 
         self._emit("iteration_start", iteration=iteration, timestamp=_timestamp())
 
-        prompt_text = prompt_file.read_text(encoding="utf-8")
+        prompt_text = self._build_prompt_with_context(
+            prompt_file.read_text(encoding="utf-8")
+        )
 
         with log_file.open("w", encoding="utf-8") as log_f:
 
@@ -370,6 +435,7 @@ class OwloopEngine:
             timed_out=result.timed_out,
             log_file=log_file,
             tokens_used=result.tokens_used,
+            summary=tail,
         )
 
     def run(self) -> RunSummary:
@@ -455,6 +521,14 @@ class OwloopEngine:
 
                 iteration += 1
                 result = self.run_iteration(iteration)
+
+                # Cross-iteration notes: summarize what just happened.
+                note_summary = result.summary
+                if result.success:
+                    commit_result = self._run_git("log", "-1", "--pretty=%s")
+                    if commit_result.returncode == 0 and commit_result.stdout.strip():
+                        note_summary = commit_result.stdout.strip()
+                self._append_run_note(iteration, result.success, note_summary)
 
                 if result.success:
                     consecutive_failures = 0
