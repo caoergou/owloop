@@ -1176,8 +1176,7 @@ button:focus-visible {
 
 .terminal-body {
   padding: 1.5rem;
-  min-height: 500px;
-  max-height: 700px;
+  height: 520px;
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: clamp(0.88rem, 1.5vw, 1rem);
@@ -1293,17 +1292,23 @@ button:focus-visible {
 .tui-mode {
   display: flex;
   align-items: stretch;
-  min-height: 460px;
+  height: 100%;
 }
 
 .tui-rich {
   width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 0;
   font-family: var(--font-mono);
   font-size: clamp(0.82rem, 1.2vw, 0.92rem);
   line-height: 1.5;
+}
+
+.tui-body {
+  flex: 1;
+  min-height: 0;
 }
 
 .tui-panel {
@@ -1479,35 +1484,43 @@ button:focus-visible {
 /* ── Report browser preview ── */
 .report-browser {
   display: none;
-  position: absolute;
-  bottom: 3rem;
-  left: 5%;
-  right: 5%;
-  z-index: 20;
+  position: fixed;
+  top: 10vh;
+  left: 50%;
+  transform: translateX(-50%) translateY(30px) scale(0.96);
+  width: min(92vw, 900px);
+  max-height: 78vh;
+  z-index: 200;
   border-radius: 0.75rem;
   overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 80px rgba(212, 160, 37, 0.08);
   opacity: 0;
-  transform: translateY(30px) scale(0.96);
   transition: opacity 0.4s ease, transform 0.4s ease;
-  max-height: 70vh;
-  overflow-y: auto;
 }
-.report-browser.open { opacity: 1; transform: translateY(0) scale(1); }
+.report-browser.open { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+.report-browser.dragged { transform: none; }
 
 .browser-chrome {
   display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.6rem 0.8rem;
-  background: #1c1c1e;
+  padding: 0.55rem 0.8rem;
+  background: #2a2a2e;
   border-bottom: 1px solid rgba(255,255,255,0.08);
+  cursor: grab;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  user-select: none;
 }
+.browser-chrome:active { cursor: grabbing; }
 .browser-dots { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .browser-urlbar {
   flex: 1; padding: 0.3rem 0.7rem;
-  background: rgba(255,255,255,0.06); border-radius: 0.4rem;
+  background: rgba(255,255,255,0.08); border-radius: 0.4rem;
   font-family: var(--font-mono); font-size: 0.72rem; color: var(--moon-dim);
   text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: text; pointer-events: none;
 }
+.browser-lock { font-size: 0.65rem; margin-right: 0.3rem; }
 .browser-close {
   color: var(--moon-dim); cursor: pointer; font-size: 0.85rem;
   padding: 0.2rem 0.4rem; border-radius: 0.25rem; transition: all 0.15s;
@@ -1517,6 +1530,10 @@ button:focus-visible {
 .browser-body {
   background: var(--night); padding: 1.5rem;
   font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5; color: var(--moon);
+  overflow-y: auto;
+  max-height: calc(78vh - 2.5rem);
+  scrollbar-width: thin;
+  scrollbar-color: var(--dim) transparent;
 }
 .rpt-header { text-align: center; border-bottom: 2px solid var(--amber); padding-bottom: 1rem; margin-bottom: 1.25rem; }
 .rpt-owl { font-size: 1.8rem; margin-bottom: 0.3rem; }
@@ -1538,7 +1555,35 @@ button:focus-visible {
 .rpt-table code { color: var(--cyan); background: rgba(255,255,255,0.06); padding: 0.1rem 0.25rem; border-radius: 0.2rem; }
 .rpt-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
 .rpt-badge-green { background: rgba(143,209,158,0.15); color: var(--success); }
+.rpt-badge-amber { background: rgba(212,160,37,0.15); color: var(--amber-bright); }
+.rpt-badge-cyan { background: rgba(143,184,222,0.15); color: var(--cyan); }
+.rpt-badge-red { background: rgba(224,119,125,0.15); color: var(--danger); }
+
+.rpt-insight {
+  background: #121a2e; border-left: 3px solid var(--amber); border-radius: 0 0.5rem 0.5rem 0;
+  padding: 0.8rem 1rem; margin-bottom: 0.8rem;
+}
+.rpt-insight-title { color: var(--amber-bright); font-weight: 600; margin-bottom: 0.3rem; font-size: 0.85rem; }
+.rpt-insight p { margin: 0; color: var(--moon-dim); font-size: 0.78rem; line-height: 1.6; }
+
+.rpt-subsection-title { font-size: 0.82rem; font-weight: 600; color: var(--amber-bright); margin: 0.8rem 0 0.4rem; }
+
+.rpt-actions { display: flex; flex-direction: column; gap: 0.4rem; }
+.rpt-action { font-size: 0.78rem; color: var(--moon-dim); display: flex; align-items: center; gap: 0.5rem; }
+.rpt-action .rpt-badge { flex-shrink: 0; }
+
+.rpt-diff {
+  background: #121a2e; border: 1px solid var(--dim-2); border-left: 3px solid var(--amber);
+  border-radius: 0.5rem; padding: 0.7rem 1rem; margin: 0;
+  font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.5;
+  color: var(--moon-dim); white-space: pre; overflow-x: auto;
+}
+
 .rpt-footer { text-align: center; color: var(--moon-dim); font-size: 0.7rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid rgba(58,66,112,0.3); }
+.rpt-footer p { margin: 0.2rem 0; }
+.rpt-footer ul { list-style: none; padding: 0; margin: 0.3rem 0 0; }
+.rpt-footer li { display: inline; margin: 0 0.5rem; }
+.rpt-footer code { color: var(--cyan); background: rgba(255,255,255,0.06); padding: 0.1rem 0.25rem; border-radius: 0.2rem; }
 
 /* ── Accessibility ── */
 a:focus-visible,

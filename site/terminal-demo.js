@@ -201,13 +201,13 @@
       container = document.createElement("div");
       container.id = "report-browser";
       container.className = "report-browser";
-      var wrap = document.querySelector(".hero-terminal-wrap");
-      if (wrap) wrap.appendChild(container);
+      var demoSection = document.getElementById("demo");
+      if (demoSection) demoSection.appendChild(container);
     }
     container.innerHTML =
-      '<div class="browser-chrome">' +
+      '<div class="browser-chrome" id="browser-drag-handle">' +
         '<div class="browser-dots"><span class="terminal-dot red"></span><span class="terminal-dot amber"></span><span class="terminal-dot green"></span></div>' +
-        '<div class="browser-urlbar">file:///.owloop/logs/owloop_report.html</div>' +
+        '<div class="browser-urlbar"><span class="browser-lock">🔒</span> file:///.owloop/logs/owloop_report.html</div>' +
         '<div class="browser-close" id="browser-close-btn">✕</div>' +
       '</div>' +
       '<div class="browser-body">' +
@@ -216,6 +216,7 @@
           '<div class="rpt-title">owloop report</div>' +
           '<div class="rpt-tagline">Your code evolves while you sleep.</div>' +
         '</div>' +
+
         '<div class="rpt-cards">' +
           '<div class="rpt-card"><div class="rpt-card-val">owloop/refactor-errors</div><div class="rpt-card-label">Branch</div></div>' +
           '<div class="rpt-card"><div class="rpt-card-val">3</div><div class="rpt-card-label">Iterations</div></div>' +
@@ -223,40 +224,106 @@
           '<div class="rpt-card"><div class="rpt-card-val">8 files · <span class="rpt-green">+328</span> · <span class="rpt-red">-108</span></div><div class="rpt-card-label">Total diff</div></div>' +
           '<div class="rpt-card"><div class="rpt-card-val">12,380</div><div class="rpt-card-label">Tokens used</div></div>' +
         '</div>' +
+
+        '<div class="rpt-section">' +
+          '<div class="rpt-section-title">AI Review Insights</div>' +
+          '<div class="rpt-insight">' +
+            '<div class="rpt-insight-title">Summary</div>' +
+            '<p>Three focused refactoring specs completed successfully. The error handling consolidation reduced 69 scattered catch blocks to a single centralized handler. Type annotations were added to all API handlers. Error codes were unified under an ErrorCode enum.</p>' +
+          '</div>' +
+          '<div class="rpt-subsection-title">Key Changes</div>' +
+          '<table class="rpt-table">' +
+            '<thead><tr><th>File</th><th>Type</th><th>Risk</th><th>Description</th></tr></thead>' +
+            '<tbody>' +
+              '<tr><td><code>errors.py</code></td><td><span class="rpt-badge rpt-badge-amber">refactor</span></td><td><span class="rpt-badge rpt-badge-green">low</span></td><td>New centralized @app.errorhandler for ValidationError</td></tr>' +
+              '<tr><td><code>types.py</code></td><td><span class="rpt-badge rpt-badge-cyan">feature</span></td><td><span class="rpt-badge rpt-badge-green">low</span></td><td>ErrorCode enum with 12 typed error constants</td></tr>' +
+              '<tr><td><code>api/*.py</code></td><td><span class="rpt-badge rpt-badge-amber">refactor</span></td><td><span class="rpt-badge rpt-badge-amber">medium</span></td><td>Removed 66 try/except blocks, delegated to handler</td></tr>' +
+            '</tbody>' +
+          '</table>' +
+          '<div class="rpt-subsection-title">Next Actions</div>' +
+          '<div class="rpt-actions">' +
+            '<div class="rpt-action"><span class="rpt-badge rpt-badge-red">now</span> Run full integration test suite before merging</div>' +
+            '<div class="rpt-action"><span class="rpt-badge rpt-badge-amber">before merge</span> Review centralized error handler edge cases</div>' +
+            '<div class="rpt-action"><span class="rpt-badge rpt-badge-green">nice to have</span> Add structured logging to error handler</div>' +
+          '</div>' +
+        '</div>' +
+
         '<div class="rpt-section">' +
           '<div class="rpt-section-title">Spec Status</div>' +
           '<table class="rpt-table">' +
-            '<thead><tr><th>Spec</th><th>Status</th></tr></thead>' +
+            '<thead><tr><th>Spec</th><th>Priority</th><th>Status</th></tr></thead>' +
             '<tbody>' +
-              '<tr><td>001-refactor-error-handling.md</td><td><span class="rpt-badge rpt-badge-green">done</span></td></tr>' +
-              '<tr><td>002-add-type-annotations.md</td><td><span class="rpt-badge rpt-badge-green">done</span></td></tr>' +
-              '<tr><td>003-unify-error-codes.md</td><td><span class="rpt-badge rpt-badge-green">done</span></td></tr>' +
+              '<tr><td>001-refactor-error-handling.md</td><td>1</td><td><span class="rpt-badge rpt-badge-green">done</span></td></tr>' +
+              '<tr><td>002-add-type-annotations.md</td><td>2</td><td><span class="rpt-badge rpt-badge-green">done</span></td></tr>' +
+              '<tr><td>003-unify-error-codes.md</td><td>3</td><td><span class="rpt-badge rpt-badge-green">done</span></td></tr>' +
             '</tbody>' +
           '</table>' +
         '</div>' +
+
+        '<div class="rpt-section">' +
+          '<div class="rpt-section-title">Diff Summary</div>' +
+          '<pre class="rpt-diff"> backend/app/__init__.py    |  18 ++++++\n backend/app/api/orders.py  |  42 ++++-------\n backend/app/api/users.py   |  38 ++++------\n backend/app/api/items.py   |  56 +++++---------\n backend/app/errors.py      |  64 +++++++++++++++++\n backend/app/types.py       | 156 ++++++++++++++++++++++++++\n tests/test_errors.py       |  34 +++++++++\n tests/test_error_codes.py  |  28 ++++++++\n 8 files changed, 328 insertions(+), 108 deletions(-)</pre>' +
+        '</div>' +
+
         '<div class="rpt-section">' +
           '<div class="rpt-section-title">Commits</div>' +
           '<table class="rpt-table">' +
-            '<thead><tr><th>Commit</th><th>Message</th><th>Changes</th></tr></thead>' +
+            '<thead><tr><th>Commit</th><th>Message</th><th>Author</th><th>Changes</th></tr></thead>' +
             '<tbody>' +
-              '<tr><td><code>a1b2c3d</code></td><td>refactor: extract ValidationError → @app.errorhandler</td><td>4 files · <span class="rpt-green">+124</span> · <span class="rpt-red">-89</span></td></tr>' +
-              '<tr><td><code>e4f5g6h</code></td><td>feat: add type annotations to api/ handlers</td><td>3 files · <span class="rpt-green">+156</span> · <span class="rpt-red">-0</span></td></tr>' +
-              '<tr><td><code>i7j8k9l</code></td><td>refactor: unify error codes with ErrorCode enum</td><td>4 files · <span class="rpt-green">+48</span> · <span class="rpt-red">-19</span></td></tr>' +
+              '<tr><td><code>a1b2c3d</code></td><td>refactor: extract ValidationError → @app.errorhandler</td><td>Claude (owloop)</td><td>4 files · <span class="rpt-green">+124</span> · <span class="rpt-red">-89</span></td></tr>' +
+              '<tr><td><code>e4f5g6h</code></td><td>feat: add type annotations to api/ handlers</td><td>Claude (owloop)</td><td>3 files · <span class="rpt-green">+156</span> · <span class="rpt-red">-0</span></td></tr>' +
+              '<tr><td><code>i7j8k9l</code></td><td>refactor: unify error codes with ErrorCode enum</td><td>Claude (owloop)</td><td>4 files · <span class="rpt-green">+48</span> · <span class="rpt-red">-19</span></td></tr>' +
             '</tbody>' +
           '</table>' +
         '</div>' +
-        '<div class="rpt-footer">Generated by owloop · Review: git diff --stat HEAD~3..HEAD</div>' +
+
+        '<div class="rpt-footer">' +
+          '<p>Generated by owloop on 2025-07-04 09:12:34</p>' +
+          '<p>Branch diff: <code>8 files · +328 · -108</code></p>' +
+          '<p>Review:</p>' +
+          '<ul><li><code>git log --oneline HEAD~3..HEAD</code></li><li><code>git diff --stat HEAD~3..HEAD</code></li></ul>' +
+        '</div>' +
       '</div>';
+
     container.style.display = "block";
     requestAnimationFrame(function () { container.classList.add("open"); });
 
-    var closeBtn = document.getElementById("browser-close-btn");
-    if (closeBtn) {
-      closeBtn.addEventListener("click", function () {
-        container.classList.remove("open");
-        setTimeout(function () { container.style.display = "none"; }, 400);
-      });
-    }
+    // Close button
+    document.getElementById("browser-close-btn").addEventListener("click", function () {
+      container.classList.remove("open");
+      setTimeout(function () { container.style.display = "none"; }, 400);
+    });
+
+    // Drag support
+    var handle = document.getElementById("browser-drag-handle");
+    var dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+
+    handle.addEventListener("mousedown", function (e) {
+      if (e.target.closest(".browser-close")) return;
+      dragging = true;
+      startX = e.clientX; startY = e.clientY;
+      var rect = container.getBoundingClientRect();
+      origX = rect.left;
+      origY = rect.top;
+      container.classList.add("dragged");
+      container.style.left = origX + "px";
+      container.style.top = origY + "px";
+      container.style.transition = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      container.style.left = (origX + e.clientX - startX) + "px";
+      container.style.top = (origY + e.clientY - startY) + "px";
+    });
+
+    document.addEventListener("mouseup", function () {
+      if (dragging) {
+        dragging = false;
+        container.style.transition = "";
+      }
+    });
   }
 
 
