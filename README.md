@@ -7,11 +7,13 @@
 A spec-driven autonomous coding loop for Claude Code.<br>
 Each iteration: fresh context, one spec, verified completion, clean commit.
 
-[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Writing Specs](#writing-specs) · [Credits](#credits)
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Writing Specs](#writing-specs) · [FAQ](#faq) · [Credits](#credits)
 
 </div>
 
 ---
+
+You have a codebase full of lint warnings, missing type annotations, and copy-pasted error handling — the kind of cleanup that always loses to shipping features. owloop is a spec-driven, autonomous loop engineering tool for Claude Code: turn that backlog into constraint-oriented specs, run `owloop run`, and go to sleep. Each iteration spawns a fresh `claude -p` process against exactly one spec, verifies its acceptance criteria with real shell commands, and commits only when they pass. Wake up to a clean commit history, not a burned overnight run you have to babysit.
 
 ## Quick Start
 
@@ -40,21 +42,17 @@ owloop run
 ## How It Works
 
 ```mermaid
-flowchart TD
-    A["🦉 owloop run"] --> B["Pick highest-priority\nincomplete spec"]
-    B --> C["Spawn fresh claude -p\n(new context window)"]
-    C --> D["Implement + verify\nacceptance criteria"]
-    D --> E{"&lt;promise&gt;DONE\n&lt;/promise&gt; ?"}
-    E -- "found" --> F["✅ Commit + push"]
-    E -- "missing" --> G["🔄 Retry (max 3)"]
-    G --> B
-    F --> H{"More specs?"}
-    H -- "yes" --> B
-    H -- "no" --> I["🌅 All specs complete"]
+graph LR
+    A["🦉 Pick spec"] --> B["claude -p<br/>fresh context"]
+    B --> C{"DONE?"}
+    C -- yes --> D["✅ Commit"] --> E{"More specs?"}
+    C -- no --> R["🔄 Retry ≤3"] --> A
+    E -- yes --> A
+    E -- no --> F["🌅 Complete"]
 
     style A fill:#d4a025,color:#0b1026,stroke:#d4a025
-    style I fill:#22c55e20,stroke:#22c55e
-    style G fill:#ef444420,stroke:#ef4444
+    style F fill:#22c55e20,stroke:#22c55e
+    style R fill:#ef444420,stroke:#ef4444
 ```
 
 **Key properties:**
@@ -112,6 +110,29 @@ owloop is forked from [fstandhartinger/ralph-wiggum](https://github.com/fstandha
 | Run report | Terminal + logs | Lavish HTML report *(coming soon)* |
 
 Everything else — fresh context per loop, stuck detection, circuit breaker, Telegram notifications, Codex/Gemini/Copilot variants — carries over unchanged.
+
+### Compared to other loop tools
+
+| Tool | Approach | Best for |
+|---|---|---|
+| **owloop** | Spec-driven loop engineering with worktree isolation, built for Claude Code | A backlog of well-defined, independently verifiable tasks |
+| **[gnhf](https://github.com/kunchenguid/gnhf)** | Agent-agnostic "ralph"-style orchestrator (Claude Code, Codex, Rovo Dev, OpenCode, Copilot CLI, Pi), shared `notes.md` memory across iterations | Multi-agent overnight runs where you want to mix CLIs |
+| **`/goal`** | Built into Claude Code — a single session runs turn-by-turn until a small model judges your completion condition met | One focused task, same sitting, no extra tool to install |
+| **[roborev](https://roborev.io/)** | Continuous background review of every commit — not a loop driver | Catching issues in agent-written commits after the fact; pairs with any of the above |
+
+## FAQ
+
+**When should I use owloop instead of `/goal`?**
+`/goal` is a Claude Code built-in: one session keeps working turn-by-turn until a small model decides your completion condition is met. It's a great fit for one task in one sitting. owloop is for backlogs — a queue of specs, each run in a fresh context, unattended for hours or overnight. If you're clearing twenty lint categories or migrating a whole module, loop engineering with independent shell-verified acceptance criteria scales further than one long session judged by a model.
+
+**How is owloop different from gnhf?**
+Both keep an agent committing while you sleep. gnhf is agent-agnostic and syncs state across iterations via a shared `notes.md`. owloop is Claude-Code-specific and specs-first: every unit of work is a constraint-oriented spec file with explicit Exclusions and shell-verifiable Acceptance Criteria, so "done" is decided by a command you wrote, not the agent's own narrative. owloop also defaults to worktree isolation, so your checkout is never touched mid-run.
+
+**Can I use owloop with Codex or OpenCode?**
+Not directly — owloop is built around `claude -p`. This repo also carries the upstream Ralph Wiggum script variants (`ralph-loop*.sh`) for Codex/Gemini/Copilot compatibility; if you need first-class multi-agent support, gnhf is the better fit.
+
+**Is this safe to run on production code?**
+owloop never touches your working checkout directly — it runs in a separate `git worktree`, and uses `--permission-mode auto` rather than `--dangerously-skip-permissions`, so tool calls still respect Claude Code's permission boundaries. That said, "safe" means "your main branch stays clean and reviewable," not "unsupervised on production infrastructure." Treat every overnight run as a PR to review in the morning, not a deploy.
 
 ## Credits
 
