@@ -8,6 +8,7 @@ ambiguities as questions, and finally write a concrete `specs/NNN-*.md` file.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from owloop.adapters import AgentAdapter
@@ -158,7 +159,7 @@ class SpecGenerator:
         goal: str,
         *,
         max_rounds: int = 3,
-        ask_fn: callable | None = None,
+        ask_fn: Callable[[list[str]], list[str]] | None = None,
     ) -> Path:
         """Run the clarification loop and write a spec file.
 
