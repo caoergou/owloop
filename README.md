@@ -4,6 +4,7 @@
 
 <br>
 
+[![PyPI](https://img.shields.io/pypi/v/owloop?color=d4a025)](https://pypi.org/project/owloop/)
 [![MIT License](https://img.shields.io/badge/license-MIT-d4a025)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-d4a025)](https://python.org)
 [![CI](https://github.com/caoergou/owloop/actions/workflows/ci.yml/badge.svg)](https://github.com/caoergou/owloop/actions/workflows/ci.yml)
