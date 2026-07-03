@@ -86,7 +86,7 @@ graph LR
 
 | Property | How |
 |---|---|
-| **Fresh context** | Each iteration starts a brand-new `claude -p` process. No context rot. |
+| **Fresh context** | Each iteration starts a brand-new agent process. No context rot. |
 | **Deterministic completion** | `grep` for `<promise>DONE</promise>` — no AI judgment, no surprises. |
 | **Worktree isolation** | Runs in a separate `git worktree`. Your main checkout stays untouched. |
 | **Auto Mode** | `--permission-mode auto`: Ollie asks before risky moves, never YOLO. |
