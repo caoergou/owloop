@@ -205,3 +205,90 @@ def test_run_uses_commit_message_as_summary_when_available(tmp_path: Path) -> No
 
     text = (repo / "run-notes.md").read_text(encoding="utf-8")
     assert "agent commit message" in text
+
+
+def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    sleeps: list[float] = []
+
+    class FakeTime:
+        def sleep(self, duration: float) -> None:
+            sleeps.append(duration)
+
+        def monotonic(self) -> float:
+            return 0.0
+
+    monkeypatch.setattr("owloop.engine.time", FakeTime())
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(stdout="f1", returncode=1, success=False, has_completion_signal=False),
+            AgentResult(stdout="f2", returncode=1, success=False, has_completion_signal=False),
+            AgentResult(stdout="f3", returncode=1, success=False, has_completion_signal=False),
+            AgentResult(
+                stdout="done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            ),
+        ]
+    )
+    engine = _make_engine(
+        repo,
+        adapter,
+        mode="build",
+        max_iterations=4,
+        max_consecutive_failures=3,
+        base_retry_delay=2.0,
+        max_retry_delay=60.0,
+    )
+
+    summary = engine.run()
+
+    assert summary.iterations == 4
+    assert sleeps == [2.0, 2.0, 4.0, 2.0]
+
+
+def test_run_exponential_backoff_continues_to_grow(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    sleeps: list[float] = []
+
+    class FakeTime:
+        def sleep(self, duration: float) -> None:
+            sleeps.append(duration)
+
+        def monotonic(self) -> float:
+            return 0.0
+
+    monkeypatch.setattr("owloop.engine.time", FakeTime())
+
+    responses = [
+        AgentResult(stdout=f"f{i}", returncode=1, success=False, has_completion_signal=False)
+        for i in range(5)
+    ]
+    adapter = MockAdapter(responses=responses)
+    engine = _make_engine(
+        repo,
+        adapter,
+        mode="build",
+        max_iterations=5,
+        max_consecutive_failures=3,
+        base_retry_delay=2.0,
+        max_retry_delay=60.0,
+    )
+
+    summary = engine.run()
+
+    assert summary.iterations == 5
+    assert sleeps == [2.0, 2.0, 4.0, 8.0, 16.0]

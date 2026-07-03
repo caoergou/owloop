@@ -27,6 +27,7 @@ from typing import Any
 
 from owloop import spec_queue
 from owloop.adapters import AgentAdapter
+from owloop.sleep_inhibitor import SleepInhibitor
 
 BUILD_PROMPT = """\
 # Owloop — Build Mode
@@ -89,6 +90,8 @@ class EngineConfig:
     idle_timeout: float = 3600  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
+    base_retry_delay: float = 2.0
+    max_retry_delay: float = 60.0
     fix_loop_threshold: int = 3
     tail_lines: int = 5
 
@@ -497,8 +500,12 @@ class OwloopEngine:
                 stopped_reason="all_specs_complete",
             )
 
+        inhibitor = SleepInhibitor(emit=lambda kind, data: self._emit(kind, **data))
+        inhibitor.start()
+
         iteration = 0
         consecutive_failures = 0
+        backoff_level = 0
         stopped_reason = "max_iterations"
         start_time = time.monotonic()
 
@@ -532,6 +539,7 @@ class OwloopEngine:
 
                 if result.success:
                     consecutive_failures = 0
+                    backoff_level = 0
                     self._check_fix_loop()
                     if self.config.mode == "plan":
                         stopped_reason = "plan_complete"
@@ -541,7 +549,8 @@ class OwloopEngine:
                     consecutive_failures += 1
                     if consecutive_failures >= self.config.max_consecutive_failures:
                         self._emit("stuck_warning", consecutive_failures=consecutive_failures)
-                        consecutive_failures = 0
+                        backoff_level += 1
+                        consecutive_failures = self.config.max_consecutive_failures
 
                 self._push(branch)
                 self._emit(
@@ -550,10 +559,16 @@ class OwloopEngine:
                     success=result.success,
                     specs=self._spec_status()["specs"],
                 )
-                time.sleep(2)
+                delay = min(
+                    self.config.base_retry_delay * (2**backoff_level),
+                    self.config.max_retry_delay,
+                )
+                time.sleep(delay)
         except KeyboardInterrupt:
             stopped_reason = "interrupted"
             self._emit("interrupted", iteration=iteration)
+        finally:
+            inhibitor.stop()
 
         summary = RunSummary(
             iterations=iteration,
