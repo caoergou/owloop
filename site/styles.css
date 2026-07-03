@@ -1076,7 +1076,7 @@ button:focus-visible {
 
 .hero-terminal-wrap {
   position: relative;
-  max-width: 780px;
+  max-width: 960px;
   margin: 0 auto;
 }
 
@@ -1170,11 +1170,11 @@ button:focus-visible {
 
 .terminal-body {
   padding: 1.25rem;
-  min-height: 360px;
-  max-height: 520px;
+  min-height: 420px;
+  max-height: 600px;
   overflow-y: auto;
   font-family: var(--font-mono);
-  font-size: clamp(0.78rem, 1.3vw, 0.86rem);
+  font-size: clamp(0.85rem, 1.4vw, 0.95rem);
   line-height: 1.65;
   color: var(--moon);
   scrollbar-width: thin;
@@ -1285,13 +1285,13 @@ button:focus-visible {
 
 .tui-fullscreen {
   margin: 0;
-  padding: 1rem 1.25rem;
+  padding: 1.25rem 1.5rem;
   background: var(--night);
   border: none;
   border-radius: 0;
-  font-size: clamp(0.68rem, 1.1vw, 0.78rem);
-  line-height: 1.4;
-  min-height: 400px;
+  font-size: clamp(0.82rem, 1.3vw, 0.92rem);
+  line-height: 1.35;
+  min-height: 460px;
   display: flex;
   align-items: center;
   box-shadow: none;

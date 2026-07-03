@@ -125,107 +125,138 @@
     }
   }
 
-  // Full-screen TUI frame renderer — mirrors the real owloop TUI
+  // Count display width: emoji/CJK = 2 cols, ASCII = 1 col
+  function dw(str) {
+    var w = 0;
+    for (var i = 0; i < str.length; i++) {
+      var code = str.codePointAt(i);
+      if (code > 0xffff) { i++; w += 2; }
+      else if (code >= 0x2700 && code <= 0x27bf) { w += 1; }
+      else if (code >= 0x2580 && code <= 0x259f) { w += 1; }
+      else if (code >= 0x2800 && code <= 0x28ff) { w += 1; }
+      else if (code >= 0x2500 && code <= 0x257f) { w += 1; }
+      else { w += 1; }
+    }
+    return w;
+  }
+
+  // Pad string to target display width
+  function padDw(str, target) {
+    var need = target - dw(str);
+    return need > 0 ? str + " ".repeat(need) : str;
+  }
+
+  // Build a bordered row: "│" + content padded to W + "│"
+  var W = 68;
+  function row(content) {
+    return "│" + padDw(content, W) + "│";
+  }
+  function hline(ch, label) {
+    if (!label) return "├" + ch.repeat(W) + "┤";
+    var rest = W - dw(label) - 2;
+    return "├─ " + label + " " + "─".repeat(rest > 0 ? rest : 0) + "┤";
+  }
+
   function renderTuiFrame(frame) {
-    var filled = Math.round(frame.progress * 40);
-    var progressBar = "█".repeat(filled) + "░".repeat(40 - filled);
+    var filled = Math.round(frame.progress * 30);
+    var progressBar = "█".repeat(filled) + "░".repeat(30 - filled);
     var pct = String(Math.round(frame.progress * 100)).padStart(3);
 
-    var specIcons = frame.specs.map(function (s) {
-      if (s[0] === "done") return "  ✓ " + s[1];
-      if (s[0] === "active") return "  🦉 " + s[1];
-      return "  ○ " + s[1];
-    });
-
     var lines = [];
-    lines.push("┌─ " + frame.moon + " owloop ───────────────────────────────────────── " + frame.elapsed + " elapsed ─┐");
-    lines.push("│  Your code evolves while you sleep.                                          │");
-    lines.push("├─ Status ─────────────────────────────────────────────────────────────────────┤");
-    lines.push("│  Model        claude-sonnet-4                                                │");
-    lines.push("│  Iteration    #" + String(frame.iter).padEnd(6) + "                                                          │");
-    lines.push("│  Branch       " + frame.branch.padEnd(63) + "│");
-    lines.push("│  Tokens       " + frame.tokens.padEnd(63) + "│");
-    lines.push("│  Specs        " + frame.specsSummary.padEnd(63) + "│");
-    lines.push("│  Current      " + frame.currentSpec.padEnd(63) + "│");
-    lines.push("│  Status       " + frame.status.padEnd(63) + "│");
-    lines.push("├─ Specs ──────────────────────────────────────────────────────────────────────┤");
-    for (var si = 0; si < specIcons.length; si++) {
-      lines.push("│" + specIcons[si].padEnd(79) + "│");
+    var topLabel = " " + frame.moon + " owloop ";
+    var topRight = " " + frame.elapsed + " elapsed ";
+    var topFill = W - dw(topLabel) - dw(topRight);
+    lines.push("┌" + "─" + topLabel + "─".repeat(topFill > 0 ? topFill : 0) + topRight + "─┐");
+
+    lines.push(row("  Your code evolves while you sleep."));
+    lines.push(hline("─", "Status"));
+    lines.push(row("  Model        claude-sonnet-4"));
+    lines.push(row("  Iteration    #" + frame.iter));
+    lines.push(row("  Branch       " + frame.branch));
+    lines.push(row("  Tokens       " + frame.tokens));
+    lines.push(row("  Specs        " + frame.specsSummary));
+    lines.push(row("  Current      " + frame.currentSpec));
+    lines.push(row("  Status       " + frame.status));
+    lines.push(hline("─", "Specs"));
+    for (var si = 0; si < frame.specs.length; si++) {
+      var s = frame.specs[si];
+      var icon = s[0] === "done" ? "✓" : s[0] === "active" ? "▸" : "○";
+      lines.push(row("  " + icon + " " + s[1]));
     }
-    lines.push("├─ What Ollie is doing ─────────────────────────────────────────────────────────┤");
-    lines.push("│  " + frame.action.padEnd(77) + "│");
+    lines.push(hline("─", "What Ollie is doing"));
+    lines.push(row("  " + frame.action));
     if (frame.actionDetail) {
-      lines.push("│    · " + frame.actionDetail.padEnd(73) + "│");
+      lines.push(row("    · " + frame.actionDetail));
     }
-    lines.push("│" + " ".repeat(79) + "│");
-    lines.push("├────────────────────────────────────────────────────────────────────────────────┤");
-    lines.push("│  " + progressBar + "  " + pct + "%                    ctrl+c to stop │");
-    lines.push("└────────────────────────────────────────────────────────────────────────────────┘");
+    lines.push(row(""));
+    lines.push("├" + "─".repeat(W) + "┤");
+    lines.push(row("  " + progressBar + "  " + pct + "%       ctrl+c to stop"));
+    lines.push("└" + "─".repeat(W) + "┘");
     return lines.join("\n");
   }
 
   var TUI_FRAMES = [
     {
-      moon: "🌒", elapsed: "0:42", iter: 1, branch: "owloop/refactor-errors",
+      moon: "C", elapsed: "0:42", iter: 1, branch: "owloop/refactor-errors",
       tokens: "2,140 / 200,000", specsSummary: "0/3 done", progress: 0.0,
       currentSpec: "001-refactor-error-handling.md",
-      status: "⠋ Working on spec",
+      status: "Working on spec",
       specs: [["active", "001-refactor-error-handling.md"], ["", "002-add-type-annotations.md"], ["", "003-unify-error-codes.md"]],
-      action: "⠋ Reading the spec and codebase",
+      action: "Reading the spec and codebase",
       actionDetail: "Scanning backend/app/api/ for ValidationError patterns",
     },
     {
-      moon: "🌒", elapsed: "1:15", iter: 1, branch: "owloop/refactor-errors",
+      moon: "C", elapsed: "1:15", iter: 1, branch: "owloop/refactor-errors",
       tokens: "3,480 / 200,000", specsSummary: "0/3 done", progress: 0.08,
       currentSpec: "001-refactor-error-handling.md",
-      status: "⠹ Running acceptance criteria",
+      status: "Running acceptance criteria",
       specs: [["active", "001-refactor-error-handling.md"], ["", "002-add-type-annotations.md"], ["", "003-unify-error-codes.md"]],
-      action: "⠹ Running acceptance criteria",
-      actionDetail: 'grep -c "except ValidationError" backend/app/api/*.py  →  3 (≤5 ✓)',
+      action: "Running acceptance criteria",
+      actionDetail: 'grep -c "except ValidationError" api/*.py  ->  3 (pass)',
     },
     {
-      moon: "🌓", elapsed: "1:23", iter: 1, branch: "owloop/refactor-errors",
+      moon: "D", elapsed: "1:23", iter: 1, branch: "owloop/refactor-errors",
       tokens: "4,120 / 200,000", specsSummary: "0/3 done", progress: 0.15,
       currentSpec: "001-refactor-error-handling.md",
-      status: "✓ done signal detected",
+      status: "done signal detected",
       specs: [["active", "001-refactor-error-handling.md"], ["", "002-add-type-annotations.md"], ["", "003-unify-error-codes.md"]],
-      action: "✓ Committing changes",
-      actionDetail: "🌙 Loop closed on iteration 1",
+      action: "Committing changes",
+      actionDetail: "Loop closed on iteration 1",
     },
     {
-      moon: "🌓", elapsed: "1:58", iter: 2, branch: "owloop/refactor-errors",
+      moon: "D", elapsed: "1:58", iter: 2, branch: "owloop/refactor-errors",
       tokens: "6,820 / 200,000", specsSummary: "1/3 done", progress: 0.33,
       currentSpec: "002-add-type-annotations.md",
-      status: "⠹ Working on spec",
+      status: "Working on spec",
       specs: [["done", "001-refactor-error-handling.md"], ["active", "002-add-type-annotations.md"], ["", "003-unify-error-codes.md"]],
-      action: "⠹ Running verification commands",
-      actionDetail: "uv run pyright src/ --outputjson  →  0 errors",
+      action: "Running verification commands",
+      actionDetail: "uv run pyright src/ --outputjson  ->  0 errors",
     },
     {
-      moon: "🌔", elapsed: "2:12", iter: 2, branch: "owloop/refactor-errors",
+      moon: "O", elapsed: "2:12", iter: 2, branch: "owloop/refactor-errors",
       tokens: "8,240 / 200,000", specsSummary: "1/3 done", progress: 0.42,
       currentSpec: "002-add-type-annotations.md",
-      status: "✓ done signal detected",
+      status: "done signal detected",
       specs: [["done", "001-refactor-error-handling.md"], ["active", "002-add-type-annotations.md"], ["", "003-unify-error-codes.md"]],
-      action: "✓ Committing changes",
-      actionDetail: "🌙 Loop closed on iteration 2",
+      action: "Committing changes",
+      actionDetail: "Loop closed on iteration 2",
     },
     {
-      moon: "🌔", elapsed: "2:47", iter: 3, branch: "owloop/refactor-errors",
+      moon: "O", elapsed: "2:47", iter: 3, branch: "owloop/refactor-errors",
       tokens: "10,540 / 200,000", specsSummary: "2/3 done", progress: 0.66,
       currentSpec: "003-unify-error-codes.md",
-      status: "⠴ Working on spec",
+      status: "Working on spec",
       specs: [["done", "001-refactor-error-handling.md"], ["done", "002-add-type-annotations.md"], ["active", "003-unify-error-codes.md"]],
-      action: "⠴ Running acceptance criteria",
-      actionDetail: "uv run pytest tests/ -q --tb=short  →  148 passed",
+      action: "Running acceptance criteria",
+      actionDetail: "uv run pytest tests/ -q --tb=short  ->  148 passed",
     },
     {
-      moon: "🌕", elapsed: "3:05", iter: 3, branch: "owloop/refactor-errors",
+      moon: "O", elapsed: "3:05", iter: 3, branch: "owloop/refactor-errors",
       tokens: "12,380 / 200,000", specsSummary: "3/3 done", progress: 1.0,
-      currentSpec: "—",
-      status: "🌅 All specs complete",
+      currentSpec: "--",
+      status: "All specs complete",
       specs: [["done", "001-refactor-error-handling.md"], ["done", "002-add-type-annotations.md"], ["done", "003-unify-error-codes.md"]],
-      action: "✓ 3 commits pushed to owloop/refactor-errors",
+      action: "3 commits pushed to owloop/refactor-errors",
       actionDetail: "",
     },
   ];
