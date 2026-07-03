@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>owloop social preview</title>
+<style>
+  :root {
+    --amber: #d4a025;
+    --amber-soft: #f0c563;
+    --night: #0b1026;
+    --night-2: #0e1330;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1280px;
+    height: 640px;
+    overflow: hidden;
+    background: var(--night);
+    font-family: -apple-system, "SF Pro Display", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .canvas {
+    position: relative;
+    width: 1280px;
+    height: 640px;
+    background:
+      radial-gradient(ellipse 900px 500px at 50% 8%, rgba(212,160,37,0.10), transparent 60%),
+      radial-gradient(ellipse 1400px 900px at 50% 100%, #121a3d 0%, var(--night) 55%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* stars */
+  .stars, .stars::before, .stars::after {
+    position: absolute;
+    inset: 0;
+    background-repeat: no-repeat;
+  }
+  .stars {
+    background-image:
+      radial-gradient(1.6px 1.6px at 62px 84px, #fff, transparent),
+      radial-gradient(1.4px 1.4px at 152px 220px, #fff, transparent),
+      radial-gradient(1.8px 1.8px at 240px 60px, #fff, transparent),
+      radial-gradient(1.3px 1.3px at 340px 300px, #fff, transparent),
+      radial-gradient(1.6px 1.6px at 430px 130px, #fff, transparent),
+      radial-gradient(1.4px 1.4px at 520px 260px, #fff, transparent),
+      radial-gradient(1.8px 1.8px at 90px 400px, #fff, transparent),
+      radial-gradient(1.3px 1.3px at 200px 500px, #fff, transparent),
+      radial-gradient(1.6px 1.6px at 980px 90px, #fff, transparent),
+      radial-gradient(1.4px 1.4px at 1080px 200px, #fff, transparent),
+      radial-gradient(1.8px 1.8px at 1160px 70px, #fff, transparent),
+      radial-gradient(1.3px 1.3px at 1200px 320px, #fff, transparent),
+      radial-gradient(1.6px 1.6px at 1030px 460px, #fff, transparent),
+      radial-gradient(1.4px 1.4px at 1130px 540px, #fff, transparent),
+      radial-gradient(1.3px 1.3px at 760px 50px, #fff, transparent),
+      radial-gradient(1.6px 1.6px at 850px 150px, #fff, transparent),
+      radial-gradient(1.3px 1.3px at 40px 560px, #fff, transparent),
+      radial-gradient(1.4px 1.4px at 120px 40px, #fff, transparent);
+    opacity: 0.55;
+  }
+
+  /* crescent moon accent, upper right */
+  .moon {
+    position: absolute;
+    top: 72px;
+    right: 128px;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--amber-soft);
+    box-shadow: -18px 4px 0 2px var(--night-2);
+    opacity: 0.85;
+    filter: blur(0.2px);
+  }
+
+  .content {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    transform: translateY(-8px);
+  }
+
+  /* ---- CSS owl ---- */
+  .owl {
+    width: 132px;
+    height: 118px;
+    position: relative;
+    margin-bottom: 6px;
+  }
+  .owl .ear {
+    position: absolute;
+    top: -14px;
+    width: 0;
+    height: 0;
+    border-left: 15px solid transparent;
+    border-right: 15px solid transparent;
+    border-bottom: 34px solid var(--amber);
+  }
+  .owl .ear.left { left: 6px; transform: rotate(-14deg); }
+  .owl .ear.right { right: 6px; transform: rotate(14deg); }
+
+  .owl .body {
+    position: absolute;
+    top: 6px;
+    left: 0;
+    width: 132px;
+    height: 112px;
+    background: var(--amber);
+    border-radius: 50% 50% 46% 46% / 55% 55% 45% 45%;
+  }
+
+  .owl .face {
+    position: absolute;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 108px;
+    height: 74px;
+    background: var(--night);
+    border-radius: 50%;
+  }
+
+  .owl .eye {
+    position: absolute;
+    top: 18px;
+    width: 34px;
+    height: 34px;
+    background: var(--amber-soft);
+    border-radius: 50%;
+  }
+  .owl .eye.left { left: 10px; }
+  .owl .eye.right { right: 10px; }
+  .owl .eye::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 12px;
+    height: 12px;
+    background: var(--night);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .owl .beak {
+    position: absolute;
+    top: 46px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-top: 16px solid var(--amber);
+  }
+
+  h1.brand {
+    font-size: 76px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    color: var(--amber);
+    line-height: 1;
+  }
+
+  p.tagline {
+    font-size: 25px;
+    font-weight: 400;
+    color: #eef1fb;
+    opacity: 0.92;
+    letter-spacing: 0.2px;
+  }
+
+  p.footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 15px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--amber);
+    opacity: 0.62;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="stars"></div>
+    <div class="moon"></div>
+    <div class="content">
+      <div class="owl">
+        <div class="ear left"></div>
+        <div class="ear right"></div>
+        <div class="body"></div>
+        <div class="face"></div>
+        <div class="eye left"></div>
+        <div class="eye right"></div>
+        <div class="beak"></div>
+      </div>
+      <h1 class="brand">owloop</h1>
+      <p class="tagline">Your code evolves while you sleep.</p>
+    </div>
+    <p class="footer">Spec-driven autonomous loop for Claude Code</p>
+  </div>
+</body>
+</html>
