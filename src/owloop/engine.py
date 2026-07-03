@@ -18,10 +18,11 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 from owloop import spec_queue
 from owloop.adapters import AgentAdapter
@@ -121,7 +122,7 @@ class OwloopEngine:
         self.session_log: Path | None = None
         self._recent_file_sets: list[set[str]] = []
 
-    def _emit(self, kind: str, **data) -> None:
+    def _emit(self, kind: str, **data: Any) -> None:
         self.on_event(kind, data)
 
     def _run_git(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
@@ -158,12 +159,12 @@ class OwloopEngine:
         issues: list[str] = self.adapter.preflight()
 
         if not self._is_git_repo():
-            issues.append("当前目录不是 git 仓库")
+            issues.append("current directory is not a git repository")
 
         specs_dir = self.cwd / "specs"
         has_plan = (self.cwd / "IMPLEMENTATION_PLAN.md").is_file()
         if not has_plan and not spec_queue.get_root_specs(specs_dir):
-            issues.append("specs/ 目录下没有 .md 文件，且没有 IMPLEMENTATION_PLAN.md")
+            issues.append("no .md files in specs/ and no IMPLEMENTATION_PLAN.md")
 
         return issues
 

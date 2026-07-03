@@ -9,68 +9,47 @@ from __future__ import annotations
 import itertools
 import math
 import random
+import re
+import signal
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import FrameType
+from typing import Any
 
 from rich.align import Align
-from rich.console import Console, Group
+from rich.console import Console, Group, RenderableType
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from owloop._brand import (
+    AMBER,
+    CYAN,
+    DIM_BLUE,
+    GRAY,
+    GREEN,
+    MOON_WHITE,
+    NIGHT,
+    OWL_BLINK,
+    OWL_MEDIUM,
+    OWL_SLEEP,
+    RED,
+    SPINNER_FRAMES,
+    STAR_STYLE,
+    TAGLINE,
+    exit_hints,
+    moon_for_progress,
+    status_message,
+    wake_message,
+)
 from owloop.engine import RunSummary
 
-NIGHT = "#0b1026"
-DIM_BLUE = "#3a4270"
-AMBER = "#d4a025"
-MOON_WHITE = "#f2ecd8"
-GREEN = "#8fd19e"
-RED = "#e0777d"
-GRAY = "#8890b3"
-STAR_STYLE = "dim #6b74a8"
-
-MOON_PHASES = ["🌑", "🌒", "🌓", "🌔", "🌕"]
-
-
-def _normalize(art: list[str]) -> list[str]:
-    width = max(len(row) for row in art)
-    return [row.ljust(width) for row in art]
-
-
-OWL_OPEN = _normalize([
-    "    ▄▄████▄▄   ",
-    "   ██ ◉  ◉ ██  ",
-    "  ███  ╰▽╯  ███",
-    "   ██ ╭──╮ ██  ",
-    "    ▀█ ║║║ █▀  ",
-    "     ▀██▄▄██▀  ",
-    "      ╱╲  ╱╲   ",
-])
-
-OWL_BLINK = _normalize([
-    "    ▄▄████▄▄   ",
-    "   ██ ─  ─ ██  ",
-    "  ███  ╰▽╯  ███",
-    "   ██ ╭──╮ ██  ",
-    "    ▀█ ║║║ █▀  ",
-    "     ▀██▄▄██▀  ",
-    "      ╱╲  ╱╲   ",
-])
-
-OWL_SLEEP = _normalize([
-    "    ▄▄████▄▄  z ",
-    "   ██ ─  ─ ██ Z ",
-    "  ███  ╰▽╯  ███ ",
-    "   ██ ╭──╮ ██   ",
-    "    ▀█ ║║║ █▀   ",
-    "     ▀██▄▄██▀   ",
-    "      ╱╲  ╱╲    ",
-])
-
 SCENE_W, SCENE_H = 28, 9
+MIN_WIDTH, MIN_HEIGHT = 80, 24
 _star_rng = random.Random(7)
 STAR_CHARS = "·∗✦⋆˙"
 STAR_FIELD = [
@@ -113,10 +92,13 @@ class AppState:
 class OwloopTUI:
     """Full-screen Live TUI. Use as a context manager around engine.run()."""
 
-    def __init__(self) -> None:
-        self.console = Console()
+    def __init__(self, ascii: bool = False, no_color: bool = False, compact: bool = False) -> None:
+        self.console = Console(no_color=no_color)
+        self.ascii = ascii
+        self._force_compact = compact
         self.state = AppState(start_time=time.monotonic(), next_blink=time.monotonic() + 5)
-        self.layout = self._build_layout()
+        self._compact = self._should_be_compact()
+        self.layout = self._build_layout() if not self._compact else self._build_compact_layout()
         self.live = Live(
             self.layout, console=self.console, screen=True, auto_refresh=False
         )
@@ -125,27 +107,44 @@ class OwloopTUI:
         self._ticker: threading.Thread | None = None
         self._live_started = False
         self._paused = False
+        self._original_sigwinch: Callable[[int, FrameType | None], Any] | int | None = None
+
+    def _should_be_compact(self) -> bool:
+        """Return whether the TUI should use the compact single-column layout."""
+        if self._force_compact:
+            return True
+        width, height = self.console.size
+        return width < MIN_WIDTH or height < MIN_HEIGHT
 
     # ── lifecycle ──
 
-    def __enter__(self) -> "OwloopTUI":
+    def _on_sigwinch(self, _signum: int, _frame: FrameType | None) -> None:
+        """Terminal resized: re-evaluate layout on next render."""
+        with self._lock:
+            self._update_layout_for_size()
+            self._render()
+
+    def __enter__(self) -> OwloopTUI:
         self.live.__enter__()
         self._live_started = True
+        self._original_sigwinch = signal.signal(signal.SIGWINCH, self._on_sigwinch)
         self._render()
         self._ticker = threading.Thread(target=self._tick_loop, daemon=True)
         self._ticker.start()
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *_exc: Any) -> None:
         self._stop_ticker.set()
         if self._ticker:
             self._ticker.join(timeout=1)
+        if self._original_sigwinch is not None:
+            signal.signal(signal.SIGWINCH, self._original_sigwinch)
+            self._original_sigwinch = None
         if self._live_started:
-            self.live.__exit__(*exc)
+            self.live.__exit__(*_exc)
             self._live_started = False
 
     def _tick_loop(self) -> None:
-        spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         frame_idx = 0
         while not self._stop_ticker.wait(0.25):
             with self._lock:
@@ -156,8 +155,8 @@ class OwloopTUI:
                     self.state.next_blink = now + (0.3 if self.state.blink else random.uniform(3, 7))
                 # working spinner — show elapsed time so user knows it's alive
                 if self.state.phase == "working":
-                    frame_idx = (frame_idx + 1) % len(spinner_frames)
-                    self.state._spinner = spinner_frames[frame_idx]
+                    frame_idx = (frame_idx + 1) % len(SPINNER_FRAMES)
+                    self.state._spinner = SPINNER_FRAMES[frame_idx]
                 self._render()
 
     # ── engine event handling ──
@@ -166,11 +165,11 @@ class OwloopTUI:
     # full-screen display must be torn down first or the prompt is invisible
     # (and its echo fights the next screen refresh).
     PROMPT_MESSAGES = {
-        "worktree_prompt": "建议在独立 worktree 中运行以保护主仓库。是否自动创建？(Y/n)",
+        "worktree_prompt": "It is recommended to run in an isolated git worktree to protect the main repository. Create one automatically? (Y/n)",
         "dirty_workspace_warning": (
-            "⚠ 工作区有未提交的修改，这些修改不会出现在 worktree 中。\n"
-            "   建议先 commit 或 stash 后再运行 owloop。\n"
-            "   继续运行？(y/N)"
+            "⚠ The workspace has uncommitted changes that will not appear in the worktree.\n"
+            "   Please commit or stash before running owloop.\n"
+            "   Continue anyway? (y/N)"
         ),
     }
 
@@ -207,79 +206,79 @@ class OwloopTUI:
             s.main_repo_dir = data["main_repo_dir"]
             s.max_iterations = data["max_iterations"]
             s.specs = data["specs"]
-            self._log(f"owloop 启动 — 模式 {s.mode} · 模型 {s.model} · 分支 {s.branch}")
+            self._log(f"{wake_message()} — mode {s.mode} · model {s.model} · branch {s.branch}")
             if data["has_plan"]:
-                self._log("发现 IMPLEMENTATION_PLAN.md，将优先使用")
+                self._log("Found IMPLEMENTATION_PLAN.md, will use it preferentially")
             elif data["first_incomplete"]:
-                self._log(f"下一个未完成 spec: {data['first_incomplete']}")
+                self._log(f"Next incomplete spec: {data['first_incomplete']}")
         elif kind == "worktree_already_active":
-            self._log(f"已在独立 worktree 中运行: {data['path']}")
+            self._log(f"Running in isolated worktree: {data['path']}")
         elif kind == "worktree_skipped":
-            self._log("未使用 worktree 隔离，直接在当前目录运行")
+            self._log("worktree isolation disabled, running in current directory")
         elif kind == "worktree_prompt":
-            self._log("建议创建独立 worktree（等待终端输入...）")
+            self._log("Recommended to create isolated worktree (waiting for terminal input...)")
         elif kind == "worktree_auto_created":
-            self._log("非交互环境，自动创建独立 worktree 以保护主仓库")
+            self._log("Non-interactive environment, automatically creating isolated worktree to protect main repository")
         elif kind == "worktree_created" or kind == "worktree_branch_reused":
             s.cwd = data["path"]
-            self._log(f"✓ 已创建并切换到 worktree: {data['path']}")
+            self._log(f"✓ created and switched to worktree: {data['path']}")
         elif kind == "worktree_reused":
             s.cwd = data["path"]
-            self._log(f"目录已存在，直接进入: {data['path']}")
+            self._log(f"directory exists, entering: {data['path']}")
         elif kind == "worktree_declined":
-            self._log("继续在当前目录运行（未使用 worktree）")
+            self._log("continue running in current directory (worktree isolation disabled)")
         elif kind == "worktree_failed":
-            self._log("✗ 创建 worktree 失败，继续在当前目录运行")
+            self._log("✗ failed to create worktree, continuing in current directory")
         elif kind == "all_specs_complete":
             s.phase = "complete"
             s.done = True
-            self._log(f"全部 {data['spec_count']} 个 spec 均已完成，无事可做")
+            self._log(f"all {data['spec_count']} specs complete, nothing to do")
         elif kind == "iteration_start":
             s.iteration = data["iteration"]
             s.phase = "working"
-            self._log(f"── 第 {s.iteration} 轮迭代开始 ──")
+            self._log(f"── iteration {s.iteration} started ──")
         elif kind == "output_line":
             line = data["line"].strip()
             if line:
                 self._log(line)
         elif kind == "done_signal":
             s.phase = "done_signal"
-            self._log(f"✓ 检测到完成信号: {data['signal']}")
-            self._flash(f"🌙 第 {s.iteration} 轮完成！", f"bold {MOON_WHITE}")
+            self._log(f"✓ done signal detected: {data['signal']}")
+            self._flash(f"🌙 iteration {s.iteration} complete!", f"bold {MOON_WHITE}")
         elif kind == "no_done_signal":
-            self._log("⚠ 未检测到完成信号，将在下一轮重试")
+            self._log("⚠ no done signal detected, will retry in the next iteration")
         elif kind == "agent_failed":
-            self._log(f"✗ Agent 执行失败（returncode={data['returncode']}）")
+            self._log(f"✗ agent failed (returncode={data['returncode']})")
         elif kind == "agent_timeout":
-            self._log(f"⏱ 第 {data['iteration']} 轮空闲超时，Agent 可能挂起，已终止")
+            self._log(f"⏱ iteration {data['iteration']} idle timeout, agent may be hung, terminated")
         elif kind == "preflight_failed":
             s.phase = "error"
             for issue in data["issues"]:
                 self._log(f"✗ {issue}")
         elif kind == "dirty_workspace_warning":
-            self._log("⚠ 工作区有未提交的修改，这些修改不会出现在 worktree 中")
+            self._log("⚠ workspace has uncommitted changes that will not appear in the worktree")
         elif kind == "dirty_workspace_declined":
             s.phase = "error"
-            self._log("已取消 — 请先 commit 或 stash 后再运行 owloop")
+            self._log("cancelled — please commit or stash first")
         elif kind == "dirty_workspace_noninteractive_continue":
-            self._log("非交互环境，忽略未提交修改警告，继续运行")
+            self._log("non-interactive environment, ignoring uncommitted changes warning, continue")
         elif kind == "claude_config_copied":
-            self._log(f"已复制 .claude/ 配置到 worktree: {data['path']}")
+            self._log(f"copied .claude/ config to worktree: {data['path']}")
         elif kind == "stuck_warning":
             s.phase = "stuck"
-            self._log(f"💤 已连续 {data['consecutive_failures']} 轮未完成，Agent 可能卡住了")
-            self._flash("💤 卡住了，继续重试...", f"bold {GRAY}")
+            self._log(f"💤 {data['consecutive_failures']} consecutive failures, agent may be stuck")
+            self._flash("💤 may be stuck, retrying...", f"bold {GRAY}")
         elif kind == "fix_loop_warning":
             files = ", ".join(data["files"][:3])
-            self._log(f"⚠ 检测到修复循环：{files} 连续 {data['consecutive']} 轮被修改")
-            self._flash("⚠ 疑似修复循环", f"bold {RED}")
+            self._log(f"⚠ fix loop detected: {files} modified for {data['consecutive']} consecutive iterations")
+            self._flash("⚠ possible fix loop", f"bold {RED}")
         elif kind == "max_duration_reached":
             s.done = True
             s.phase = "complete"
-            self._log(f"⏱ 已达运行时间上限 ({data['minutes']} 分钟)，停止循环")
-            self._flash("⏱ 时间到", f"bold {AMBER}")
+            self._log(f"⏱ reached maximum run time ({data['minutes']} min), stopping loop")
+            self._flash("⏱ time up", f"bold {AMBER}")
         elif kind == "push_retry":
-            self._log(f"推送失败，创建远程分支 {data['branch']}...")
+            self._log(f"push failed, creating remote branch {data['branch']}...")
         elif kind == "iteration_end":
             if "specs" in data:
                 s.specs = data["specs"]
@@ -287,78 +286,97 @@ class OwloopTUI:
         elif kind == "plan_complete":
             s.done = True
             s.phase = "complete"
-            self._log("规划完成！运行 'owloop run' 开始构建")
-            self._flash("🌅 规划完成", f"bold {AMBER}")
+            self._log("planning complete! run 'owloop run' to start building")
+            self._flash("🌅 planning complete", f"bold {AMBER}")
         elif kind == "interrupted":
             s.phase = "error"
-            self._log("已停止（Ctrl+C）")
+            self._log("stopped (Ctrl+C)")
 
     # ── rendering ──
+
+    @staticmethod
+    def _is_done(spec: dict) -> bool:
+        """Whether a spec dict represents a completed spec.
+
+        Supports both the newer `status` key and the legacy `done` boolean.
+        """
+        status = spec.get("status")
+        return status == "done" or (status is None and bool(spec.get("done")))
+
+    def _current_spec_name(self) -> str:
+        """Name of the first incomplete spec (the one currently being worked on)."""
+        for spec in self.state.specs:
+            if not self._is_done(spec):
+                return str(spec.get("name", ""))
+        return ""
 
     def _status_text(self) -> Text:
         s = self.state
         if s.flash and time.monotonic() < s.flash[2]:
             text, style, _ = s.flash
             return Text(text, style=style)
+        spec_name = self._current_spec_name()
+        message = status_message(s.phase, s.iteration, spec_name)
         if s.phase == "complete":
-            return Text("🌅 运行完成", style=f"bold {AMBER}")
-        if s.phase == "error":
-            return Text("✗ 已停止", style=f"bold {RED}")
-        if s.phase == "stuck":
-            return Text("💤 可能卡住了...", style=f"bold {GRAY}")
-        if s.phase == "done_signal":
-            return Text(f"🌙 第 {s.iteration} 轮完成", style=f"bold {MOON_WHITE}")
-        if s.iteration:
-            elapsed = time.monotonic() - s.start_time
-            iter_elapsed = _format_elapsed(elapsed)
-            spinner = getattr(s, '_spinner', '⠋')
-            return Text(f"{spinner} 第 {s.iteration} 轮进行中... ({iter_elapsed})", style=f"bold {AMBER}")
-        return Text("🦉 启动中...", style=f"bold {AMBER}")
+            style = f"bold {AMBER}"
+        elif s.phase == "error":
+            style = f"bold {RED}"
+        elif s.phase == "stuck":
+            style = f"bold {GRAY}"
+        elif s.phase == "done_signal":
+            style = f"bold {MOON_WHITE}"
+        else:
+            style = f"bold {AMBER}"
+        return Text(message, style=style)
 
     def _render_header(self) -> Panel:
         s = self.state
-        done = sum(1 for spec in s.specs if spec.get("done"))
+        done = sum(1 for spec in s.specs if self._is_done(spec))
         total = len(s.specs) or 1
-        moon = MOON_PHASES[min(len(MOON_PHASES) - 1, int(done / total * (len(MOON_PHASES) - 1)))]
+        moon = moon_for_progress(done, total)
         grid = Table.grid(expand=True)
         grid.add_column(ratio=1)
         grid.add_column(justify="right")
         grid.add_row(
-            Text("Your code evolves while you sleep.", style=f"italic {GRAY}"),
+            Text(TAGLINE, style=f"italic {GRAY}"),
             Text(f"{_format_elapsed(time.monotonic() - s.start_time)} elapsed", style=DIM_BLUE),
         )
         return Panel(grid, title=f"{moon} owloop", title_align="left", border_style=AMBER, style=f"on {NIGHT}")
 
     def _render_status(self) -> Panel:
         s = self.state
-        done = sum(1 for spec in s.specs if spec.get("done"))
+        done = sum(1 for spec in s.specs if self._is_done(spec))
         table = Table.grid(padding=(0, 1))
         table.add_column(style=f"dim {GRAY}")
         table.add_column()
-        table.add_row("模式", Text(s.mode, style=f"bold {MOON_WHITE}"))
-        table.add_row("模型", Text(s.model or "—", style="#8fb8de"))
-        table.add_row("迭代", Text(f"#{s.iteration}" + (f" / {s.max_iterations}" if s.max_iterations else ""), style=f"bold {MOON_WHITE}"))
-        table.add_row("分支", Text(s.branch or "—", style=GREEN))
+        table.add_row("Mode", Text(s.mode, style=f"bold {MOON_WHITE}"))
+        table.add_row("Model", Text(s.model or "—", style=CYAN))
+        table.add_row("Iteration", Text(f"#{s.iteration}" + (f" / {s.max_iterations}" if s.max_iterations else ""), style=f"bold {MOON_WHITE}"))
+        table.add_row("Branch", Text(s.branch or "—", style=GREEN))
         if s.specs:
             table.add_row("Specs", Text(f"{done}/{len(s.specs)} done", style=GREEN))
-        table.add_row("状态", self._status_text())
+        current_spec = self._current_spec_name()
+        if current_spec:
+            table.add_row("Current Spec", Text(current_spec, style=f"bold {AMBER}"))
+        table.add_row("Status", self._status_text())
         return Panel(table, title="Status", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
 
     def _render_specs(self) -> Panel:
         s = self.state
+        body: RenderableType
         if not s.specs:
-            body = Text("(无 spec)", style=f"dim {GRAY}")
+            body = Text("(no specs)", style=f"dim {GRAY}")
         else:
             rows = []
-            first_pending_marked = False
             for spec in s.specs:
-                if spec.get("done"):
-                    rows.append(Text(f"✓ {spec['name']}", style=GREEN))
-                elif not first_pending_marked:
-                    first_pending_marked = True
-                    rows.append(Text(f"🦉 {spec['name']}", style=f"bold {AMBER}"))
+                status = spec.get("status")
+                name = spec.get("name", "")
+                if self._is_done(spec):
+                    rows.append(Text(f"✓ {name}", style=GREEN))
+                elif status == "in_progress":
+                    rows.append(Text(f"🦉 {name}", style=f"bold {AMBER}"))
                 else:
-                    rows.append(Text(f"○ {spec['name']}", style=f"dim {GRAY}"))
+                    rows.append(Text(f"○ {name}", style=f"dim {GRAY}"))
             body = Group(*rows)
         return Panel(body, title="Specs", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
 
@@ -377,7 +395,7 @@ class OwloopTUI:
         if s.phase == "complete" or s.phase == "error":
             art = OWL_SLEEP
         else:
-            art = OWL_BLINK if s.blink else OWL_OPEN
+            art = OWL_BLINK if s.blink else OWL_MEDIUM
         top = (SCENE_H - len(art)) // 2
         left = (SCENE_W - len(art[0])) // 2
         for dy, row in enumerate(art):
@@ -402,27 +420,33 @@ class OwloopTUI:
             height=SCENE_H + 2,
         )
 
+    @staticmethod
+    def _clean_log_line(line: str) -> str:
+        """Strip ANSI escapes, trim whitespace, and collapse repeated spaces."""
+        line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
+        return " ".join(line.split())
+
     def _render_activity(self) -> Panel:
-        recent = self.state.logs[-7:]
+        recent = [self._clean_log_line(line) for line in self.state.logs[-12:]]
+        recent = [line for line in recent if line]
         rows = []
         for i, line in enumerate(recent):
             is_latest = i == len(recent) - 1
             prefix = "▸" if is_latest else " "
             style = f"bold {MOON_WHITE}" if is_latest else GRAY
             rows.append(Text(f"{prefix} {line}", style=style, no_wrap=True, overflow="ellipsis"))
-        # When working but no recent output, show a reassuring message
-        if self.state.phase == "working" and self.state.iteration > 0:
-            elapsed = time.monotonic() - self.state.start_time
+        # When working but no recent output, show a reassuring spinner message
+        if self.state.phase == "working" and self.state.iteration > 0 and not recent:
             spinner = getattr(self.state, '_spinner', '⠋')
             rows.append(Text(
-                f"  {spinner} claude -p 运行中，输出将在本轮结束时显示...",
+                f"  {spinner} claude -p running, output will appear when this iteration ends...",
                 style=f"dim italic {GRAY}", no_wrap=True
             ))
         return Panel(Group(*rows) if rows else Text(""), title="Activity", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
 
     def _render_footer(self) -> Panel:
         s = self.state
-        done = sum(1 for spec in s.specs if spec.get("done"))
+        done = sum(1 for spec in s.specs if self._is_done(spec))
         total = len(s.specs) or 1
         width = 30
         filled = int(width * done / total)
@@ -432,7 +456,8 @@ class OwloopTUI:
         grid = Table.grid(expand=True)
         grid.add_column(ratio=1)
         grid.add_column(justify="right")
-        grid.add_row(bar, Text("ctrl+c to stop", style=f"dim {GRAY}"))
+        loop_indicator = " ↻" if s.phase == "working" else ""
+        grid.add_row(bar, Text(f"ctrl+c to stop{loop_indicator}", style=f"dim {GRAY}"))
         return Panel(grid, border_style=DIM_BLUE, style=f"on {NIGHT}")
 
     def _build_layout(self) -> Layout:
@@ -447,15 +472,46 @@ class OwloopTUI:
         layout["right"].split(Layout(name="owl", size=SCENE_H + 2), Layout(name="activity", ratio=1))
         return layout
 
+    def _build_compact_layout(self) -> Layout:
+        """Single-column fallback for small terminals."""
+        layout = Layout(name="root")
+        layout.split(
+            Layout(name="header", size=3),
+            Layout(name="status", size=8),
+            Layout(name="activity", ratio=1),
+            Layout(name="footer", size=3),
+        )
+        return layout
+
+    def _update_layout_for_size(self) -> None:
+        """Switch between full and compact layout based on terminal dimensions."""
+        if self._force_compact:
+            wants_compact = True
+        else:
+            width, height = self.console.size
+            wants_compact = width < MIN_WIDTH or height < MIN_HEIGHT
+        if wants_compact == self._compact:
+            return
+        self._compact = wants_compact
+        self.layout = (
+            self._build_compact_layout() if self._compact else self._build_layout()
+        )
+        self.live.update(self.layout, refresh=False)
+
     def _render(self) -> None:
         if self._paused:
             return
+        self._update_layout_for_size()
         self.layout["header"].update(self._render_header())
-        self.layout["status"].update(self._render_status())
-        self.layout["specs"].update(self._render_specs())
-        self.layout["owl"].update(self._render_owl_scene())
-        self.layout["activity"].update(self._render_activity())
         self.layout["footer"].update(self._render_footer())
+        if self._compact:
+            self.layout["status"].update(self._render_status())
+            self.layout["activity"].update(self._render_activity())
+        else:
+            self.layout["status"].update(self._render_status())
+            self.layout["specs"].update(self._render_specs())
+            self.layout["owl"].update(self._render_owl_scene())
+            self.layout["activity"].update(self._render_activity())
         self.live.refresh()
 
     # ── exit summary (printed to normal scrollback, after Live has closed) ──
@@ -468,7 +524,7 @@ class OwloopTUI:
 
         if failed:
             owl = Text("\n".join(OWL_SLEEP), style=f"dim {RED}", justify="center")
-            lines = [Align.center(Text("✗ owloop 未启动", style=f"bold {RED}")), Text("")]
+            lines: list[RenderableType] = [Align.center(Text("✗ owloop failed to start", style=f"bold {RED}")), Text("")]
             for issue in summary.issues or []:
                 lines.append(Align.center(Text(f"· {issue}", style=f"dim {GRAY}")))
             body = Group(owl, Text(""), *lines)
@@ -481,20 +537,17 @@ class OwloopTUI:
         facts = Table.grid(padding=(0, 2))
         facts.add_column(style=f"dim {GRAY}", justify="right")
         facts.add_column(style=MOON_WHITE)
-        facts.add_row("分支", summary.branch)
+        facts.add_row("Branch", summary.branch)
         if s.specs:
-            done = sum(1 for spec in s.specs if spec.get("done"))
+            done = sum(1 for spec in s.specs if self._is_done(spec))
             facts.add_row("Specs", Text(f"{done}/{len(s.specs)} done", style=f"bold {GREEN}"))
-        facts.add_row("迭代", str(summary.iterations))
-        facts.add_row("耗时", _format_elapsed(elapsed))
+        facts.add_row("Iteration", str(summary.iterations))
+        facts.add_row("Time", _format_elapsed(elapsed))
 
-        hints_lines = [Text(f"分支: {summary.branch}", style=f"dim {GRAY}")]
-        if summary.cwd != summary.main_repo_dir:
-            hints_lines = [
-                Text(f"审查: git log --oneline HEAD~{summary.iterations}..HEAD", style=f"dim {GRAY}"),
-                Text(f"合并: cd {summary.main_repo_dir} && git merge {summary.branch}", style=f"dim {GRAY}"),
-                Text(f"丢弃: git worktree remove {summary.cwd}", style=f"dim {GRAY}"),
-            ]
+        hints_lines = [
+            Text(line, style=f"dim {GRAY}")
+            for line in exit_hints(summary.branch, summary.iterations, summary.cwd, summary.main_repo_dir)
+        ]
 
         body = Group(
             owl,

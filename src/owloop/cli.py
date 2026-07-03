@@ -3,19 +3,20 @@
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from owloop import _brand
 from owloop.adapters import get_adapter
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.reporter import ConsoleReporter
 from owloop.tui import OwloopTUI
-
-console = Console()
 
 DEFAULT_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 
@@ -45,12 +46,6 @@ After each change: run your lint/test commands, commit only if clean.
 Output when complete: `<promise>DONE</promise>`
 """
 
-OWLOOP_BANNER = Text.from_markup(
-    "[bold #d4a025]  ▄▄████▄▄\n"
-    " ██ ◉  ◉ ██   owloop\n"
-    "███ ╰▽╯ ███[/]\n"
-)
-
 
 CHECKED_BOX_RE = re.compile(r"- \[[xX]\]")
 
@@ -66,23 +61,53 @@ def classify_spec(content: str) -> str:
     return "pending"
 
 
-def render_progress_bar(done: int, total: int, width: int = 20) -> str:
+def _banner_text(ascii: bool = False, no_color: bool = False) -> Text | str:
+    """Return the owloop banner using brand owl art."""
+    art = _brand.ASCII_OWL_SMALL if ascii else _brand.OWL_SMALL
+    lines = list(art)
+    # Place the product name next to the owl's eyes.
+    if len(lines) > 1:
+        lines[1] = f"{lines[1]}   owloop"
+    joined = "\n".join(lines)
+    if ascii and no_color:
+        return joined
+    return Text.from_markup(f"[bold {_brand.AMBER}]{joined}[/]")
+
+
+def render_progress_bar(done: int, total: int, width: int = 20, ascii: bool = False) -> str:
     filled = round(width * done / total) if total else 0
     filled = max(0, min(width, filled))
     pct = round(done / total * 100) if total else 0
-    return f"[#d4a025]{'█' * filled}[/][dim]{'░' * (width - filled)}[/] {pct}%"
+    moon = _brand.ascii_moon_for_progress(done, total) if ascii else _brand.moon_for_progress(done, total)
+    return (
+        f"{moon} [{_brand.AMBER}]{'█' * filled}[/][{_brand.GRAY}]{'░' * (width - filled)}[/] {pct}%"
+    )
+
+
+def _cli_options() -> tuple[bool, bool, bool]:
+    """Read global --ascii / --no-color / --compact flags from the current Click context."""
+    ctx = click.get_current_context()
+    obj = ctx.ensure_object(dict)
+    return bool(obj.get("ascii")), bool(obj.get("no_color")), bool(obj.get("compact"))
 
 
 @click.group(invoke_without_command=True)
 @click.version_option(package_name="owloop")
+@click.option("--ascii", is_flag=True, default=False, help="Use ASCII art instead of Unicode glyphs.")
+@click.option("--no-color", is_flag=True, default=False, help="Disable colored terminal output.")
+@click.option("--compact", is_flag=True, default=False, help="Force the compact single-column TUI layout.")
 @click.pass_context
-def main(ctx: click.Context) -> None:
+def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool) -> None:
     """🦉 owloop — Your code evolves while you sleep."""
+    ctx.ensure_object(dict)
+    ctx.obj["ascii"] = ascii
+    ctx.obj["no_color"] = no_color
+    ctx.obj["compact"] = compact
+    console = Console(no_color=no_color)
+
     if ctx.invoked_subcommand is None:
-        console.print(OWLOOP_BANNER)
-        console.print(
-            "[dim]Spec-driven autonomous coding loop for Claude Code.[/]\n"
-        )
+        console.print(_banner_text(ascii=ascii, no_color=no_color))
+        console.print(f"[dim]{_brand.TAGLINE}[/]\n")
         console.print("Commands:")
         console.print("  [bold]owloop init[/]    Initialize owloop in current project")
         console.print("  [bold]owloop run[/]     Start the autonomous loop")
@@ -108,6 +133,8 @@ def main(ctx: click.Context) -> None:
 )
 def init(specs_dir: str, example: bool) -> None:
     """Initialize owloop in the current project."""
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
     cwd = Path.cwd()
 
     if not (cwd / ".git").exists():
@@ -151,14 +178,14 @@ def init(specs_dir: str, example: bool) -> None:
             created.append(f"{specs_dir}/01-example.md")
 
     console.print()
-    console.print(OWLOOP_BANNER)
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
 
     if created:
         console.print(
             Panel(
                 "\n".join(f"  [green]✓[/] {f}" for f in created),
                 title="[bold]Initialized[/]",
-                border_style="#d4a025",
+                border_style=_brand.AMBER,
                 padding=(1, 2),
             )
         )
@@ -166,7 +193,7 @@ def init(specs_dir: str, example: bool) -> None:
         console.print("[dim]Already initialized — nothing to create.[/]")
 
     console.print()
-    console.print("[bold #d4a025]Next steps:[/]")
+    console.print(f"[bold {_brand.AMBER}]Next steps:[/]")
     console.print(f"  1. Edit [bold]{specs_dir}/01-example.md[/] with your task")
     console.print("  2. Run [bold]owloop run[/]")
     console.print()
@@ -178,6 +205,7 @@ STOPPED_REASON_EXIT_1 = {"preflight_failed", "dirty_workspace_declined"}
 def _run_engine(
     mode: str, max_iterations: int, worktree: bool, model: str, agent: str,
     idle_timeout: float = 3600, max_duration: int = 0,
+    ascii: bool = False, no_color: bool = False, compact: bool = False,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -195,33 +223,39 @@ def _run_engine(
     )
 
     if sys.stdout.isatty():
-        tui = OwloopTUI()
+        tui = OwloopTUI(ascii=ascii, no_color=no_color, compact=compact)
         try:
             with tui:
                 engine = OwloopEngine(config, adapter, on_event=tui.on_event)
                 summary = engine.run()
         except KeyboardInterrupt:
+            console = Console(no_color=no_color)
             console.print("\n[dim]owloop stopped.[/]")
-            raise SystemExit(0)
+            raise SystemExit(0) from None
         tui.print_exit_summary(summary)
     else:
+        console = Console(no_color=no_color)
         console.print()
-        console.print(OWLOOP_BANNER)
-        console.print("[#d4a025]Starting autonomous loop...[/]" if mode == "build" else "[#d4a025]Planning mode — analyzing specs...[/]")
-        reporter = ConsoleReporter(console)
+        console.print(_banner_text(ascii=ascii, no_color=no_color))
+        console.print(
+            f"[{_brand.AMBER}]Starting autonomous loop...[/]"
+            if mode == "build"
+            else f"[{_brand.AMBER}]Planning mode — analyzing specs...[/]"
+        )
+        reporter = ConsoleReporter(console, ascii=ascii)
         engine = OwloopEngine(config, adapter, on_event=reporter.on_event)
         try:
             summary = engine.run()
         except KeyboardInterrupt:
             console.print("\n[dim]owloop stopped.[/]")
-            raise SystemExit(0)
+            raise SystemExit(0) from None
         reporter.print_summary(summary)
 
     if summary.stopped_reason in STOPPED_REASON_EXIT_1:
         raise SystemExit(1)
 
 
-def _common_run_options(f):
+def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
     """Shared options for run and plan commands."""
     f = click.option(
         "--agent", type=click.Choice(["claude"]), default="claude",
@@ -255,13 +289,18 @@ def _common_run_options(f):
 def run(max_iterations: int, worktree: bool, model: str, agent: str,
         idle_timeout: float, max_duration: int) -> None:
     """Start the autonomous coding loop."""
+    ascii, no_color, compact = _cli_options()
     specs_dir = Path.cwd() / "specs"
     if not specs_dir.exists() or not list(specs_dir.glob("*.md")):
+        console = Console(no_color=no_color)
         console.print("[red]Error:[/] No specs found. Create specs in [bold]specs/[/] first.")
         console.print("[dim]Run [bold]owloop init[/] to get started.[/]")
         raise SystemExit(1)
 
-    _run_engine("build", max_iterations, worktree, model, agent, idle_timeout, max_duration)
+    _run_engine(
+        "build", max_iterations, worktree, model, agent,
+        idle_timeout, max_duration, ascii=ascii, no_color=no_color, compact=compact,
+    )
 
 
 @main.command()
@@ -273,12 +312,18 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
 def plan(max_iterations: int, worktree: bool, model: str, agent: str,
          idle_timeout: float, max_duration: int) -> None:
     """Generate an implementation plan from specs."""
-    _run_engine("plan", max_iterations, worktree, model, agent, idle_timeout, max_duration)
+    ascii, no_color, compact = _cli_options()
+    _run_engine(
+        "plan", max_iterations, worktree, model, agent,
+        idle_timeout, max_duration, ascii=ascii, no_color=no_color, compact=compact,
+    )
 
 
 @main.command()
 def status() -> None:
     """Show current specs and their completion status."""
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
     specs_dir = Path.cwd() / "specs"
 
     if not specs_dir.exists():
@@ -291,13 +336,13 @@ def status() -> None:
         raise SystemExit(0)
 
     console.print()
-    console.print(OWLOOP_BANNER)
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
 
     from rich.table import Table
 
     table = Table(
         title="Specs",
-        border_style="#d4a025",
+        border_style=_brand.AMBER,
         show_lines=False,
         padding=(0, 2),
     )
@@ -306,9 +351,9 @@ def status() -> None:
     table.add_column("Priority", justify="center")
     table.add_column("Status", justify="center")
 
-    STATE_DISPLAY = {
+    state_display = {
         "done": ("[green]✓[/]", "[green]done[/]"),
-        "in_progress": ("[#d4a025]🦉[/]", "[#d4a025]in progress[/]"),
+        "in_progress": (f"[{_brand.AMBER}]🦉[/]", f"[{_brand.AMBER}]in progress[/]"),
         "pending": ("[dim]○[/]", "[dim]pending[/]"),
     }
 
@@ -325,16 +370,16 @@ def status() -> None:
                 priority = line.split(":")[-1].strip()
                 break
 
-        icon, status_text = STATE_DISPLAY[state]
+        icon, status_text = state_display[state]
         table.add_row(icon, spec_file.name, priority, status_text)
 
     total = len(specs)
     console.print(
         f"  [green]✓ {counts['done']} done[/] · "
-        f"[#d4a025]🦉 {counts['in_progress']} in progress[/] · "
+        f"[{_brand.AMBER}]🦉 {counts['in_progress']} in progress[/] · "
         f"[dim]○ {counts['pending']} pending[/]"
     )
-    console.print(f"  {render_progress_bar(counts['done'], total)}")
+    console.print(f"  {render_progress_bar(counts['done'], total, ascii=ascii)}")
     console.print()
     console.print(table)
     console.print()
@@ -343,7 +388,10 @@ def status() -> None:
 @main.command()
 def version() -> None:
     """Show the owloop version."""
-    from importlib.metadata import PackageNotFoundError, version as pkg_version
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as pkg_version
 
     try:
         v = pkg_version("owloop")
@@ -351,8 +399,8 @@ def version() -> None:
         v = "0.0.0-dev"
 
     console.print()
-    console.print(OWLOOP_BANNER)
-    console.print(f"[bold]owloop[/] [#d4a025]v{v}[/]")
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[bold]owloop[/] [{_brand.AMBER}]v{v}[/]")
     console.print()
 
 

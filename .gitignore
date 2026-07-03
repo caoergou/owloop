@@ -12,6 +12,8 @@ build/
 .ruff_cache/
 .mypy_cache/
 .venv/
+.coverage
+htmlcov/
 
 # owloop runtime
 logs/

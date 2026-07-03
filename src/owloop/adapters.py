@@ -8,6 +8,7 @@ interface leaves room for future adapters (Codex, OpenCode, ...) and for a
 
 from __future__ import annotations
 
+import contextlib
 import os
 import queue
 import re
@@ -16,9 +17,9 @@ import signal
 import subprocess
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 DONE_SIGNAL_RE = re.compile(r"<promise>(?:ALL_)?DONE</promise>")
@@ -82,7 +83,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         issues: list[str] = []
 
         if not shutil.which(self.claude_cmd):
-            issues.append(f"未找到 {self.claude_cmd} 命令，请先安装并登录 Claude Code CLI")
+            issues.append(f"{self.claude_cmd} command not found, please install and log in to Claude Code CLI")
             return issues
 
         try:
@@ -101,11 +102,11 @@ class ClaudeCodeAdapter(AgentAdapter):
             if probe.returncode != 0:
                 detail = (probe.stderr or probe.stdout).strip().splitlines()
                 tail = detail[-1] if detail else "(no output)"
-                issues.append(f"claude 冒烟测试失败（returncode={probe.returncode}）: {tail}")
+                issues.append(f"claude smoke test failed (returncode={probe.returncode}): {tail}")
         except subprocess.TimeoutExpired:
-            issues.append("claude 冒烟测试超时（30s），请检查网络连接或登录状态")
+            issues.append("claude smoke test timed out (30s), please check network connection or login status")
         except OSError as exc:
-            issues.append(f"claude 冒烟测试异常: {exc}")
+            issues.append(f"claude smoke test error: {exc}")
 
         return issues
 
@@ -128,10 +129,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
 
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
         try:
@@ -248,4 +247,4 @@ def get_adapter(
             claude_cmd=claude_cmd,
             idle_timeout=idle_timeout,
         )
-    raise ValueError(f"未知的 agent 类型: {agent!r}（目前只支持 'claude'）")
+    raise ValueError(f"unknown agent type: {agent!r} (currently only supports 'claude')")
