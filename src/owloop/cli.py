@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -11,7 +12,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from owloop.engine import EngineConfig, OwloopEngine
+from owloop.reporter import ConsoleReporter
+from owloop.tui import OwloopTUI
+
 console = Console()
+
+DEFAULT_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 
 SPEC_TEMPLATE = """\
 # Spec: {name}
@@ -195,6 +202,67 @@ def init(specs_dir: str, example: bool) -> None:
     console.print()
 
 
+def _run_legacy_script(mode: str, max_iterations: int, worktree: bool) -> None:
+    script = find_script()
+    if not script:
+        console.print("[red]Error:[/] owloop.sh not found. Run [bold]owloop init[/] first.")
+        raise SystemExit(1)
+
+    env = os.environ.copy()
+    if not worktree:
+        env["OWLOOP_SKIP_WORKTREE"] = "1"
+
+    cmd = ["bash", str(script)]
+    if mode == "plan":
+        cmd.append("plan")
+    if max_iterations > 0:
+        cmd.append(str(max_iterations))
+
+    try:
+        result = subprocess.run(cmd, env=env)
+        raise SystemExit(result.returncode)
+    except KeyboardInterrupt:
+        console.print("\n[dim]owloop stopped.[/]")
+        raise SystemExit(0)
+
+
+def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str) -> None:
+    config = EngineConfig(
+        project_dir=Path.cwd(),
+        mode=mode,
+        max_iterations=max_iterations,
+        model=model,
+        claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+        worktree=worktree,
+    )
+
+    if sys.stdout.isatty():
+        tui = OwloopTUI()
+        try:
+            with tui:
+                engine = OwloopEngine(config, on_event=tui.on_event)
+                summary = engine.run()
+        except KeyboardInterrupt:
+            console.print("\n[dim]owloop stopped.[/]")
+            raise SystemExit(0)
+        tui.print_exit_summary(summary)
+    else:
+        console.print()
+        console.print(OWLOOP_BANNER)
+        console.print("[#d4a025]Starting autonomous loop...[/]" if mode == "build" else "[#d4a025]Planning mode — analyzing specs...[/]")
+        reporter = ConsoleReporter(console)
+        engine = OwloopEngine(config, on_event=reporter.on_event)
+        try:
+            summary = engine.run()
+        except KeyboardInterrupt:
+            console.print("\n[dim]owloop stopped.[/]")
+            raise SystemExit(0)
+        reporter.print_summary(summary)
+
+    if summary.stopped_reason == "claude_cli_missing":
+        raise SystemExit(1)
+
+
 @main.command()
 @click.option(
     "--max-iterations", "-n",
@@ -209,39 +277,35 @@ def init(specs_dir: str, example: bool) -> None:
     help="Run in an isolated git worktree.",
     show_default=True,
 )
-def run(max_iterations: int, worktree: bool) -> None:
+@click.option(
+    "--model",
+    default=DEFAULT_MODEL,
+    help="Claude model to use (or set CLAUDE_MODEL).",
+    show_default=True,
+)
+@click.option(
+    "--legacy",
+    is_flag=True,
+    default=False,
+    help="Use the legacy bash loop engine (scripts/owloop.sh) instead of the built-in Python engine.",
+)
+def run(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
     """Start the autonomous coding loop."""
-    script = find_script()
-    if not script:
-        console.print("[red]Error:[/] owloop.sh not found. Run [bold]owloop init[/] first.")
-        raise SystemExit(1)
-
     specs_dir = Path.cwd() / "specs"
     if not specs_dir.exists() or not list(specs_dir.glob("*.md")):
         console.print("[red]Error:[/] No specs found. Create specs in [bold]specs/[/] first.")
         console.print("[dim]Run [bold]owloop init[/] to get started.[/]")
         raise SystemExit(1)
 
-    console.print()
-    console.print(OWLOOP_BANNER)
-    console.print("[#d4a025]Starting autonomous loop...[/]")
+    if legacy:
+        console.print()
+        console.print(OWLOOP_BANNER)
+        console.print("[#d4a025]Starting autonomous loop (legacy bash engine)...[/]")
+        console.print()
+        _run_legacy_script("build", max_iterations, worktree)
+        return
 
-    env = os.environ.copy()
-    if not worktree:
-        console.print("[dim]○ Worktree isolation disabled — running directly in this checkout.[/]")
-        env["OWLOOP_SKIP_WORKTREE"] = "1"
-    console.print()
-
-    cmd = ["bash", str(script)]
-    if max_iterations > 0:
-        cmd.append(str(max_iterations))
-
-    try:
-        result = subprocess.run(cmd, env=env)
-        raise SystemExit(result.returncode)
-    except KeyboardInterrupt:
-        console.print("\n[dim]owloop stopped.[/]")
-        raise SystemExit(0)
+    _run_engine("build", max_iterations, worktree, model)
 
 
 @main.command()
@@ -252,28 +316,35 @@ def run(max_iterations: int, worktree: bool) -> None:
     help="Maximum planning iterations.",
     show_default=True,
 )
-def plan(max_iterations: int) -> None:
+@click.option(
+    "--worktree/--no-worktree",
+    default=True,
+    help="Run in an isolated git worktree.",
+    show_default=True,
+)
+@click.option(
+    "--model",
+    default=DEFAULT_MODEL,
+    help="Claude model to use (or set CLAUDE_MODEL).",
+    show_default=True,
+)
+@click.option(
+    "--legacy",
+    is_flag=True,
+    default=False,
+    help="Use the legacy bash loop engine (scripts/owloop.sh) instead of the built-in Python engine.",
+)
+def plan(max_iterations: int, worktree: bool, model: str, legacy: bool) -> None:
     """Generate an implementation plan from specs."""
-    script = find_script()
-    if not script:
-        console.print("[red]Error:[/] owloop.sh not found. Run [bold]owloop init[/] first.")
-        raise SystemExit(1)
+    if legacy:
+        console.print()
+        console.print(OWLOOP_BANNER)
+        console.print("[#d4a025]Planning mode — analyzing specs (legacy bash engine)...[/]")
+        console.print()
+        _run_legacy_script("plan", max_iterations, worktree)
+        return
 
-    console.print()
-    console.print(OWLOOP_BANNER)
-    console.print("[#d4a025]Planning mode — analyzing specs...[/]")
-    console.print()
-
-    cmd = ["bash", str(script), "plan"]
-    if max_iterations > 0:
-        cmd.append(str(max_iterations))
-
-    try:
-        result = subprocess.run(cmd)
-        raise SystemExit(result.returncode)
-    except KeyboardInterrupt:
-        console.print("\n[dim]owloop stopped.[/]")
-        raise SystemExit(0)
+    _run_engine("plan", max_iterations, worktree, model)
 
 
 @main.command()
