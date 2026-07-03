@@ -107,6 +107,7 @@ class AppState:
     flash: tuple[str, str, float] | None = None
     done: bool = False
     stopped_reason: str = ""
+    _spinner: str = "⠋"
 
 
 class OwloopTUI:
@@ -144,12 +145,19 @@ class OwloopTUI:
             self._live_started = False
 
     def _tick_loop(self) -> None:
-        while not self._stop_ticker.wait(0.5):
+        spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        frame_idx = 0
+        while not self._stop_ticker.wait(0.25):
             with self._lock:
                 now = time.monotonic()
+                # owl blink animation
                 if now >= self.state.next_blink:
                     self.state.blink = not self.state.blink
                     self.state.next_blink = now + (0.3 if self.state.blink else random.uniform(3, 7))
+                # working spinner — show elapsed time so user knows it's alive
+                if self.state.phase == "working":
+                    frame_idx = (frame_idx + 1) % len(spinner_frames)
+                    self.state._spinner = spinner_frames[frame_idx]
                 self._render()
 
     # ── engine event handling ──
@@ -292,7 +300,10 @@ class OwloopTUI:
         if s.phase == "done_signal":
             return Text(f"🌙 第 {s.iteration} 轮完成", style=f"bold {MOON_WHITE}")
         if s.iteration:
-            return Text(f"🦉 第 {s.iteration} 轮进行中...", style=f"bold {AMBER}")
+            elapsed = time.monotonic() - s.start_time
+            iter_elapsed = _format_elapsed(elapsed)
+            spinner = getattr(s, '_spinner', '⠋')
+            return Text(f"{spinner} 第 {s.iteration} 轮进行中... ({iter_elapsed})", style=f"bold {AMBER}")
         return Text("🦉 启动中...", style=f"bold {AMBER}")
 
     def _render_header(self) -> Panel:
@@ -390,6 +401,14 @@ class OwloopTUI:
             prefix = "▸" if is_latest else " "
             style = f"bold {MOON_WHITE}" if is_latest else GRAY
             rows.append(Text(f"{prefix} {line}", style=style, no_wrap=True, overflow="ellipsis"))
+        # When working but no recent output, show a reassuring message
+        if self.state.phase == "working" and self.state.iteration > 0:
+            elapsed = time.monotonic() - self.state.start_time
+            spinner = getattr(self.state, '_spinner', '⠋')
+            rows.append(Text(
+                f"  {spinner} claude -p 运行中，输出将在本轮结束时显示...",
+                style=f"dim italic {GRAY}", no_wrap=True
+            ))
         return Panel(Group(*rows) if rows else Text(""), title="Activity", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
 
     def _render_footer(self) -> Panel:
