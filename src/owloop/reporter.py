@@ -159,7 +159,7 @@ class ConsoleReporter:
         c = self.console
         failed = summary.stopped_reason in self.FAILED_REASONS
 
-        owl_art = _brand.ASCII_OWL_SMALL if self.ascii else _brand.OWL_SLEEP
+        owl_art = _brand.ASCII_OWL_SMALL if self.ascii else [_brand.OWL_EMOJI]
         owl = Text("\n".join(owl_art), justify="center")
 
         commits, (total_files, total_ins, total_del) = self._gather_summary_stats(summary)

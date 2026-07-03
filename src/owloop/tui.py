@@ -39,6 +39,7 @@ from owloop._brand import (
     MOON_WHITE,
     NIGHT,
     OWL_BLINK,
+    OWL_EMOJI,
     OWL_MEDIUM,
     OWL_SLEEP,
     RED,
@@ -490,6 +491,8 @@ class OwloopTUI:
             self.layout["owl"].update(panel)
 
     def _build_owl_panel(self, art: list[str], caption: str, border: str) -> Panel:
+        if not self.ascii:
+            art = ["", OWL_EMOJI, ""]
         owl_text = Text("\n".join(art), style=f"bold {AMBER}", justify="center")
         caption_text = Text(caption, style=f"italic {MOON_WHITE}", justify="center")
         body = Group(Text(""), owl_text, Text(""), caption_text)
@@ -507,14 +510,18 @@ class OwloopTUI:
                 grid[y][x] = ch
                 styles[y][x] = STAR_STYLE
 
-        art = self._owl_art_for_phase()
-        top = (SCENE_H - len(art)) // 2
-        left = (SCENE_W - len(art[0])) // 2
-        for dy, row in enumerate(art):
-            for dx, ch in enumerate(row):
-                if ch != " ":
-                    grid[top + dy][left + dx] = ch
-                    styles[top + dy][left + dx] = f"bold {AMBER}"
+        if self.ascii:
+            art = self._owl_art_for_phase()
+            top = (SCENE_H - len(art)) // 2
+            left = (SCENE_W - len(art[0])) // 2
+            for dy, row in enumerate(art):
+                for dx, ch in enumerate(row):
+                    if ch != " ":
+                        grid[top + dy][left + dx] = ch
+                        styles[top + dy][left + dx] = f"bold {AMBER}"
+        else:
+            grid[SCENE_H // 2][SCENE_W // 2] = OWL_EMOJI
+            styles[SCENE_H // 2][SCENE_W // 2] = f"bold {AMBER}"
 
         text = Text(justify="center")
         for y in range(SCENE_H):
