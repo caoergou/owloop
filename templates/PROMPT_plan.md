@@ -2,7 +2,7 @@
 
 You are running inside an Owloop autonomous loop in planning mode.
 
-Read `.specify/memory/constitution.md` for project principles.
+If a CLAUDE.md file exists in this project, read it first.
 
 Study `specs/` and compare against the current codebase (gap analysis).
 Create or update `IMPLEMENTATION_PLAN.md` with a prioritized task breakdown.

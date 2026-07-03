@@ -2,16 +2,16 @@
 
 ## Quick Start
 
-**To start Ralph loop:**
+**To start the owloop loop:**
 ```bash
-./scripts/ralph-loop.sh
+owloop run
 ```
 
 This works directly from specs — no planning step needed.
 
 ---
 
-## How Ralph Works
+## How owloop Works
 
 1. Agent reads `specs/` folder
 2. Picks the **highest priority incomplete spec** (lowest number first)
@@ -20,12 +20,6 @@ This works directly from specs — no planning step needed.
 5. Outputs `<promise>DONE</promise>`
 6. Loop restarts with fresh context
 7. Repeat until all specs are done
-
----
-
-## Project Constitution
-
-Read `.specify/memory/constitution.md` for project principles.
 
 ---
 
@@ -41,7 +35,7 @@ Specs are numbered: `001-xxx`, `002-xxx`, etc.
 
 Only if you need detailed task breakdown:
 ```bash
-./scripts/ralph-loop.sh plan
+owloop plan
 ```
 
 **Most projects don't need this** — specs are the plan.

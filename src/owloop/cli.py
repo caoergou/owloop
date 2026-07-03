@@ -2,8 +2,6 @@
 
 import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -52,18 +50,6 @@ OWLOOP_BANNER = Text.from_markup(
     " ██ ◉  ◉ ██   owloop\n"
     "███ ╰▽╯ ███[/]\n"
 )
-
-
-def find_script() -> Path | None:
-    candidates = [
-        Path(__file__).parent.parent.parent / "scripts" / "owloop.sh",
-        Path.cwd() / "scripts" / "owloop.sh",
-        Path.home() / ".claude" / "skills" / "owloop" / "scripts" / "owloop.sh",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
 
 
 CHECKED_BOX_RE = re.compile(r"- \[[xX]\]")
@@ -164,22 +150,6 @@ def init(specs_dir: str, example: bool) -> None:
             )
             created.append(f"{specs_dir}/01-example.md")
 
-    script = find_script()
-    if script:
-        target = cwd / "scripts" / "owloop.sh"
-        if not target.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(script, target)
-            target.chmod(0o755)
-            created.append("scripts/owloop.sh")
-
-        lib_src = script.parent / "lib"
-        if lib_src.exists():
-            lib_target = target.parent / "lib"
-            if not lib_target.exists():
-                shutil.copytree(lib_src, lib_target)
-                created.append("scripts/lib/")
-
     console.print()
     console.print(OWLOOP_BANNER)
 
@@ -202,44 +172,26 @@ def init(specs_dir: str, example: bool) -> None:
     console.print()
 
 
-def _run_legacy_script(mode: str, max_iterations: int, worktree: bool) -> None:
-    script = find_script()
-    if not script:
-        console.print("[red]Error:[/] owloop.sh not found. Run [bold]owloop init[/] first.")
-        raise SystemExit(1)
-
-    env = os.environ.copy()
-    if not worktree:
-        env["OWLOOP_SKIP_WORKTREE"] = "1"
-
-    cmd = ["bash", str(script)]
-    if mode == "plan":
-        cmd.append("plan")
-    if max_iterations > 0:
-        cmd.append(str(max_iterations))
-
-    try:
-        result = subprocess.run(cmd, env=env)
-        raise SystemExit(result.returncode)
-    except KeyboardInterrupt:
-        console.print("\n[dim]owloop stopped.[/]")
-        raise SystemExit(0)
-
-
 STOPPED_REASON_EXIT_1 = {"preflight_failed", "dirty_workspace_declined"}
 
 
-def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str, agent: str) -> None:
+def _run_engine(
+    mode: str, max_iterations: int, worktree: bool, model: str, agent: str,
+    idle_timeout: float = 3600, max_duration: int = 0,
+) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
         mode=mode,
         max_iterations=max_iterations,
+        max_duration_minutes=max_duration,
+        idle_timeout=idle_timeout,
         worktree=worktree,
     )
     adapter = get_adapter(
         agent,
         model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+        idle_timeout=idle_timeout,
     )
 
     if sys.stdout.isatty():
@@ -269,40 +221,39 @@ def _run_engine(mode: str, max_iterations: int, worktree: bool, model: str, agen
         raise SystemExit(1)
 
 
+def _common_run_options(f):
+    """Shared options for run and plan commands."""
+    f = click.option(
+        "--agent", type=click.Choice(["claude"]), default="claude",
+        help="Coding agent adapter.", show_default=True,
+    )(f)
+    f = click.option(
+        "--model", default=DEFAULT_MODEL,
+        help="Claude model to use (or set CLAUDE_MODEL).", show_default=True,
+    )(f)
+    f = click.option(
+        "--idle-timeout", type=float, default=3600,
+        help="Kill agent after N seconds without output.", show_default=True,
+    )(f)
+    f = click.option(
+        "--max-duration", type=int, default=0,
+        help="Stop loop after N minutes total (0 = unlimited).", show_default=True,
+    )(f)
+    f = click.option(
+        "--worktree/--no-worktree", default=True,
+        help="Run in an isolated git worktree.", show_default=True,
+    )(f)
+    return f
+
+
 @main.command()
 @click.option(
-    "--max-iterations", "-n",
-    type=int,
-    default=0,
-    help="Maximum iterations (0 = unlimited).",
-    show_default=True,
+    "--max-iterations", "-n", type=int, default=0,
+    help="Maximum iterations (0 = unlimited).", show_default=True,
 )
-@click.option(
-    "--worktree/--no-worktree",
-    default=True,
-    help="Run in an isolated git worktree.",
-    show_default=True,
-)
-@click.option(
-    "--model",
-    default=DEFAULT_MODEL,
-    help="Claude model to use (or set CLAUDE_MODEL).",
-    show_default=True,
-)
-@click.option(
-    "--agent",
-    type=click.Choice(["claude"]),
-    default="claude",
-    help="Coding agent adapter to drive the loop with.",
-    show_default=True,
-)
-@click.option(
-    "--legacy",
-    is_flag=True,
-    default=False,
-    help="Use the legacy bash loop engine (scripts/owloop.sh) instead of the built-in Python engine.",
-)
-def run(max_iterations: int, worktree: bool, model: str, agent: str, legacy: bool) -> None:
+@_common_run_options
+def run(max_iterations: int, worktree: bool, model: str, agent: str,
+        idle_timeout: float, max_duration: int) -> None:
     """Start the autonomous coding loop."""
     specs_dir = Path.cwd() / "specs"
     if not specs_dir.exists() or not list(specs_dir.glob("*.md")):
@@ -310,61 +261,19 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str, legacy: boo
         console.print("[dim]Run [bold]owloop init[/] to get started.[/]")
         raise SystemExit(1)
 
-    if legacy:
-        console.print()
-        console.print(OWLOOP_BANNER)
-        console.print("[#d4a025]Starting autonomous loop (legacy bash engine)...[/]")
-        console.print()
-        _run_legacy_script("build", max_iterations, worktree)
-        return
-
-    _run_engine("build", max_iterations, worktree, model, agent)
+    _run_engine("build", max_iterations, worktree, model, agent, idle_timeout, max_duration)
 
 
 @main.command()
 @click.option(
-    "--max-iterations", "-n",
-    type=int,
-    default=1,
-    help="Maximum planning iterations.",
-    show_default=True,
+    "--max-iterations", "-n", type=int, default=1,
+    help="Maximum planning iterations.", show_default=True,
 )
-@click.option(
-    "--worktree/--no-worktree",
-    default=True,
-    help="Run in an isolated git worktree.",
-    show_default=True,
-)
-@click.option(
-    "--model",
-    default=DEFAULT_MODEL,
-    help="Claude model to use (or set CLAUDE_MODEL).",
-    show_default=True,
-)
-@click.option(
-    "--agent",
-    type=click.Choice(["claude"]),
-    default="claude",
-    help="Coding agent adapter to drive the loop with.",
-    show_default=True,
-)
-@click.option(
-    "--legacy",
-    is_flag=True,
-    default=False,
-    help="Use the legacy bash loop engine (scripts/owloop.sh) instead of the built-in Python engine.",
-)
-def plan(max_iterations: int, worktree: bool, model: str, agent: str, legacy: bool) -> None:
+@_common_run_options
+def plan(max_iterations: int, worktree: bool, model: str, agent: str,
+         idle_timeout: float, max_duration: int) -> None:
     """Generate an implementation plan from specs."""
-    if legacy:
-        console.print()
-        console.print(OWLOOP_BANNER)
-        console.print("[#d4a025]Planning mode — analyzing specs (legacy bash engine)...[/]")
-        console.print()
-        _run_legacy_script("plan", max_iterations, worktree)
-        return
-
-    _run_engine("plan", max_iterations, worktree, model, agent)
+    _run_engine("plan", max_iterations, worktree, model, agent, idle_timeout, max_duration)
 
 
 @main.command()

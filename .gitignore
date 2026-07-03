@@ -1,4 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Dev tools
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# owloop runtime
 logs/
 PROMPT_build.md
 PROMPT_plan.md
-src/owloop/__pycache__/

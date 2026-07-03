@@ -82,6 +82,11 @@ class ConsoleReporter:
             c.print(f"[cyan]已复制 .claude/ 配置到 worktree: {data['path']}[/]")
         elif kind == "stuck_warning":
             c.print(f"[red]⚠ 已连续 {data['consecutive_failures']} 轮未完成，Agent 可能卡住了[/]")
+        elif kind == "fix_loop_warning":
+            files = ", ".join(data["files"][:5])
+            c.print(f"[yellow]⚠ 检测到修复循环：{files} 连续 {data['consecutive']} 轮被修改[/]")
+        elif kind == "max_duration_reached":
+            c.print(f"[yellow]⏱ 已达运行时间上限 ({data['minutes']} 分钟)，停止循环[/]")
         elif kind == "push_retry":
             c.print(f"[yellow]推送失败，创建远程分支 {data['branch']}...[/]")
         elif kind == "plan_complete":

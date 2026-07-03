@@ -269,6 +269,15 @@ class OwloopTUI:
             s.phase = "stuck"
             self._log(f"💤 已连续 {data['consecutive_failures']} 轮未完成，Agent 可能卡住了")
             self._flash("💤 卡住了，继续重试...", f"bold {GRAY}")
+        elif kind == "fix_loop_warning":
+            files = ", ".join(data["files"][:3])
+            self._log(f"⚠ 检测到修复循环：{files} 连续 {data['consecutive']} 轮被修改")
+            self._flash("⚠ 疑似修复循环", f"bold {RED}")
+        elif kind == "max_duration_reached":
+            s.done = True
+            s.phase = "complete"
+            self._log(f"⏱ 已达运行时间上限 ({data['minutes']} 分钟)，停止循环")
+            self._flash("⏱ 时间到", f"bold {AMBER}")
         elif kind == "push_retry":
             self._log(f"推送失败，创建远程分支 {data['branch']}...")
         elif kind == "iteration_end":

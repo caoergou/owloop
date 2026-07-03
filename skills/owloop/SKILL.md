@@ -1,243 +1,106 @@
 ---
 name: owloop
-description: "Loop engineering tool: spec-driven autonomous coding loop that runs overnight. Write specs, start the loop, wake up to verified code."
-keywords:
-  - autonomous
-  - loop
-  - overnight
-  - spec-driven
-  - loop-engineering
-  - ralph-wiggum
-  - coding-agent
-  - verification
-  - fresh-context
-  - worktree
-  - claude-code
-  - refactoring
+description: >-
+  Spec-driven autonomous coding loop for Claude Code — 规范驱动的自主编码循环。
+  Write constraint-oriented specs with shell-verifiable acceptance criteria,
+  run the loop overnight, wake up to verified commits.
+  Use when user mentions owloop, autonomous loop, spec-driven, overnight coding,
+  loop engineering, 自主循环, 写 spec, 跑循环, 无人值守, 循环工程, 隔夜编码.
+license: MIT
+compatibility: Requires Python 3.10+, git, and Claude Code CLI
 metadata:
   author: caoergou
-  version: "0.1.0"
+  version: "0.2.0"
   repository: https://github.com/caoergou/owloop
-license: MIT
 ---
 
 # Owloop
 
-> Loop engineering: spec-driven autonomous coding loop that runs overnight. Write specs, start the loop, wake up to verified code.
+> **Language policy:** Respond in the user's language. If the user writes in Chinese, respond entirely in Chinese. If in English, respond in English. Section headers in generated spec files are always English (`## Requirements`, `## Exclusions`, etc.).
 
-## What is Owloop?
+Owloop is a **loop engineering** tool: it combines spec-driven development with an autonomous coding loop for Claude Code. Each iteration spawns a fresh `claude -p` process against one spec, verifies acceptance criteria with shell commands, and commits only on success.
 
-Owloop combines **Geoffrey Huntley's iterative bash loop** with **spec-driven development** for fully autonomous AI-assisted software development — a discipline we call **loop engineering**: designing the spec, the verification command, and the exclusions so an unattended agent loop converges instead of wandering.
+## When to Use
 
-The key insight: **Fresh context each iteration**. Each loop starts a new agent process with a clean context window, preventing context overflow and degradation.
+- Mechanical improvements: lint fixes, type annotations, dead code removal, error handling unification
+- Overnight unattended runs against a backlog of well-defined tasks
+- Any task where "done" can be expressed as a shell command
+- When `/goal` stops early because the Haiku evaluator misjudges completion
 
-## When to Use owloop
-
-- You have a codebase that needs mechanical improvements (lint fixes, type annotations, dead code removal, error handling unification)
-- You want to run these improvements overnight without babysitting
-- You need verification that changes actually work (shell-verifiable acceptance criteria)
-- You're tired of `/goal` stopping early because the Haiku evaluator misjudges completion
-- You want fresh context per iteration (no context window overflow on long runs)
-- You have multiple specifications/features to implement and want the AI to work through them autonomously
-
-## When NOT to Use owloop
+## When NOT to Use
 
 - Tasks requiring product judgment or design decisions
 - Security-sensitive changes
 - Anything where "done" can't be expressed as a shell command
 
-## How owloop Compares
-
-| | owloop | /goal | gnhf | roborev |
-|---|---|---|---|---|
-| Completion check | grep (deterministic) | Haiku model (probabilistic) | grep | AI review |
-| Context management | Fresh per iteration | Same session | Fresh per iteration | Fresh per iteration |
-| Spec format | Constraint-oriented | Free-form prompt | Free-form prompt | Review guidelines |
-| Install footprint | Zero (uvx) | Built-in | npm -g | brew/go install |
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     OWLOOP LOOP                              │
-├─────────────────────────────────────────────────────────────┤
-│  Loop 1: Pick spec A → Implement → Test → Commit → DONE    │
-│  Loop 2: Pick spec B → Implement → Test → Commit → DONE    │
-│  Loop 3: Pick spec C → Implement → Test → Commit → DONE    │
-│  ...                                                        │
-│                                                             │
-│  Each iteration = Fresh context window                      │
-│  Shared state = Files on disk (specs, plan, history)        │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Installation
-
-### Quick Install (via Skill Installers)
+## Quick Start
 
 ```bash
-# Using Vercel's add-skill
-npx add-skill caoergou/owloop
+# Install
+uv tool install git+https://github.com/caoergou/owloop
 
-# Using OpenSkills
-openskills install caoergou/owloop
+# Initialize in your project
+owloop init
+
+# Edit the example spec, then run
+owloop run
 ```
 
-### Full Setup (Recommended)
+## Core Architecture
 
-For full Owloop setup with constitution and interview:
-
-```bash
-# Tell your AI agent:
-"Set up Owloop using https://github.com/caoergou/owloop"
+```
+Loop iteration N:
+  1. Pick highest-priority incomplete spec from specs/
+  2. Spawn fresh `claude -p --permission-mode auto` (zero accumulated context)
+  3. Agent implements spec, runs verification commands
+  4. Agent outputs <promise>DONE</promise> on success
+  5. Loop detects signal via grep (deterministic, not AI judgment)
+  6. Commit + push, move to next spec
 ```
 
-The agent will guide you through a **lightweight, pleasant setup**:
+**Key properties:**
+- **Fresh context every iteration** — no context overflow, no degradation
+- **State on disk** — `specs/`, `IMPLEMENTATION_PLAN.md`, `logs/`
+- **Auto Mode** — `--permission-mode auto`, never YOLO
+- **Worktree isolation** — runs in a separate `git worktree`, main checkout untouched
+- **Stuck detection** — 3 consecutive failures triggers warning and reset
+- **Fix-loop detection** — same files modified 3+ rounds warns of possible death spiral
+- **Duration cap** — `--max-duration` prevents overnight cost runaway
 
-1. **Quick Setup** (~1 min) — Create directories, download scripts
-2. **Project Interview** — Focus on your **vision and goals** (not tech details)
-3. **Constitution** — Create a guiding document for all sessions
-4. **Next Steps** — Clear guidance on creating specs and starting Owloop
+## Commands
 
-For existing projects, the agent detects your tech stack automatically. The interview prioritizes understanding *what you're building and why*.
+| Command | Description |
+|---|---|
+| `owloop init` | Initialize owloop in current project (creates `specs/`, templates) |
+| `owloop run` | Start the autonomous loop with TUI |
+| `owloop run -n 20` | Limit to 20 iterations |
+| `owloop run --max-duration 120` | Stop after 2 hours |
+| `owloop plan` | Generate implementation plan from specs |
+| `owloop status` | Show specs and completion progress |
 
-## Core Concepts
+## Writing Specs
 
-### 1. Fresh Context Each Loop
+The spec format is **constraint-oriented**: define what's off-limits, then make every acceptance criterion a shell command. See [references/spec-format.md](references/spec-format.md) for the complete template and examples.
 
-Each iteration of the Owloop loop starts a new AI agent process. This means:
-- No context window overflow
-- No degradation over time
-- Clean slate for each task
+Key sections:
+- **Requirements** — what to build
+- **Acceptance Criteria** — `command → expected output` (shell-verifiable)
+- **Exclusions** — what NOT to touch (highest-leverage section for preventing drift)
+- **Style** — conventions to follow
+- **Verification** — exact commands to run before claiming completion
 
-### 2. Shared State on Disk
+## How It Compares
 
-State persists between loops via files:
-- `specs/` — Feature specifications with acceptance criteria
-- `owloop_history.txt` — Log of breakthroughs, blockers, learnings
-- `IMPLEMENTATION_PLAN.md` — Optional detailed task breakdown
+See [references/comparison.md](references/comparison.md) for detailed comparison with `/goal`, gnhf, and roborev.
 
-### 3. Completion Signal
-
-The agent outputs `<promise>DONE</promise>` **ONLY** when:
-- All acceptance criteria are verified
-- Tests pass
-- Changes are committed and pushed
-
-The bash loop checks for this phrase. If not found, it retries.
-
-### 4. Backpressure via Tests
-
-Tests, lints, and builds act as guardrails. The agent must fix issues before outputting the completion signal.
-
-### 5. Constraint-Oriented Specs
-
-Beyond Requirements and Acceptance Criteria, Owloop specs carry three constraint sections that keep an unattended run from wandering (see `templates/spec-template.md`):
-
-- **Exclusions** — What NOT to touch: files/modules out of scope, behaviors that must not change. This is the highest-leverage section for preventing scope creep during autonomous runs.
-- **Style** — Conventions to follow (naming, existing patterns, libraries already in use) so generated code matches the codebase instead of introducing a new one-off style.
-- **Verification** — The exact commands to run after each change. Owloop runs these itself before it's allowed to output the completion signal — vague verification steps produce vague confidence.
-
-## Usage
-
-### Creating Specifications
-
-**The key to success:** Each spec needs **clear, testable acceptance criteria** and explicit boundaries. This is what tells Owloop when a task is truly "done" — and what it should leave alone.
-
-```markdown
-# Feature: User Authentication
-
-## Priority: 1
-
-## Requirements
-- OAuth login with Google
-- Session management
-- Logout functionality
-
-## Acceptance Criteria
-- [ ] User can log in with Google
-- [ ] Session persists across page reloads
-- [ ] User can log out
-- [ ] Tests pass
-
-## Exclusions
-- Do not touch the existing `LegacyAuth` module
-- Do not change the database schema
-
-## Style
-- Follow the existing `services/*Service.ts` pattern
-
-## Verification
-- `npm test -- auth`
-- `npm run lint`
-
-Output when complete: `<promise>DONE</promise>`
-```
-
-**Good criteria:** "User can log in with Google and session persists"
-**Bad criteria:** "Auth works correctly"
-
-The more specific your acceptance criteria — and the more explicit your exclusions — the better Owloop performs.
-
-### Running the Loop
-
-```bash
-# Start building (Claude Code)
-./scripts/owloop-loop.sh
-
-# With max iterations
-./scripts/owloop-loop.sh 20
-
-# Using Codex CLI
-./scripts/owloop-loop-codex.sh
-```
-
-### Logging (All Output Captured)
-
-Every loop run writes **all output** to log files in `logs/`:
-
-- **Session log:** `logs/owloop_*_session_YYYYMMDD_HHMMSS.log` (entire run, including CLI output)
-- **Iteration logs:** `logs/owloop_*_iter_N_YYYYMMDD_HHMMSS.log` (per-iteration CLI output)
-- **Codex last message:** `logs/owloop_codex_output_iter_N_*.txt`
-
-## Two Modes
-
-| Mode | Purpose | Command |
-|------|---------|---------|
-| **build** (default) | Pick spec, implement, test, commit | `./scripts/owloop-loop.sh` |
-| **plan** (optional) | Create detailed task breakdown | `./scripts/owloop-loop.sh plan` |
-
-## Key Principles
-
-### Let Owloop Loop
-
-Trust the AI to self-identify, self-correct, and self-improve. Observe patterns and adjust prompts.
-
-### Auto Mode (Not YOLO)
-
-Owloop uses `--permission-mode auto` — Claude Code's official autonomous mode that approves routine tool calls while preserving safety boundaries for destructive operations. This replaces the old `--dangerously-skip-permissions` (YOLO) flag.
-
-- `--permission-mode auto`: approves reads, writes, lint, test — blocks `rm -rf`, `git push --force`, etc.
-- `--dangerously-skip-permissions`: skips **all** checks — never use this with owloop.
-
-Auto mode is standing approval to keep moving, not a license to skip review. Pair it with worktree isolation below.
-
-### Worktree Isolation
-
-Run each Owloop loop in its own `git worktree`, on a dedicated branch, instead of your primary working copy:
-
-```bash
-git worktree add ../myproject-owloop-spec-001 -b owloop/spec-001
-cd ../myproject-owloop-spec-001
-./scripts/owloop-loop.sh
-```
-
-Autonomous edits, commits, and test runs stay contained to that worktree. Review the diff and merge — or just delete the worktree — once the loop outputs `<promise>DONE</promise>`. If a loop goes off the rails, the blast radius is a disposable worktree, not your main branch.
-
-⚠️ **Still review before merging.** Auto mode plus worktree isolation reduces risk; it does not replace review.
+| | owloop | /goal | gnhf |
+|---|---|---|---|
+| Completion check | grep (deterministic) | Haiku model (probabilistic) | grep |
+| Context management | Fresh per iteration | Same session | Fresh per iteration |
+| Spec format | Constraint-oriented | Free-form prompt | Free-form prompt |
 
 ## Links
 
 - **GitHub:** https://github.com/caoergou/owloop
-- **Original methodology:** [Geoffrey Huntley's how-to-ralph-wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)
+- **Original methodology:** [Geoffrey Huntley's Ralph Wiggum](https://ghuntley.com/ralph/)
 - **Forked from:** [fstandhartinger/ralph-wiggum](https://github.com/fstandhartinger/ralph-wiggum)

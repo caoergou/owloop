@@ -47,16 +47,20 @@ owloop's response: don't pretend babysitting isn't needed. Instead, **make babys
 - [x] Social preview + GitHub topics + GEO-optimized README
 - [x] Basic test suite (14 tests)
 
-## v0.2 — Reliable
+## v0.2 — Reliable (current)
 
 Focus: **make it not break**, address the failure modes above.
 
-- [ ] Token tracking and budget cap (`--max-tokens`, prevent cost runaway)
-- [ ] Subprocess timeout (30min no-output → kill, prevent hung sessions)
-- [ ] Semantic fix-loop detection (same files modified 3+ times → stop)
+- [x] Subprocess idle timeout (`--idle-timeout`, default 60min, prevent hung sessions)
+- [x] Semantic fix-loop detection (same files modified 3+ consecutive iterations → warning)
+- [x] Duration cap (`--max-duration`, prevent cost runaway via wall-clock limit)
+- [x] `.claude/` config copying to worktree (permissions survive isolation)
+- [x] Legacy bash engine removed (Python engine is the sole engine)
+- [x] Skills bilingual rewrite (Chinese + English trigger support)
+- [x] Skills restructured per agentskills.io spec (references/ directory)
+- [ ] Token tracking and budget cap (`--max-tokens`, per-iteration token counting)
 - [ ] Integration verification in spec template ("function exists AND is called")
 - [ ] `owloop report` — lavish HTML summary with per-iteration diffs
-- [ ] `.claude/` config copying to worktree (permissions survive isolation)
 - [ ] PyPI release (`uvx owloop` works without git install)
 
 ## v0.3 — Smart Specs

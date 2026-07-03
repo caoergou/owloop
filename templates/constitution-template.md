@@ -12,15 +12,15 @@
 This constitution is read by AI agents in two different contexts:
 
 ### 1. Interactive Mode
-When the user is chatting with you outside of a Ralph loop:
+When the user is chatting with you outside of a owloop loop:
 - Be conversational and helpful
 - Ask clarifying questions when needed
 - Guide the user through decisions
 - Help create specifications via `/speckit.specify`
 - Discuss project ideas and architecture
 
-### 2. Ralph Loop Mode  
-When you're running inside a Ralph bash loop (fed via stdin):
+### 2. Owloop Loop Mode  
+When you're running inside a owloop loop (fed via stdin):
 - Be fully autonomous — don't ask for permission
 - Read IMPLEMENTATION_PLAN.md and pick the highest priority incomplete task
 - Implement the task completely
@@ -29,7 +29,7 @@ When you're running inside a Ralph bash loop (fed via stdin):
 - Output `<promise>DONE</promise>` ONLY when the task is 100% complete
 - If criteria not met, fix issues and try again
 
-**How to detect:** If the prompt instructs you to read IMPLEMENTATION_PLAN.md and pick a task, you're in Ralph Loop Mode.
+**How to detect:** If the prompt instructs you to read IMPLEMENTATION_PLAN.md and pick a task, you're in Owloop Loop Mode.
 
 ---
 
@@ -72,12 +72,10 @@ AI coding agents work autonomously:
 
 ---
 
-## Ralph Wiggum Configuration
+## Owloop Configuration
 
 ### Autonomy Settings
-- **YOLO Mode**: [ENABLED/DISABLED]
-  - Claude: `--dangerously-skip-permissions`
-  - Codex: `--dangerously-bypass-approvals-and-sandbox`
+- **Auto Mode**: `--permission-mode auto` (safe autonomous execution)
 - **Git Autonomy**: [ENABLED/DISABLED]
 
 ### Work Item Source
@@ -87,19 +85,16 @@ AI coding agents work autonomously:
   - GitHub: [REPO_URL]
   - Custom: [CUSTOM_LOCATION]
 
-### Ralph Loop Scripts
-Located in `scripts/`:
-- `ralph-loop.sh` — Claude Code loop
-- `ralph-loop-codex.sh` — OpenAI Codex loop
+### Owloop Commands
 
 **Usage:**
 ```bash
 # Planning: Create task list from specs
-./scripts/ralph-loop.sh plan
+owloop plan
 
 # Building: Implement tasks one by one
-./scripts/ralph-loop.sh        # Unlimited
-./scripts/ralph-loop.sh 20     # Max 20 iterations
+owloop run             # Unlimited
+owloop run -n 20       # Max 20 iterations
 ```
 
 ---
@@ -120,7 +115,7 @@ Use the SpecKit approach:
 ### Phase 2: Run Planning Mode
 
 ```bash
-./scripts/ralph-loop.sh plan
+./scripts/owloop plan
 ```
 
 This analyzes specs vs current code and creates IMPLEMENTATION_PLAN.md.
@@ -128,7 +123,7 @@ This analyzes specs vs current code and creates IMPLEMENTATION_PLAN.md.
 ### Phase 3: Run Build Mode
 
 ```bash
-./scripts/ralph-loop.sh
+./scripts/owloop
 ```
 
 Each iteration:

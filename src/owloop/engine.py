@@ -75,8 +75,11 @@ class EngineConfig:
     project_dir: Path
     mode: str = "build"  # "build" | "plan"
     max_iterations: int = 0  # 0 = unlimited
+    max_duration_minutes: int = 0  # 0 = unlimited
+    idle_timeout: float = 3600  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
+    fix_loop_threshold: int = 3
     tail_lines: int = 5
 
 
@@ -109,6 +112,7 @@ class OwloopEngine:
         self.main_repo_dir = config.project_dir
         self.log_dir = config.project_dir / "logs"
         self.session_log: Path | None = None
+        self._recent_file_sets: list[set[str]] = []
 
     def _emit(self, kind: str, **data) -> None:
         self.on_event(kind, data)
@@ -270,6 +274,25 @@ class OwloopEngine:
             "first_incomplete": incomplete[0].name if incomplete else None,
         }
 
+    def _check_fix_loop(self) -> None:
+        """Detect when the same files keep getting modified without progress."""
+        result = self._run_git("diff", "--name-only", "HEAD~1", "HEAD")
+        if result.returncode != 0:
+            return
+        changed = {f.strip() for f in result.stdout.splitlines() if f.strip()}
+        if not changed:
+            return
+        self._recent_file_sets.append(changed)
+        threshold = self.config.fix_loop_threshold
+        if len(self._recent_file_sets) < threshold:
+            return
+        window = self._recent_file_sets[-threshold:]
+        repeated = set.intersection(*window)
+        if repeated:
+            self._emit("fix_loop_warning", files=sorted(repeated), consecutive=threshold)
+        if len(self._recent_file_sets) > threshold * 2:
+            self._recent_file_sets = self._recent_file_sets[-threshold * 2:]
+
     def _push(self, branch: str) -> None:
         pushed = self._run_git("push", "origin", branch)
         if pushed.returncode != 0:
@@ -382,17 +405,26 @@ class OwloopEngine:
         iteration = 0
         consecutive_failures = 0
         stopped_reason = "max_iterations"
+        start_time = time.monotonic()
 
         try:
             while True:
                 if self.config.max_iterations > 0 and iteration >= self.config.max_iterations:
                     break
 
+                if self.config.max_duration_minutes > 0:
+                    elapsed_min = (time.monotonic() - start_time) / 60
+                    if elapsed_min >= self.config.max_duration_minutes:
+                        stopped_reason = "max_duration"
+                        self._emit("max_duration_reached", minutes=int(elapsed_min))
+                        break
+
                 iteration += 1
                 result = self.run_iteration(iteration)
 
                 if result.success:
                     consecutive_failures = 0
+                    self._check_fix_loop()
                     if self.config.mode == "plan":
                         stopped_reason = "plan_complete"
                         self._emit("plan_complete")
