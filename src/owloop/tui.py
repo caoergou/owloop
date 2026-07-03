@@ -127,7 +127,10 @@ class OwloopTUI:
     def __enter__(self) -> OwloopTUI:
         self.live.__enter__()
         self._live_started = True
-        self._original_sigwinch = signal.signal(signal.SIGWINCH, self._on_sigwinch)
+        # SIGWINCH is not available on Windows; the ticker loop will still
+        # poll console.size to react to resizes.
+        if hasattr(signal, "SIGWINCH"):
+            self._original_sigwinch = signal.signal(signal.SIGWINCH, self._on_sigwinch)
         self._render()
         self._ticker = threading.Thread(target=self._tick_loop, daemon=True)
         self._ticker.start()
@@ -137,7 +140,7 @@ class OwloopTUI:
         self._stop_ticker.set()
         if self._ticker:
             self._ticker.join(timeout=1)
-        if self._original_sigwinch is not None:
+        if self._original_sigwinch is not None and hasattr(signal, "SIGWINCH"):
             signal.signal(signal.SIGWINCH, self._original_sigwinch)
             self._original_sigwinch = None
         if self._live_started:

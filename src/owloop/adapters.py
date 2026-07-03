@@ -15,6 +15,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -122,6 +123,15 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     @staticmethod
     def _killpg(proc: subprocess.Popen) -> None:
+        """Terminate the agent process (and its group when possible)."""
+        if sys.platform == "win32":
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return
+
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -133,17 +143,21 @@ class ClaudeCodeAdapter(AgentAdapter):
                 os.killpg(proc.pid, signal.SIGKILL)
 
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
+        popen_kwargs: dict = {
+            "cwd": cwd,
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+        }
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+
         try:
-            proc = subprocess.Popen(
-                self._build_cmd(),
-                cwd=cwd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                start_new_session=True,
-            )
+            proc = subprocess.Popen(self._build_cmd(), **popen_kwargs)
         except FileNotFoundError:
             return AgentResult(stdout="", returncode=127, success=False, has_completion_signal=False)
 
