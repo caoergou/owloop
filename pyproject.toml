@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "owloop"
-version = "0.2.1"
+version = "0.3.0"
 description = "Your code evolves while you sleep. 🦉 Spec-driven autonomous coding loop."
 readme = "README.md"
 license = "MIT"
