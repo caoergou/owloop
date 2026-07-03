@@ -11,6 +11,34 @@ The loop itself is trivial (a bash while loop). What's hard — and what owloop 
 
 > "The skill that's becoming scarce: turning taste into checkable constraints."
 
+## What we learned from the ecosystem
+
+We audited `gnhf`, `ralphloop.sh`, `goal-md`, `/goal`, `/loop`, `roborev`, and `spec-kit`. Four things became clear:
+
+### 1. Pre-flight spec validation is a blue ocean
+No existing tool validates spec quality before the loop starts. `spec-kit` (117k+ stars) exposes a quality check, but it is opt-in; the community is asking for it to be mandatory. owloop can be the first loop runner that refuses to start a bad spec.
+
+### 2. Fresh context is a double-edged sword
+`gnhf` keeps cross-iteration memory via `notes.md` (auto-appended summary + key learnings, read by the next iteration). `/goal` keeps state in a single session. owloop chose fresh `claude -p` per iteration to avoid context rot, but that also means the agent repeats mistakes. v0.3 closes this gap with `run-notes.md` without sacrificing isolation.
+
+### 3. Deterministic completion beats model judgment
+`/goal` uses a Haiku model to decide when a task is done; this is probabilistic and can mis-fire. `gnhf` trusts the agent to self-report. owloop uses a hard `grep` for `<promise>DONE</promise>`. We are extending this in v0.4 to support `<promise>BLOCKED:reason</promise>` and `<promise>DECIDE:question</promise>` (borrowed from `ralphloop.sh`) so the loop can distinguish "done", "stuck", and "needs human decision".
+
+### 4. Borrowings that are cheap and high-value
+| Source | Design | How owloop adopts it |
+|---|---|---|
+| `ralphloop.sh` | `STEERING.md` — edit mid-flight, agent reads every iteration | v0.3: add `STEERING.md` support |
+| `ralphloop.sh` | Promise exit codes (COMPLETE / BLOCKED / DECIDE) | v0.4: extend promise protocol |
+| `gnhf` | `notes.md` cross-iteration memory | v0.3: `run-notes.md` |
+| `gnhf` | Prevent system sleep (`caffeinate`, `systemd-inhibit`) | v0.3: cross-platform sleep inhibitor |
+| `gnhf` | Rich exit report with diff stats and token usage | v0.3: `owloop report` summary |
+| `gnhf` | Exponential backoff on hard errors | v0.3: replace fixed "3 failures = reset" |
+
+### 5. Things we intentionally will not do
+- **Docker sandbox isolation** (`ralphloop` style): too heavy. Git worktree isolation is enough for blast-radius containment.
+- **Fitness-function optimization** (`goal-md` style): a different paradigm. owloop is for discrete pass/fail tasks; continuous metric optimization belongs in a different tool class.
+- **Multi-agent adapters in the near term**: `gnhf` demonstrates that agent-agnostic orchestration introduces a lot of JSON parsing / protocol fragility. We will keep Claude Code as the first-class adapter until the spec format is rock solid.
+
 ## Known failure modes (why loop engineering isn't mainstream yet)
 
 These are real, documented problems. owloop must address each one to be worth using.
@@ -64,7 +92,7 @@ Focus: **make it not break**, address the failure modes above.
 
 ## v0.3 — Memory & Cost Control
 
-Focus: **close the two biggest gaps vs gnhf** — cross-iteration learning and token-based cost control.
+Focus: **close the two biggest gaps vs gnhf** — cross-iteration learning and token-based cost control. Also adopt the cheap, high-value ergonomics from `ralphloop.sh` and `gnhf`.
 
 - [ ] Cross-iteration notes (`run-notes.md`): auto-append summary + learnings after each iteration; next iteration reads it. Solves "fresh context = repeated mistakes"
 - [ ] `--max-tokens`: parse token counts from claude output, abort when cumulative limit reached
@@ -75,7 +103,7 @@ Focus: **close the two biggest gaps vs gnhf** — cross-iteration learning and t
 
 ## v0.4 — Smart Specs
 
-Focus: **the bottleneck is spec quality, not loop mechanics**. No tool in the ecosystem does pre-flight spec validation — owloop can be first.
+Focus: **the bottleneck is spec quality, not loop mechanics**. Pre-flight spec validation is a blue ocean — `spec-kit` only offers it opt-in, and the community is asking for it to be mandatory. owloop can be the first loop runner that refuses to start a bad spec.
 
 - [ ] Spec pre-flight linter (`owloop check`): run before loop starts
   - Verify all acceptance criteria are executable shell commands
@@ -88,6 +116,8 @@ Focus: **the bottleneck is spec quality, not loop mechanics**. No tool in the ec
 - [ ] Promise protocol: support `<promise>BLOCKED:reason</promise>` and `<promise>DECIDE:question</promise>` in addition to `DONE` (inspired by ralphloop.sh)
 
 ## v0.5 — Multi-Agent
+
+Intentionally later: `gnhf` shows that agent-agnostic orchestration adds significant protocol fragility (JSON parsing, tool schema mismatches). We will keep Claude Code first-class until the spec format and verification pipeline are rock solid.
 
 - [ ] Additional agent adapters (CodexAdapter, OpenCodeAdapter)
 - [ ] Parallel spec execution (multiple worktrees, one agent per spec)
