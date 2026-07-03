@@ -1,0 +1,48 @@
+name: Dispatch Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.2.2)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version in pyproject.toml
+        run: |
+          sed -i "s/^version = \"[^\"]*\"$/version = \"${{ inputs.version }}\"/" pyproject.toml
+          grep '^version = ' pyproject.toml
+
+      - name: Commit version bump
+        run: |
+          git add pyproject.toml
+          git commit -m "chore: bump version to ${{ inputs.version }}"
+          git push origin main
+
+      - name: Tag release
+        run: |
+          git tag v${{ inputs.version }}
+          git push origin v${{ inputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
+          generate_release_notes: true
