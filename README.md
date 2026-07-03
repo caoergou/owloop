@@ -13,7 +13,10 @@
 
 **Write specs. Start the loop. Wake up to clean commits.**
 
-> 🦉 Ollie is a nocturnal owl. While you sleep, he reads your specs, runs fresh `claude -p` iterations, and only commits when the shell commands pass.
+> 🦉 Ollie is a nocturnal owl.
+>
+> While you sleep, he reads your specs, spawns a fresh agent iteration for each task,
+> verifies the result with real shell commands, and only commits when they pass.
 
 [Quick Start](#-quick-start) · [How It Works](#-how-it-works) · [Writing Specs](#-writing-specs) · [Compared To](#-compared-to) · [FAQ](#-faq)
 
