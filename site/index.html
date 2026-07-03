@@ -7,165 +7,407 @@
   <meta name="description" content="owloop is a spec-driven autonomous coding loop. Write specs, start the loop, and wake up to clean commits.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/owloop/styles.css">
 </head>
 <body>
-  <div class="stars" aria-hidden="true"></div>
+  <div class="cosmos" aria-hidden="true">
+    <div class="nebula"></div>
+    <div class="stars"></div>
+    <div class="shooting-star"></div>
+    <div class="shooting-star" style="--delay: 7s; --top: 35%;"></div>
+  </div>
+
+  <nav class="nav">
+    <div class="container nav-inner">
+      <a class="nav-logo" href="#" aria-label="owloop home">
+        <svg class="nav-logo-icon" viewBox="0 0 40 40" aria-hidden="true">
+          <circle class="owl-body" cx="20" cy="22" r="14"/>
+          <ellipse class="owl-eye" cx="15" cy="19" rx="4" ry="4"/>
+          <ellipse class="owl-eye" cx="25" cy="19" rx="4" ry="4"/>
+          <circle class="owl-pupil" cx="15.8" cy="18.3" r="1.6"/>
+          <circle class="owl-pupil" cx="25.8" cy="18.3" r="1.6"/>
+          <path class="owl-beak" d="M20 22 l-2.5 3.5 h5 z"/>
+          <path class="owl-ear" d="M8 14 l4 -7 l4 5 z"/>
+          <path class="owl-ear" d="M32 14 l-4 -7 l-4 5 z"/>
+        </svg>
+        <span class="nav-logo-text">owloop</span>
+      </a>
+      <div class="nav-links">
+        <a href="#how">How it works</a>
+        <a href="#night">Overnight</a>
+        <a href="#quality">Quality</a>
+        <a href="#compare">Compare</a>
+        <a class="nav-cta" href="https://github.com/caoergou/owloop" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </nav>
 
   <header class="hero">
-    <div class="container">
-      <pre class="ollie-ascii" aria-label="Ollie the owl">
-     ▄▄████▄▄     
-    ██ ◉  ◉ ██  ∞ 
-   ███  ╰▽╯  ███   
-    ██ ╭──╮ ██    
-     ▀█ ║║║ █▀     
-      ▀██▄▄██▀     
-       ╱╲  ╱╲      
-      </pre>
-      <h1 class="title">owloop</h1>
-      <p class="tagline">Your code evolves while you sleep.</p>
-      <p class="subtagline">Write specs. Start the loop. Wake up to clean commits.</p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/caoergou/owloop#-quick-start" target="_blank" rel="noopener">Get Started</a>
-        <a class="btn btn-secondary" href="#terminal-demo">View Demo</a>
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <div class="hero-badge">
+          <span class="pulse"></span>
+          <span>Autonomous coding loop</span>
+        </div>
+        <h1 class="hero-title">
+          Write specs.<br>
+          <span class="text-amber">Start the loop.</span><br>
+          Wake up to commits.
+        </h1>
+        <p class="hero-lead">
+          Define a queue of verifiable tasks before you leave work. owloop runs them overnight in isolated git worktrees, verifies each one with the shell commands you wrote, and commits only on green.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/caoergou/owloop#-quick-start" target="_blank" rel="noopener">
+            <span>Get Started</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="#terminal-demo">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M4 7l2 2-2 2M7.5 11h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Watch demo</span>
+          </a>
+        </div>
+        <div class="hero-install">
+          <code class="install-snippet">uvx owloop init && owloop run</code>
+          <button class="copy-btn" type="button" aria-label="Copy install command" data-copy="uvx owloop init && owloop run">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="hero-terminal-wrap" id="terminal-demo">
+        <div class="terminal">
+          <div class="terminal-glow"></div>
+          <div class="terminal-header">
+            <div class="terminal-controls">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot amber"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <span class="terminal-title">ollie@night ~/project</span>
+            <div class="terminal-badge">zsh</div>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-output" id="terminal-output" aria-live="polite">
+              <noscript>
+                <span class="line"><span class="prompt">$</span> <span class="cmd">owloop run</span></span>
+                <span class="line dim">🦉 Ollie is waking up...</span>
+                <span class="line"><span class="success">✓</span> Iteration 1 · 001-fix-lint.md → committed</span>
+                <span class="line"><span class="success">✓</span> Iteration 2 · 002-add-types.md → committed</span>
+                <span class="line"><span class="success">✓</span> Iteration 3 · 003-unify-errors.md → committed</span>
+                <span class="line dawn">🌅 Complete. 3 specs done · 0 failures · 12.4k tokens</span>
+              </noscript>
+            </div>
+            <div class="terminal-input-line" id="terminal-input-line" style="display: none;">
+              <span class="prompt">$</span>
+              <span class="terminal-typed" id="terminal-typed"></span>
+              <span class="terminal-cursor" aria-hidden="true">▊</span>
+            </div>
+          </div>
+          <div class="terminal-statusbar">
+            <span id="terminal-status">● running</span>
+            <span>branch: owloop/2026-07-03</span>
+            <span>specs: 3/3</span>
+          </div>
+        </div>
       </div>
     </div>
   </header>
 
   <main>
-    <section class="section problem-solution">
+    <section class="section" id="how">
       <div class="container">
-        <div class="card-grid two-col">
-          <div class="card problem">
-            <h2>🌑 The problem</h2>
-            <p>You have 20 lint categories, 200 missing type annotations, and copy-pasted error handling. You know what to do — you just don't have the hours.</p>
-          </div>
-          <div class="card solution">
-            <h2>🌕 The solution</h2>
-            <p>Write specs. Start the loop. Wake up to clean commits.</p>
-          </div>
-        </div>
-      </div>
-    </section>
+        <p class="section-overline">How it works</p>
+        <h2 class="section-title">From spec to commit, unattended.</h2>
 
-    <section class="section how-it-works">
-      <div class="container">
-        <h2>How It Works</h2>
         <div class="steps">
           <div class="step">
-            <div class="step-number">1</div>
+            <div class="step-header">
+              <span class="step-number">01</span>
+              <div class="step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
             <h3>Write a spec</h3>
-            <p>Define requirements, shell-verifiable acceptance criteria, and exclusions.</p>
+            <p>Requirements, shell-verifiable acceptance criteria, exclusions, and a stuck-behavior plan.</p>
           </div>
           <div class="step">
-            <div class="step-number">2</div>
-            <h3>Run <code>owloop run</code></h3>
-            <p>Ollie picks up your spec queue and starts the overnight loop.</p>
+            <div class="step-header">
+              <span class="step-number">02</span>
+              <div class="step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
+            <h3>Start the loop</h3>
+            <p><code>owloop run</code> picks the highest-priority spec and enters a fresh agent context.</p>
           </div>
           <div class="step">
-            <div class="step-number">3</div>
-            <h3>Fresh iterations</h3>
-            <p>Each task spawns a clean agent context. Ollie commits only when shell checks pass.</p>
+            <div class="step-header">
+              <span class="step-number">03</span>
+              <div class="step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
+            <h3>Verify & commit</h3>
+            <p>The agent runs the exact shell commands from your acceptance criteria. Only green means commit.</p>
           </div>
           <div class="step">
-            <div class="step-number">4</div>
-            <h3>Review the report</h3>
-            <p>Open the rich HTML report in the morning and merge the worktree.</p>
+            <div class="step-header">
+              <span class="step-number">04</span>
+              <div class="step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
+            <h3>Review in the morning</h3>
+            <p>Open the worktree diff and the HTML report. Merge when ready. Go back to sleep.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="terminal-demo" class="section terminal-section">
+    <section class="section timeline-section" id="night">
       <div class="container">
-        <h2>See it in action</h2>
-        <div class="terminal" role="img" aria-label="Simulated terminal showing owloop run output">
-          <div class="terminal-header">
-            <span class="terminal-dot red"></span>
-            <span class="terminal-dot amber"></span>
-            <span class="terminal-dot green"></span>
-            <span class="terminal-title">ollie@night:~</span>
+        <p class="section-overline">A night with owloop</p>
+        <h2 class="section-title">Leave work with specs. Come back to commits.</h2>
+
+        <div class="timeline">
+          <div class="timeline-track" aria-hidden="true">
+            <div class="timeline-moon">🌑</div>
+            <div class="timeline-progress"></div>
+            <div class="timeline-moon">🌕</div>
           </div>
-          <div class="terminal-body">
-            <pre class="terminal-output" id="terminal-output"><noscript>$ owloop run
-🦉 Ollie is waking up...
-Iteration 1: 001-fix-lint.md → ✅ committed
-Iteration 2: 002-add-types.md → ✅ committed
-Iteration 3: 003-unify-errors.md → ✅ committed
-🌅 Complete. 3 specs done, 0 failures.</noscript></pre>
-            <span class="terminal-cursor" id="terminal-cursor" aria-hidden="true">_</span>
+
+          <div class="timeline-events">
+            <div class="timeline-event">
+              <div class="timeline-time">17:30</div>
+              <div class="timeline-card">
+                <h3>Write & queue specs</h3>
+                <p>Break the backlog into small, verifiable specs with acceptance criteria and exclusions.</p>
+                <code class="timeline-code">owloop run --max-tokens 200000 --max-duration 480</code>
+              </div>
+            </div>
+
+            <div class="timeline-event">
+              <div class="timeline-time">22:00</div>
+              <div class="timeline-card">
+                <h3>Fresh agent iterations</h3>
+                <p>Each spec spawns a clean context. The agent reads <code>AGENTS.md</code>, searches the codebase, implements, then runs the shell checks you defined.</p>
+              </div>
+            </div>
+
+            <div class="timeline-event">
+              <div class="timeline-time">03:00</div>
+              <div class="timeline-card">
+                <h3>Commit only on green</h3>
+                <p>Green acceptance criteria → commit + push. Failure → retry with exponential backoff. Same files flapping → fix-loop warning.</p>
+              </div>
+            </div>
+
+            <div class="timeline-event">
+              <div class="timeline-time">09:00</div>
+              <div class="timeline-card highlight">
+                <h3>Review & merge</h3>
+                <p>Open the HTML report, inspect the worktree diff, run your own sanity checks, then merge. Your main branch stayed clean all night.</p>
+              </div>
+            </div>
           </div>
         </div>
-        <button class="btn btn-secondary replay-btn" id="replay-btn" type="button">Replay</button>
       </div>
     </section>
 
-    <section class="section features">
+    <section class="section section-dark quality-section" id="quality">
       <div class="container">
-        <h2>Features</h2>
+        <p class="section-overline">Quality you can verify</p>
+        <h2 class="section-title">No trust required. Only green checks count.</h2>
+
+        <div class="quality-grid">
+          <div class="quality-card">
+            <div class="quality-check">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Shell-verified acceptance</h3>
+            <p>The spec defines the exact commands that must pass. The agent does not decide for itself whether it is done.</p>
+          </div>
+
+          <div class="quality-card">
+            <div class="quality-check">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Worktree isolation</h3>
+            <p>Everything happens in a disposable git worktree. Your main checkout is never touched until you choose to merge.</p>
+          </div>
+
+          <div class="quality-card">
+            <div class="quality-check">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Fix-loop detection</h3>
+            <p>If the same files keep changing without the spec closing, the loop warns instead of burning tokens forever.</p>
+          </div>
+
+          <div class="quality-card">
+            <div class="quality-check">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="12 6 12 12 16 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Budget caps & run notes</h3>
+            <p><code>--max-tokens</code> and <code>--max-duration</code> stop the run before costs spiral. Cross-iteration notes prevent the agent from repeating the same mistake.</p>
+          </div>
+        </div>
+
+        <div class="report-preview">
+          <div class="report-preview-header">
+            <span class="report-dot"></span>
+            <span>Morning report</span>
+          </div>
+          <div class="report-preview-body">
+            <div class="report-stat">
+              <span class="report-value">3</span>
+              <span class="report-label">specs completed</span>
+            </div>
+            <div class="report-stat">
+              <span class="report-value">14</span>
+              <span class="report-label">commits</span>
+            </div>
+            <div class="report-stat">
+              <span class="report-value">0</span>
+              <span class="report-label">failures</span>
+            </div>
+            <div class="report-stat">
+              <span class="report-value">12.4k</span>
+              <span class="report-label">tokens used</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="features">
+      <div class="container">
+        <p class="section-overline">Why owloop</p>
+        <h2 class="section-title">Built for reliable overnight progress.</h2>
+
         <div class="feature-grid">
-          <div class="feature">Spec-driven queue</div>
-          <div class="feature">Fresh context per iteration</div>
-          <div class="feature">Git worktree isolation</div>
-          <div class="feature">Deterministic completion</div>
-          <div class="feature">Fix-loop detection</div>
-          <div class="feature">Token budget cap</div>
-          <div class="feature">Rich HTML report</div>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon">∞</div>
+            <h3>Spec-driven queue</h3>
+            <p>Prioritized markdown specs with explicit exclusions keep the agent from wandering.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon">🌙</div>
+            <h3>Fresh context per iteration</h3>
+            <p>Each task starts clean. No accumulated context drift, no accidental side effects.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon">🌲</div>
+            <h3>Git worktree isolation</h3>
+            <p>Main checkout stays untouched until you review and merge the worktree branch.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon">✓</div>
+            <h3>Deterministic completion</h3>
+            <p>Completion is a grep-able <code>&lt;promise&gt;DONE&lt;/promise&gt;</code>, not a model guess.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon">⚡</div>
+            <h3>Fix-loop detection</h3>
+            <p>Catches death spirals when the same files are edited repeatedly without progress.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon">🪙</div>
+            <h3>Token budget cap</h3>
+            <p>Set <code>--max-tokens</code> and <code>--max-duration</code>. The loop stops before your wallet does.</p>
+          </article>
         </div>
       </div>
     </section>
 
-    <section class="section comparison">
+    <section class="section" id="compare">
       <div class="container">
-        <h2>Compared To</h2>
+        <p class="section-overline">Compared to</p>
+        <h2 class="section-title">Pick the right loop for the job.</h2>
+
         <div class="table-wrap">
-          <table>
+          <table class="compare-table">
             <thead>
               <tr>
                 <th></th>
-                <th>owloop</th>
+                <th class="col-owloop">owloop</th>
                 <th><code>/goal</code></th>
                 <th>gnhf</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td><strong>Completion</strong></td>
-                <td>grep (deterministic)</td>
-                <td>Haiku model (probabilistic)</td>
+                <td>Completion check</td>
+                <td class="col-owloop">grep <code>&lt;promise&gt;</code></td>
+                <td>Haiku judgment</td>
                 <td>grep</td>
               </tr>
               <tr>
-                <td><strong>Context</strong></td>
-                <td>Fresh per iteration</td>
+                <td>Best for</td>
+                <td class="col-owloop">Backlog of verifiable tasks</td>
+                <td>One focused task, user present</td>
+                <td>Multi-agent overnight</td>
+              </tr>
+              <tr>
+                <td>Spec format</td>
+                <td class="col-owloop">Constraint-oriented</td>
+                <td>Free-form</td>
+                <td>Free-form</td>
+              </tr>
+              <tr>
+                <td>Context</td>
+                <td class="col-owloop">Fresh per iteration</td>
                 <td>Same session</td>
                 <td>Fresh per iteration</td>
               </tr>
               <tr>
-                <td><strong>Specs</strong></td>
-                <td>Constraint-oriented</td>
-                <td>Free-form</td>
-                <td>Free-form</td>
-              </tr>
-              <tr>
-                <td><strong>Best for</strong></td>
-                <td>Backlog of verifiable tasks</td>
-                <td>One focused task</td>
-                <td>Multi-agent overnight</td>
+                <td>Isolation</td>
+                <td class="col-owloop">Worktree</td>
+                <td>None</td>
+                <td>None</td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
     </section>
+
+    <section class="section cta-section">
+      <div class="container cta-card">
+        <div class="cta-owl" aria-hidden="true">
+          <svg viewBox="0 0 120 120">
+            <circle class="owl-body" cx="60" cy="65" r="40"/>
+            <ellipse class="owl-eye" cx="45" cy="55" rx="12" ry="12"/>
+            <ellipse class="owl-eye" cx="75" cy="55" rx="12" ry="12"/>
+            <circle class="owl-pupil" cx="48" cy="52" r="5"/>
+            <circle class="owl-pupil" cx="78" cy="52" r="5"/>
+            <path class="owl-beak" d="M60 62 l-7 10 h14 z"/>
+            <path class="owl-ear" d="M22 38 l12 -20 l10 14 z"/>
+            <path class="owl-ear" d="M98 38 l-12 -20 l-10 14 z"/>
+          </svg>
+        </div>
+        <h2>Put your backlog to work overnight.</h2>
+        <p>Install owloop, write your first spec, and let Ollie handle the rest.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/caoergou/owloop#-quick-start" target="_blank" rel="noopener">Read the docs</a>
+          <a class="btn btn-ghost" href="https://github.com/caoergou/owloop" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="footer">
-    <div class="container">
+    <div class="container footer-inner">
       <p><a href="https://github.com/caoergou/owloop" target="_blank" rel="noopener">GitHub</a> · <a href="/owloop/LICENSE">MIT License</a></p>
-      <p class="credits">Built on <a href="https://ghuntley.com/ralph/" target="_blank" rel="noopener">Ralph Wiggum methodology</a> · Ollie watches while you sleep 🦉</p>
+      <p class="credits">Built on the <a href="https://ghuntley.com/ralph/" target="_blank" rel="noopener">Ralph Wiggum methodology</a>. Ollie watches while you sleep.</p>
     </div>
   </footer>
 
