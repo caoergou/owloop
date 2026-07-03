@@ -31,6 +31,7 @@ from rich.text import Text
 
 from owloop._brand import (
     AMBER,
+    BRAND_BAR,
     CYAN,
     DIM_BLUE,
     GRAY,
@@ -526,6 +527,8 @@ class OwloopTUI:
         return Panel(
             Align.center(text, vertical="middle"),
             title="Ollie",
+            subtitle=BRAND_BAR,
+            subtitle_align="center",
             border_style=DIM_BLUE,
             style=f"on {NIGHT}",
             height=SCENE_H + 2,

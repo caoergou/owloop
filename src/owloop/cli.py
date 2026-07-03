@@ -71,7 +71,7 @@ def _banner_text(ascii: bool = False, no_color: bool = False) -> Text | str:
     lines = list(art)
     # Place the product name next to the owl's eyes.
     if len(lines) > 1:
-        lines[1] = f"{lines[1]}   owloop"
+        lines[1] = f"{lines[1]}   OWLOOP"
     joined = "\n".join(lines)
     if ascii and no_color:
         return joined
