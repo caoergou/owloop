@@ -93,6 +93,16 @@ Key sections:
 
 See [references/loop-engineering-guide.md](references/loop-engineering-guide.md) for the full guide on writing specs that converge, baseline calibration, task sizing, stuck behavior, and common failure modes.
 
+## Scenario References
+
+When the user's task matches one of these scenarios, read the corresponding reference before writing or executing a spec:
+
+- **Legacy refactoring** → read [references/legacy-refactoring.md](references/legacy-refactoring.md)
+- **ML / DS code hygiene** → read [references/ml-engineering-hygiene.md](references/ml-engineering-hygiene.md)
+- **API / framework / dependency migration** → read [references/api-migration.md](references/api-migration.md)
+
+Use the matching spec template in `templates/` when available.
+
 ## How It Compares
 
 See [references/comparison.md](references/comparison.md) for detailed comparison with `/goal`, gnhf, and roborev.

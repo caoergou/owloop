@@ -110,7 +110,7 @@ Focus: **the bottleneck is spec quality, not loop mechanics**. Pre-flight spec v
   - Check Exclusions section is non-empty
   - Detect internal contradictions
   - Run baseline commands and confirm they execute without error
-- [ ] `/owloop analyze` — scan codebase, generate problem report
+- [ ] Community spec template library (legacy refactor, ML hygiene, API migration, etc.)
 - [ ] Spec-from-issue — convert Jira/GitHub issues to specs
 - [ ] Spec-from-review — convert code review findings to specs
 - [ ] Promise protocol: support `<promise>BLOCKED:reason</promise>` and `<promise>DECIDE:question</promise>` in addition to `DONE` (inspired by ralphloop.sh)
