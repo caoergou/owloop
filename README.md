@@ -28,7 +28,7 @@
 > You have 20 lint categories to fix, 200 functions missing type annotations, and error handling copy-pasted everywhere. You know what to do — you just don't have the hours. **owloop does it while you sleep.**
 
 ```
-owloop run → pick spec → fresh claude -p → verify with shell commands → commit → next spec → 🌅
+owloop run → pick spec → fresh agent context → verify with shell commands → commit → next spec → 🌅
 ```
 
 ## 🌙 Quick Start
@@ -49,12 +49,17 @@ owloop run         # start the loop
 | Command | Description |
 |---|---|
 | `owloop init` | Initialize project (creates `specs/`, `.gitignore` entries) |
+| `owloop spec "goal"` | Turn a vague goal into a concrete spec via agent clarification |
+| `owloop check` | Validate all specs before running the loop (pre-flight linter) |
 | `owloop run` | Start the autonomous loop with TUI |
 | `owloop run -n 20` | Limit to 20 iterations |
 | `owloop run --max-duration 120` | Stop after 2 hours |
+| `owloop run --max-tokens 200000` | Stop after token budget reached |
 | `owloop run --idle-timeout 1800` | Kill hung agent after 30min silence |
 | `owloop plan` | Generate implementation plan from specs |
 | `owloop status` | Show specs and completion progress |
+| `owloop report` | Generate HTML summary report for the latest run |
+| `owloop spec-from-issue 42` | Generate a spec draft from a GitHub issue |
 | `owloop version` | Show installed version |
 
 **Global options**
@@ -87,13 +92,16 @@ graph LR
 
 | Property | How |
 |---|---|
+| **Natural-language specs** | `owloop spec "goal"` reads the codebase, asks clarifying questions, drafts a concrete spec. |
+| **Pre-flight linting** | `owloop check` validates specs before the loop starts — no wasted tokens on bad specs. |
 | **Fresh context** | Each iteration starts a brand-new agent process. No context rot. |
+| **Cross-iteration notes** | `run-notes.md` carries learnings between iterations — fresh context without repeating mistakes. |
 | **Deterministic completion** | `grep` for `<promise>DONE</promise>` — no AI judgment, no surprises. |
 | **Worktree isolation** | Runs in a separate `git worktree`. Your main checkout stays untouched. |
 | **Auto Mode** | `--permission-mode auto`: Ollie asks before risky moves, never YOLO. |
-| **Stuck detection** | 3 consecutive failures → warning and a reset. |
 | **Fix-loop detection** | Same files modified 3+ rounds → Ollie warns of a death spiral. |
-| **Duration cap** | `--max-duration` keeps overnight runs from wandering too long. |
+| **Token budget cap** | `--max-tokens` stops the run before costs spiral. |
+| **Sleep prevention** | Keeps your machine awake during overnight runs (macOS / Linux / Windows). |
 
 ## 📝 Writing Specs
 

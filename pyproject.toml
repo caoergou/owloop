@@ -28,8 +28,9 @@ dependencies = [
 owloop = "owloop.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/caoergou/owloop"
+Homepage = "https://eric.run.place/owloop/"
 Repository = "https://github.com/caoergou/owloop"
+Documentation = "https://eric.run.place/owloop/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/owloop"]
