@@ -155,7 +155,11 @@ owloop's identity — Ollie the owl, the night/amber palette, and the "your code
 
 ## Credits
 
-Built on [Geoffrey Huntley's Ralph Wiggum methodology](https://ghuntley.com/ralph/), forked from [Florian Standhartinger's implementation](https://github.com/fstandhartinger/ralph-wiggum).
+Inspired by and built upon:
+
+- [Geoffrey Huntley's Ralph Wiggum methodology](https://ghuntley.com/ralph/) — the original "unattended coding loop" concept
+- [Florian Standhartinger's ralph-wiggum](https://github.com/fstandhartinger/ralph-wiggum) — the implementation owloop was forked from
+- [gnhf](https://github.com/kunchenguid/gnhf) — multi-agent overnight runner, influenced owloop's fresh-context-per-iteration design
 
 ## License
 
