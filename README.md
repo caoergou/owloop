@@ -9,9 +9,11 @@
 [![CI](https://github.com/caoergou/owloop/actions/workflows/ci.yml/badge.svg)](https://github.com/caoergou/owloop/actions/workflows/ci.yml)
 [![Agent Skill](https://img.shields.io/badge/agent--skill-owloop-d4a025)](https://agentskills.io)
 
+*Your code evolves while you sleep.*
+
 **Write specs. Start the loop. Wake up to clean commits.**
 
-*Your overnight coding agent — powered by Claude Code.*
+> 🦉 Ollie is a nocturnal owl. While you sleep, he reads your specs, runs fresh `claude -p` iterations, and only commits when the shell commands pass.
 
 [Quick Start](#-quick-start) · [How It Works](#-how-it-works) · [Writing Specs](#-writing-specs) · [Compared To](#-compared-to) · [FAQ](#-faq)
 
@@ -25,7 +27,7 @@
 owloop run → pick spec → fresh claude -p → verify with shell commands → commit → next spec → 🌅
 ```
 
-## 🚀 Quick Start
+## 🌙 Quick Start
 
 ```bash
 # Install from PyPI
@@ -61,7 +63,7 @@ owloop run         # start the loop
 
 </details>
 
-## ⚙️ How It Works
+## 🦉 How It Works
 
 ```mermaid
 graph LR
@@ -73,19 +75,19 @@ graph LR
     E -- no --> F["🌅 Complete"]
 
     style A fill:#d4a025,color:#0b1026,stroke:#d4a025
-    style F fill:#22c55e20,stroke:#22c55e
-    style R fill:#ef444420,stroke:#ef4444
+    style F fill:#8fd19e20,stroke:#8fd19e
+    style R fill:#e0777d20,stroke:#e0777d
 ```
 
 | Property | How |
 |---|---|
-| **Fresh context** | Each iteration = new `claude -p` process. No context rot. |
-| **Deterministic completion** | `grep` for `<promise>DONE</promise>`, not AI judgment. |
-| **Worktree isolation** | Runs in a separate `git worktree`. Main checkout untouched. |
-| **Auto Mode** | `--permission-mode auto`, never YOLO. |
-| **Stuck detection** | 3 consecutive failures → warning + reset. |
-| **Fix-loop detection** | Same files modified 3+ rounds → warns of death spiral. |
-| **Duration cap** | `--max-duration` prevents overnight cost runaway. |
+| **Fresh context** | Each iteration starts a brand-new `claude -p` process. No context rot. |
+| **Deterministic completion** | `grep` for `<promise>DONE</promise>` — no AI judgment, no surprises. |
+| **Worktree isolation** | Runs in a separate `git worktree`. Your main checkout stays untouched. |
+| **Auto Mode** | `--permission-mode auto`: Ollie asks before risky moves, never YOLO. |
+| **Stuck detection** | 3 consecutive failures → warning and a reset. |
+| **Fix-loop detection** | Same files modified 3+ rounds → Ollie warns of a death spiral. |
+| **Duration cap** | `--max-duration` keeps overnight runs from wandering too long. |
 
 ## 📝 Writing Specs
 
@@ -171,6 +173,10 @@ uv run mypy src/owloop tests
 ```
 
 All changes are validated on Linux, macOS, and Windows via GitHub Actions.
+
+## 🦉 Brand
+
+owloop's identity — Ollie the owl, the night/amber palette, and the "your code evolves while you sleep" story — is documented in [.github/BRAND.md](.github/BRAND.md).
 
 ## Credits
 
