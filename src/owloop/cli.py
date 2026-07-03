@@ -17,6 +17,7 @@ from owloop.adapters import get_adapter
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.report import ReportGenerator
 from owloop.reporter import ConsoleReporter
+from owloop.spec_linter import LintReport, SpecLinter
 from owloop.tui import OwloopTUI
 
 DEFAULT_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
@@ -83,6 +84,41 @@ def render_progress_bar(done: int, total: int, width: int = 20, ascii: bool = Fa
     return (
         f"{moon} [{_brand.AMBER}]{'█' * filled}[/][{_brand.GRAY}]{'░' * (width - filled)}[/] {pct}%"
     )
+
+
+def _print_check_report(console: Console, report: LintReport, *, ascii: bool = False) -> None:
+    """Render a Rich report from a SpecLinter lint result."""
+    check_icon = "+" if ascii else "✓"
+    error_icon = "x" if ascii else "✗"
+    warn_icon = "!" if ascii else "⚠"
+
+    console.print()
+    console.print("[bold]owloop check[/]")
+    console.print(f"[dim]{'─' * 12}[/]")
+    console.print(f"{check_icon} {report.spec_count} specs scanned")
+
+    if report.error_count or report.warning_count:
+        console.print(
+            f"[{_brand.RED}]{error_icon} {report.error_count} error"
+            f"{'s' if report.error_count != 1 else ''}[/], "
+            f"[{_brand.AMBER}]{warn_icon} {report.warning_count} warning"
+            f"{'s' if report.warning_count != 1 else ''}[/]"
+        )
+    else:
+        console.print(f"[{_brand.GREEN}]{check_icon} 0 errors, 0 warnings[/]")
+
+    for file_name, findings in report.results.items():
+        if not findings:
+            continue
+        console.print()
+        console.print(file_name)
+        for finding in findings:
+            if finding.severity == "error":
+                icon = f"[{_brand.RED}]{error_icon}[/]"
+            else:
+                icon = f"[{_brand.AMBER}]{warn_icon}[/]"
+            console.print(f"  {icon} {finding.message}")
+    console.print()
 
 
 def _cli_options() -> tuple[bool, bool, bool]:
@@ -411,6 +447,35 @@ def version() -> None:
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[bold]owloop[/] [{_brand.AMBER}]v{v}[/]")
     console.print()
+
+
+@main.command()
+@click.option("--strict", is_flag=True, help="Treat warnings as errors.")
+@click.option(
+    "--run-baseline",
+    is_flag=True,
+    help="Execute baseline commands and verify they run without error.",
+)
+def check(strict: bool, run_baseline: bool) -> None:
+    """Validate all specs before running the loop."""
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
+    specs_dir = Path.cwd() / "specs"
+
+    if not specs_dir.is_dir():
+        console.print()
+        console.print(_banner_text(ascii=ascii, no_color=no_color))
+        console.print("[dim]No specs/ directory. Run [bold]owloop init[/] first.[/]")
+        console.print()
+        raise SystemExit(0)
+
+    linter = SpecLinter(specs_dir)
+    report = linter.lint_all(run_baseline=run_baseline)
+    _print_check_report(console, report, ascii=ascii)
+
+    failed = report.error_count > 0 or (strict and report.warning_count > 0)
+    if failed:
+        raise SystemExit(1)
 
 
 @main.command()
