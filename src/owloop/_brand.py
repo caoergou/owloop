@@ -22,6 +22,7 @@ STAR_STYLE = "dim #6b74a8"
 # ── mascot ──
 OLLIE_NAME = "Ollie"
 TAGLINE = "Your code evolves while you sleep."
+OWL_EMOJI = "🦉"
 
 # ── brand bar ──
 BRAND_BAR = "✦  O W L O O P  ✦"

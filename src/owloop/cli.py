@@ -67,7 +67,11 @@ def classify_spec(content: str) -> str:
 
 def _banner_text(ascii: bool = False, no_color: bool = False) -> Text | str:
     """Return the owloop banner."""
-    joined = _brand.BRAND_BAR_ASCII if ascii else _brand.BRAND_BAR
+    joined = (
+        _brand.BRAND_BAR_ASCII
+        if ascii
+        else f"{_brand.OWL_EMOJI}  {_brand.BRAND_BAR}"
+    )
     if no_color:
         return joined
     return Text.from_markup(f"[bold {_brand.AMBER}]{joined}[/]")
