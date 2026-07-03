@@ -27,6 +27,7 @@ from typing import Any
 
 from owloop import spec_queue
 from owloop.adapters import AgentAdapter
+from owloop.promise import parse_promise_signal
 from owloop.sleep_inhibitor import SleepInhibitor
 
 BUILD_PROMPT = """\
@@ -44,6 +45,11 @@ add a `**Status**: COMPLETE` line near the top of that spec's markdown file
 (this is how the next iteration knows to skip it — omitting this step means the
 loop will pick the same spec again), commit and push, then output
 `<promise>DONE</promise>`.
+
+If you hit an external blocker (missing API key, unavailable dependency), output
+`<promise>BLOCKED:reason</promise>` and the loop will stop. If you need a human
+decision before continuing, output `<promise>DECIDE:question</promise>` and the
+loop will stop to ask for guidance.
 
 Before implementing, search the codebase for existing implementations — do not
 assume something doesn't exist without checking.
@@ -67,6 +73,8 @@ Create or update `IMPLEMENTATION_PLAN.md` with a prioritized task breakdown.
 Do NOT implement anything.
 
 When the plan is complete, output `<promise>DONE</promise>`.
+If you are blocked or need a human decision, output
+`<promise>BLOCKED:reason</promise>` or `<promise>DECIDE:question</promise>`.
 """
 
 EventCallback = Callable[[str, dict], None]
@@ -106,6 +114,8 @@ class IterationResult:
     log_file: Path
     tokens_used: int = 0
     summary: str = ""
+    promise_state: str = ""
+    promise_payload: str = ""
 
 
 @dataclass
@@ -117,6 +127,8 @@ class RunSummary:
     stopped_reason: str
     issues: list[str] | None = None
     tokens_used: int = 0
+    blocker: str | None = None
+    decision_question: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -127,6 +139,8 @@ class RunSummary:
             "stopped_reason": self.stopped_reason,
             "issues": self.issues,
             "tokens_used": self.tokens_used,
+            "blocker": self.blocker,
+            "decision_question": self.decision_question,
         }
 
 
@@ -415,6 +429,9 @@ class OwloopEngine:
             result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
 
         tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
+        parsed = parse_promise_signal(result.stdout)
+        promise_state = parsed[0] if parsed else ""
+        promise_payload = parsed[1] if parsed else ""
 
         self.tokens_used += result.tokens_used
         self._emit("tokens_update", iteration=iteration, tokens_used=result.tokens_used, total_tokens=self.tokens_used)
@@ -423,12 +440,12 @@ class OwloopEngine:
             self._emit("agent_timeout", iteration=iteration)
         elif not result.success:
             self._emit("agent_failed", returncode=result.returncode, tail=tail)
-        elif result.has_completion_signal:
+        elif promise_state == "DONE":
             self._emit("done_signal", signal=result.done_signal)
         else:
             self._emit("no_done_signal", tail=tail)
 
-        success = result.success and result.has_completion_signal
+        success = result.success and promise_state == "DONE"
 
         return IterationResult(
             iteration=iteration,
@@ -439,6 +456,8 @@ class OwloopEngine:
             log_file=log_file,
             tokens_used=result.tokens_used,
             summary=tail,
+            promise_state=promise_state,
+            promise_payload=promise_payload,
         )
 
     def run(self) -> RunSummary:
@@ -507,6 +526,8 @@ class OwloopEngine:
         consecutive_failures = 0
         backoff_level = 0
         stopped_reason = "max_iterations"
+        blocker: str | None = None
+        decision_question: str | None = None
         start_time = time.monotonic()
 
         try:
@@ -537,7 +558,7 @@ class OwloopEngine:
                         note_summary = commit_result.stdout.strip()
                 self._append_run_note(iteration, result.success, note_summary)
 
-                if result.success:
+                if result.promise_state == "DONE":
                     consecutive_failures = 0
                     backoff_level = 0
                     self._check_fix_loop()
@@ -545,6 +566,16 @@ class OwloopEngine:
                         stopped_reason = "plan_complete"
                         self._emit("plan_complete")
                         break
+                elif result.promise_state == "BLOCKED":
+                    stopped_reason = "blocked"
+                    blocker = result.promise_payload
+                    self._emit("blocked", payload=result.promise_payload)
+                    break
+                elif result.promise_state == "DECIDE":
+                    stopped_reason = "decide"
+                    decision_question = result.promise_payload
+                    self._emit("decide", payload=result.promise_payload)
+                    break
                 else:
                     consecutive_failures += 1
                     if consecutive_failures >= self.config.max_consecutive_failures:
@@ -577,6 +608,8 @@ class OwloopEngine:
             main_repo_dir=self.main_repo_dir,
             stopped_reason=stopped_reason,
             tokens_used=self.tokens_used,
+            blocker=blocker,
+            decision_question=decision_question,
         )
         self._write_summary(summary)
         return summary

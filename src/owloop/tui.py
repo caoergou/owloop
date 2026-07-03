@@ -280,6 +280,14 @@ class OwloopTUI:
             self._log(f"✓ done signal detected: {data['signal']}")
             self._log(f"🌙 Loop closed on iteration {s.iteration}")
             self._flash(f"🌙 Loop closed on iteration {s.iteration}", f"bold {MOON_WHITE}")
+        elif kind == "blocked":
+            s.phase = "stuck"
+            self._log(f"✗ blocked: {data['payload']}")
+            self._flash(f"✗ blocked: {data['payload']}", f"bold {RED}")
+        elif kind == "decide":
+            s.phase = "stuck"
+            self._log(f"❓ decision needed: {data['payload']}")
+            self._flash(f"❓ decision needed: {data['payload']}", f"bold {AMBER}")
         elif kind == "no_done_signal":
             self._log("⚠ no done signal detected, will retry in the next iteration")
         elif kind == "agent_failed":
@@ -582,6 +590,11 @@ class OwloopTUI:
             done = sum(1 for spec in s.specs if self._is_done(spec))
             facts.add_row("Specs", Text(f"{done}/{len(s.specs)} done", style=f"bold {GREEN}"))
         facts.add_row("Iteration", str(summary.iterations))
+        facts.add_row("Stopped reason", summary.stopped_reason)
+        if summary.blocker:
+            facts.add_row("Blocker", summary.blocker)
+        if summary.decision_question:
+            facts.add_row("Decision", summary.decision_question)
         if summary.tokens_used:
             facts.add_row("Tokens", f"{summary.tokens_used:,}")
         facts.add_row("Time", _format_elapsed(elapsed))

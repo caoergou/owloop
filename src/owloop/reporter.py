@@ -90,6 +90,10 @@ class ConsoleReporter:
             c.print(f"[{_brand.GREEN}]{self._mark('ok')} task completed successfully![/]")
         elif kind == "no_done_signal":
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} no done signal detected, will retry in next iteration...[/]")
+        elif kind == "blocked":
+            c.print(f"[{_brand.RED}]{self._mark('fail')} blocked: {data['payload']}[/]")
+        elif kind == "decide":
+            c.print(f"[{_brand.AMBER}]{self._mark('warn')} decision needed: {data['payload']}[/]")
         elif kind == "agent_failed":
             c.print(f"[{_brand.RED}]{self._mark('fail')} agent failed (returncode={data['returncode']})[/]")
         elif kind == "agent_timeout":
@@ -168,6 +172,10 @@ class ConsoleReporter:
         facts.add_row("Branch", summary.branch)
         facts.add_row("Iterations", str(summary.iterations))
         facts.add_row("Stopped reason", summary.stopped_reason)
+        if summary.blocker:
+            facts.add_row("Blocker", summary.blocker)
+        if summary.decision_question:
+            facts.add_row("Decision", summary.decision_question)
         facts.add_row("Diff", f"{total_files} files · [green]+{total_ins}[/] · [red]-{total_del}[/]")
         if summary.tokens_used:
             facts.add_row("Tokens", f"{summary.tokens_used:,}")

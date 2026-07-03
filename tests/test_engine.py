@@ -292,3 +292,100 @@ def test_run_exponential_backoff_continues_to_grow(tmp_path: Path, monkeypatch) 
 
     assert summary.iterations == 5
     assert sleeps == [2.0, 2.0, 4.0, 8.0, 16.0]
+
+
+def test_run_blocked_signal_stops_loop_with_payload(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="<promise>BLOCKED:missing env var</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>BLOCKED:missing env var</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, mode="build", max_iterations=5)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    summary = engine.run()
+
+    assert summary.iterations == 1
+    assert summary.stopped_reason == "blocked"
+    assert summary.blocker == "missing env var"
+    assert summary.decision_question is None
+    assert any(kind == "blocked" and data.get("payload") == "missing env var" for kind, data in events)
+
+
+def test_run_decide_signal_stops_loop_with_payload(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="<promise>DECIDE:which API to use?</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DECIDE:which API to use?</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, mode="build", max_iterations=5)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    summary = engine.run()
+
+    assert summary.iterations == 1
+    assert summary.stopped_reason == "decide"
+    assert summary.decision_question == "which API to use?"
+    assert summary.blocker is None
+    assert any(kind == "decide" and data.get("payload") == "which API to use?" for kind, data in events)
+
+
+def test_run_no_signal_counts_as_failure(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "specs").mkdir()
+    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="some output without signal",
+                returncode=0,
+                success=True,
+                has_completion_signal=False,
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, mode="build", max_iterations=1)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    summary = engine.run()
+
+    assert summary.iterations == 1
+    assert summary.stopped_reason == "max_iterations"
+    assert any(kind == "no_done_signal" for kind, _ in events)
+    assert not any(kind in {"blocked", "decide"} for kind, _ in events)

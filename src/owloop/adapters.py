@@ -22,10 +22,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from owloop.promise import PROMISE_SIGNAL_RE, parse_promise_signal
 from owloop.tokens import TokenTracker
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
-DONE_SIGNAL_RE = re.compile(r"<promise>(?:ALL_)?DONE</promise>")
 
 DEFAULT_IDLE_TIMEOUT = 3600  # 60 minutes — claude -p buffers all output until
 # the end of a turn, so "no output" ≠ "stuck". Real-test showed spec 01 took
@@ -47,6 +47,8 @@ class AgentResult:
     done_signal: str | None = None
     timed_out: bool = False
     tokens_used: int = 0
+    promise_state: str = ""  # "DONE" | "BLOCKED" | "DECIDE" | ""
+    promise_payload: str = ""  # text after the colon for BLOCKED/DECIDE
 
 
 class AgentAdapter(ABC):
@@ -164,7 +166,14 @@ class ClaudeCodeAdapter(AgentAdapter):
         try:
             proc = subprocess.Popen(self._build_cmd(), **popen_kwargs)
         except FileNotFoundError:
-            return AgentResult(stdout="", returncode=127, success=False, has_completion_signal=False)
+            return AgentResult(
+                stdout="",
+                returncode=127,
+                success=False,
+                has_completion_signal=False,
+                promise_state="",
+                promise_payload="",
+            )
 
         assert proc.stdin is not None and proc.stdout is not None
         try:
@@ -211,7 +220,8 @@ class ClaudeCodeAdapter(AgentAdapter):
             raise
 
         clean_output = "\n".join(output_lines)
-        match = None if timed_out else DONE_SIGNAL_RE.search(clean_output)
+        match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
+        parsed = parse_promise_signal(clean_output) if match else None
         returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
         tokens_used = self.token_tracker.count_from_text(clean_output)
 
@@ -223,6 +233,8 @@ class ClaudeCodeAdapter(AgentAdapter):
             done_signal=match.group(0) if match else None,
             timed_out=timed_out,
             tokens_used=tokens_used,
+            promise_state=parsed[0] if parsed else "",
+            promise_payload=parsed[1] if parsed else "",
         )
 
 
@@ -246,7 +258,14 @@ class MockAdapter(AgentAdapter):
         if self._responses:
             result = self._responses.pop(0)
         else:
-            result = AgentResult(stdout="", returncode=0, success=True, has_completion_signal=False)
+            result = AgentResult(
+                stdout="",
+                returncode=0,
+                success=True,
+                has_completion_signal=False,
+                promise_state="",
+                promise_payload="",
+            )
         if on_line:
             for line in result.stdout.splitlines():
                 on_line(line)
