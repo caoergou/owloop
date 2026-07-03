@@ -22,6 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from owloop.tokens import TokenTracker
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 DONE_SIGNAL_RE = re.compile(r"<promise>(?:ALL_)?DONE</promise>")
 
@@ -44,6 +46,7 @@ class AgentResult:
     has_completion_signal: bool
     done_signal: str | None = None
     timed_out: bool = False
+    tokens_used: int = 0
 
 
 class AgentAdapter(ABC):
@@ -70,11 +73,13 @@ class ClaudeCodeAdapter(AgentAdapter):
         permission_mode: str = "auto",
         claude_cmd: str = "claude",
         idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+        token_tracker: TokenTracker | None = None,
     ) -> None:
         self.model = model
         self.permission_mode = permission_mode
         self.claude_cmd = claude_cmd
         self.idle_timeout = idle_timeout
+        self.token_tracker = token_tracker or TokenTracker()
 
     @property
     def name(self) -> str:
@@ -208,6 +213,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         clean_output = "\n".join(output_lines)
         match = None if timed_out else DONE_SIGNAL_RE.search(clean_output)
         returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
+        tokens_used = self.token_tracker.count_from_text(clean_output)
 
         return AgentResult(
             stdout=clean_output,
@@ -216,6 +222,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             has_completion_signal=bool(match),
             done_signal=match.group(0) if match else None,
             timed_out=timed_out,
+            tokens_used=tokens_used,
         )
 
 
@@ -253,6 +260,7 @@ def get_adapter(
     permission_mode: str = "auto",
     claude_cmd: str = "claude",
     idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+    token_tracker: TokenTracker | None = None,
 ) -> AgentAdapter:
     if agent == "claude":
         return ClaudeCodeAdapter(
@@ -260,5 +268,6 @@ def get_adapter(
             permission_mode=permission_mode,
             claude_cmd=claude_cmd,
             idle_timeout=idle_timeout,
+            token_tracker=token_tracker,
         )
     raise ValueError(f"unknown agent type: {agent!r} (currently only supports 'claude')")

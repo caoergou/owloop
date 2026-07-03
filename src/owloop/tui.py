@@ -76,6 +76,7 @@ class AppState:
     cwd: str = ""
     main_repo_dir: str = ""
     max_iterations: int = 0
+    max_tokens: int = 0
     iteration: int = 0
     specs: list[dict] = field(default_factory=list)
     logs: list[str] = field(default_factory=list)
@@ -86,6 +87,7 @@ class AppState:
     flash: tuple[str, str, float] | None = None
     done: bool = False
     stopped_reason: str = ""
+    tokens_used: int = 0
     _spinner: str = "⠋"
 
 
@@ -228,6 +230,7 @@ class OwloopTUI:
             s.cwd = data["cwd"]
             s.main_repo_dir = data["main_repo_dir"]
             s.max_iterations = data["max_iterations"]
+            s.max_tokens = data.get("max_tokens", 0)
             s.specs = data["specs"]
             self._log(f"{wake_message()} — mode {s.mode} · model {s.model} · branch {s.branch}")
             if data["has_plan"]:
@@ -264,6 +267,14 @@ class OwloopTUI:
             line = data["line"].strip()
             if line:
                 self._log(line)
+        elif kind == "tokens_update":
+            s.tokens_used = data["total_tokens"]
+            self._log(f"Tokens this round: {data['tokens_used']:,} · total: {s.tokens_used:,}")
+        elif kind == "max_tokens_reached":
+            s.phase = "complete"
+            s.done = True
+            self._log(f"⏱ token budget reached ({data['tokens']:,} / {data['limit']:,}), stopping loop")
+            self._flash("⏱ token budget reached", f"bold {AMBER}")
         elif kind == "done_signal":
             s.phase = "done_signal"
             self._log(f"✓ done signal detected: {data['signal']}")
@@ -377,6 +388,11 @@ class OwloopTUI:
         table.add_row("Model", Text(s.model or "—", style=CYAN))
         table.add_row("Iteration", Text(f"#{s.iteration}" + (f" / {s.max_iterations}" if s.max_iterations else ""), style=f"bold {MOON_WHITE}"))
         table.add_row("Branch", Text(s.branch or "—", style=GREEN))
+        if s.tokens_used:
+            token_text = f"{s.tokens_used:,}"
+            if s.max_tokens:
+                token_text += f" / {s.max_tokens:,}"
+            table.add_row("Tokens", Text(token_text, style=CYAN))
         if s.specs:
             table.add_row("Specs", Text(f"{done}/{len(s.specs)} done", style=GREEN))
         current_spec = self._current_spec_name()
@@ -566,6 +582,8 @@ class OwloopTUI:
             done = sum(1 for spec in s.specs if self._is_done(spec))
             facts.add_row("Specs", Text(f"{done}/{len(s.specs)} done", style=f"bold {GREEN}"))
         facts.add_row("Iteration", str(summary.iterations))
+        if summary.tokens_used:
+            facts.add_row("Tokens", f"{summary.tokens_used:,}")
         facts.add_row("Time", _format_elapsed(elapsed))
 
         hints_lines = [

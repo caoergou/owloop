@@ -84,6 +84,7 @@ class EngineConfig:
     mode: str = "build"  # "build" | "plan"
     max_iterations: int = 0  # 0 = unlimited
     max_duration_minutes: int = 0  # 0 = unlimited
+    max_tokens: int = 0  # 0 = unlimited
     idle_timeout: float = 3600  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
@@ -99,6 +100,7 @@ class IterationResult:
     returncode: int
     timed_out: bool
     log_file: Path
+    tokens_used: int = 0
 
 
 @dataclass
@@ -109,6 +111,7 @@ class RunSummary:
     main_repo_dir: Path
     stopped_reason: str
     issues: list[str] | None = None
+    tokens_used: int = 0
 
 
 class OwloopEngine:
@@ -121,6 +124,7 @@ class OwloopEngine:
         self.log_dir = config.project_dir / "logs"
         self.session_log: Path | None = None
         self._recent_file_sets: list[set[str]] = []
+        self.tokens_used = 0
 
     def _emit(self, kind: str, **data: Any) -> None:
         self.on_event(kind, data)
@@ -332,6 +336,9 @@ class OwloopEngine:
 
         tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
 
+        self.tokens_used += result.tokens_used
+        self._emit("tokens_update", iteration=iteration, tokens_used=result.tokens_used, total_tokens=self.tokens_used)
+
         if result.timed_out:
             self._emit("agent_timeout", iteration=iteration)
         elif not result.success:
@@ -350,6 +357,7 @@ class OwloopEngine:
             returncode=result.returncode,
             timed_out=result.timed_out,
             log_file=log_file,
+            tokens_used=result.tokens_used,
         )
 
     def run(self) -> RunSummary:
@@ -392,6 +400,7 @@ class OwloopEngine:
             main_repo_dir=str(self.main_repo_dir),
             session_log=str(self.session_log),
             max_iterations=self.config.max_iterations,
+            max_tokens=self.config.max_tokens,
             **status,
         )
 
@@ -427,6 +436,11 @@ class OwloopEngine:
                         self._emit("max_duration_reached", minutes=int(elapsed_min))
                         break
 
+                if self.config.max_tokens > 0 and self.tokens_used >= self.config.max_tokens:
+                    stopped_reason = "max_tokens"
+                    self._emit("max_tokens_reached", tokens=self.tokens_used, limit=self.config.max_tokens)
+                    break
+
                 iteration += 1
                 result = self.run_iteration(iteration)
 
@@ -461,4 +475,5 @@ class OwloopEngine:
             cwd=self.cwd,
             main_repo_dir=self.main_repo_dir,
             stopped_reason=stopped_reason,
+            tokens_used=self.tokens_used,
         )

@@ -117,6 +117,10 @@ class ConsoleReporter:
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} detected fix loop: {files} modified for {data['consecutive']} consecutive iterations[/]")
         elif kind == "max_duration_reached":
             c.print(f"[{_brand.AMBER}]{self._mark('clock')} reached maximum run time ({data['minutes']} minutes), stopping loop[/]")
+        elif kind == "tokens_update":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} tokens: +{data['tokens_used']:,} this round · {data['total_tokens']:,} total[/]")
+        elif kind == "max_tokens_reached":
+            c.print(f"[{_brand.AMBER}]{self._mark('clock')} token budget reached ({data['tokens']:,} / {data['limit']:,}), stopping loop[/]")
         elif kind == "push_retry":
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} push failed, creating remote branch {data['branch']}...[/]")
         elif kind == "plan_complete":
@@ -140,6 +144,8 @@ class ConsoleReporter:
         facts.add_column(style=_brand.MOON_WHITE)
         facts.add_row("Branch", summary.branch)
         facts.add_row("Iterations", str(summary.iterations))
+        if summary.tokens_used:
+            facts.add_row("Tokens", f"{summary.tokens_used:,}")
 
         hints = _brand.exit_hints(
             branch=summary.branch,

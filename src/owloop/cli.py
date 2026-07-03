@@ -204,7 +204,7 @@ STOPPED_REASON_EXIT_1 = {"preflight_failed", "dirty_workspace_declined"}
 
 def _run_engine(
     mode: str, max_iterations: int, worktree: bool, model: str, agent: str,
-    idle_timeout: float = 3600, max_duration: int = 0,
+    idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
 ) -> None:
     config = EngineConfig(
@@ -212,6 +212,7 @@ def _run_engine(
         mode=mode,
         max_iterations=max_iterations,
         max_duration_minutes=max_duration,
+        max_tokens=max_tokens,
         idle_timeout=idle_timeout,
         worktree=worktree,
     )
@@ -274,6 +275,10 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
         help="Stop loop after N minutes total (0 = unlimited).", show_default=True,
     )(f)
     f = click.option(
+        "--max-tokens", type=int, default=0,
+        help="Stop loop after N total tokens (0 = unlimited).", show_default=True,
+    )(f)
+    f = click.option(
         "--worktree/--no-worktree", default=True,
         help="Run in an isolated git worktree.", show_default=True,
     )(f)
@@ -287,7 +292,7 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
 )
 @_common_run_options
 def run(max_iterations: int, worktree: bool, model: str, agent: str,
-        idle_timeout: float, max_duration: int) -> None:
+        idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact = _cli_options()
     specs_dir = Path.cwd() / "specs"
@@ -299,7 +304,8 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
 
     _run_engine(
         "build", max_iterations, worktree, model, agent,
-        idle_timeout, max_duration, ascii=ascii, no_color=no_color, compact=compact,
+        idle_timeout, max_duration, max_tokens,
+        ascii=ascii, no_color=no_color, compact=compact,
     )
 
 
@@ -310,12 +316,13 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
 )
 @_common_run_options
 def plan(max_iterations: int, worktree: bool, model: str, agent: str,
-         idle_timeout: float, max_duration: int) -> None:
+         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Generate an implementation plan from specs."""
     ascii, no_color, compact = _cli_options()
     _run_engine(
         "plan", max_iterations, worktree, model, agent,
-        idle_timeout, max_duration, ascii=ascii, no_color=no_color, compact=compact,
+        idle_timeout, max_duration, max_tokens,
+        ascii=ascii, no_color=no_color, compact=compact,
     )
 
 
