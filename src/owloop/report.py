@@ -40,7 +40,7 @@ class ReportGenerator:
 
     def _load_summary(self) -> dict[str, Any]:
         if self.summary_path.exists():
-            with self.summary_path.open() as f:
+            with self.summary_path.open(encoding="utf-8") as f:
                 return json.load(f)  # type: ignore[no-any-return]
         return {}
 
@@ -114,7 +114,7 @@ class ReportGenerator:
             total_ins=total_ins,
             total_del=total_del,
         )
-        report_file.write_text(html)
+        report_file.write_text(html, encoding="utf-8")
         return report_file
 
     def _render_html(

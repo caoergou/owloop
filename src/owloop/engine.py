@@ -152,7 +152,7 @@ class OwloopEngine:
 
     def _log_line(self, text: str) -> None:
         if self.session_log is not None:
-            with self.session_log.open("a") as f:
+            with self.session_log.open("a", encoding="utf-8") as f:
                 f.write(text + "\n")
 
     def _is_git_repo(self) -> bool:
@@ -275,8 +275,8 @@ class OwloopEngine:
         return True
 
     def _write_prompt_files(self) -> None:
-        (self.cwd / "PROMPT_build.md").write_text(BUILD_PROMPT)
-        (self.cwd / "PROMPT_plan.md").write_text(PLAN_PROMPT)
+        (self.cwd / "PROMPT_build.md").write_text(BUILD_PROMPT, encoding="utf-8")
+        (self.cwd / "PROMPT_plan.md").write_text(PLAN_PROMPT, encoding="utf-8")
 
     def _current_branch(self) -> str:
         result = self._run_git("branch", "--show-current")
@@ -335,9 +335,9 @@ class OwloopEngine:
 
         self._emit("iteration_start", iteration=iteration, timestamp=_timestamp())
 
-        prompt_text = prompt_file.read_text()
+        prompt_text = prompt_file.read_text(encoding="utf-8")
 
-        with log_file.open("w") as log_f:
+        with log_file.open("w", encoding="utf-8") as log_f:
 
             def _on_line(line: str) -> None:
                 log_f.write(line + "\n")
@@ -495,5 +495,5 @@ class OwloopEngine:
     def _write_summary(self, summary: RunSummary) -> None:
         """Persist the latest run summary so `owloop report` can read it."""
         summary_path = self.log_dir / "owloop_summary_latest.json"
-        with summary_path.open("w") as f:
+        with summary_path.open("w", encoding="utf-8") as f:
             json.dump(summary.as_dict(), f, indent=2)

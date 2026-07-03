@@ -158,23 +158,24 @@ def init(specs_dir: str, example: bool) -> None:
     gitignore = cwd / ".gitignore"
     gitignore_entries = ["logs/", "PROMPT_build.md", "PROMPT_plan.md"]
     if gitignore.exists():
-        existing = gitignore.read_text()
+        existing = gitignore.read_text(encoding="utf-8")
         to_add = [e for e in gitignore_entries if e not in existing]
         if to_add:
-            with open(gitignore, "a") as f:
+            with open(gitignore, "a", encoding="utf-8") as f:
                 f.write("\n# owloop\n")
                 for entry in to_add:
                     f.write(f"{entry}\n")
             created.append(".gitignore (updated)")
     else:
-        gitignore.write_text("# owloop\n" + "\n".join(gitignore_entries) + "\n")
+        gitignore.write_text("# owloop\n" + "\n".join(gitignore_entries) + "\n", encoding="utf-8")
         created.append(".gitignore")
 
     if example:
         example_spec = specs_path / "01-example.md"
         if not example_spec.exists():
             example_spec.write_text(
-                SPEC_TEMPLATE.format(name="example-task", priority=1)
+                SPEC_TEMPLATE.format(name="example-task", priority=1),
+                encoding="utf-8",
             )
             created.append(f"{specs_dir}/01-example.md")
 
@@ -368,7 +369,7 @@ def status() -> None:
     counts = {"done": 0, "in_progress": 0, "pending": 0}
 
     for spec_file in specs:
-        content = spec_file.read_text()
+        content = spec_file.read_text(encoding="utf-8")
         state = classify_spec(content)
         counts[state] += 1
 

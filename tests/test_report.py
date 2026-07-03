@@ -11,7 +11,7 @@ def _make_repo_with_commits(tmp_path):
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True, capture_output=True)
 
-    (tmp_path / "a.txt").write_text("hello\n")
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "first commit"], cwd=tmp_path, check=True, capture_output=True)
 
@@ -43,13 +43,13 @@ def test_generate_report_from_summary(tmp_path):
         "issues": None,
         "tokens_used": 1234,
     }
-    (logs_dir / "owloop_summary_latest.json").write_text(__import__("json").dumps(summary))
+    (logs_dir / "owloop_summary_latest.json").write_text(__import__("json").dumps(summary), encoding="utf-8")
 
     generator = ReportGenerator(repo)
     report_path = generator.generate()
 
     assert report_path.exists()
-    html = report_path.read_text()
+    html = report_path.read_text(encoding="utf-8")
     assert "owloop report" in html
     assert "main" in html
     assert "first commit" in html

@@ -28,7 +28,7 @@ def get_root_specs(specs_dir: Path) -> list[Path]:
 def is_root_spec_complete(spec_file: Path) -> bool:
     if not spec_file.is_file():
         return False
-    return bool(_COMPLETE_RE.search(spec_file.read_text(errors="replace")))
+    return bool(_COMPLETE_RE.search(spec_file.read_text(encoding="utf-8", errors="replace")))
 
 
 def get_incomplete_root_specs(specs_dir: Path) -> list[Path]:
