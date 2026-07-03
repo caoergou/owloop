@@ -39,41 +39,22 @@ owloop run
 
 ## How It Works
 
-```
-                ┌─────────────────┐
-                │    owloop run   │
-                └────────┬────────┘
-                         ▼
-              ┌──────────────────────┐
-              │  Pick highest-priority│
-              │  incomplete spec      │◄─────────────────┐
-              └──────────┬───────────┘                   │
-                         ▼                               │
-              ┌──────────────────────┐                   │
-              │  New claude -p process│                   │
-              │  (fresh context)      │                   │
-              └──────────┬───────────┘                   │
-                         ▼                               │
-              ┌──────────────────────┐                   │
-              │  Implement + verify   │                   │
-              │  acceptance criteria  │                   │
-              └──────────┬───────────┘                   │
-                         ▼                               │
-                 ┌──────────────┐                        │
-                 │ <promise>DONE│                        │
-                 │ </promise> ? │                        │
-                 └───┬─────┬───┘                        │
-              found  │     │  missing                   │
-                     ▼     ▼                            │
-               ┌────────┐ ┌────────┐                    │
-               │ commit │ │ retry  │                    │
-               │ + next │ │ (max 3)│────────────────────┘
-               └────┬───┘ └────────┘
-                    ▼
-             ┌────────────┐
-             │ All specs   │
-             │ complete    │
-             └─────────────┘
+```mermaid
+flowchart TD
+    A["🦉 owloop run"] --> B["Pick highest-priority\nincomplete spec"]
+    B --> C["Spawn fresh claude -p\n(new context window)"]
+    C --> D["Implement + verify\nacceptance criteria"]
+    D --> E{"&lt;promise&gt;DONE\n&lt;/promise&gt; ?"}
+    E -- "found" --> F["✅ Commit + push"]
+    E -- "missing" --> G["🔄 Retry (max 3)"]
+    G --> B
+    F --> H{"More specs?"}
+    H -- "yes" --> B
+    H -- "no" --> I["🌅 All specs complete"]
+
+    style A fill:#d4a025,color:#0b1026,stroke:#d4a025
+    style I fill:#22c55e20,stroke:#22c55e
+    style G fill:#ef444420,stroke:#ef4444
 ```
 
 **Key properties:**
