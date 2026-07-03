@@ -59,26 +59,37 @@ Focus: **make it not break**, address the failure modes above.
 - [x] Skills bilingual rewrite (Chinese + English trigger support)
 - [x] Skills restructured per agentskills.io spec (references/ directory)
 - [ ] Token tracking and budget cap (`--max-tokens`, per-iteration token counting)
-- [ ] Integration verification in spec template ("function exists AND is called")
 - [ ] `owloop report` — lavish HTML summary with per-iteration diffs
 - [ ] PyPI release (`uvx owloop` works without git install)
 
-## v0.3 — Smart Specs
+## v0.3 — Memory & Cost Control
 
-Focus: **the bottleneck is spec quality, not loop mechanics**.
+Focus: **close the two biggest gaps vs gnhf** — cross-iteration learning and token-based cost control.
 
-- [ ] `/owloop analyze` — scan codebase, generate problem report (like today's 3-agent analysis)
-- [ ] `/owloop-spec` v2 — auto-calibrate acceptance criteria:
-  - Run each Acceptance Criteria command BEFORE writing the spec
-  - Record baseline values (ruff errors: 84, grep count: 69)
-  - Set target based on baseline, not guesswork
+- [ ] Cross-iteration notes (`run-notes.md`): auto-append summary + learnings after each iteration; next iteration reads it. Solves "fresh context = repeated mistakes"
+- [ ] `--max-tokens`: parse token counts from claude output, abort when cumulative limit reached
+- [ ] Rich exit summary: diff stats (files changed, lines added/deleted), token usage, branch diff, review commands
+- [ ] Prevent system sleep during run (`caffeinate` on macOS, `systemd-inhibit` on Linux)
+- [ ] Exponential backoff on hard errors (replace current "3 failures = warning + reset")
+- [ ] `STEERING.md`: agent reads this file each iteration for mid-flight course corrections (inspired by ralphloop.sh)
+
+## v0.4 — Smart Specs
+
+Focus: **the bottleneck is spec quality, not loop mechanics**. No tool in the ecosystem does pre-flight spec validation — owloop can be first.
+
+- [ ] Spec pre-flight linter (`owloop check`): run before loop starts
+  - Verify all acceptance criteria are executable shell commands
+  - Check Exclusions section is non-empty
+  - Detect internal contradictions
+  - Run baseline commands and confirm they execute without error
+- [ ] `/owloop analyze` — scan codebase, generate problem report
 - [ ] Spec-from-issue — convert Jira/GitHub issues to specs
 - [ ] Spec-from-review — convert code review findings to specs
-- [ ] Spec quality score — warn before running: "this spec has no Exclusions" or "Acceptance Criteria uses subjective language"
+- [ ] Promise protocol: support `<promise>BLOCKED:reason</promise>` and `<promise>DECIDE:question</promise>` in addition to `DONE` (inspired by ralphloop.sh)
 
-## v0.4 — Multi-Agent
+## v0.5 — Multi-Agent
 
-- [ ] Agent adapter abstraction (ClaudeCodeAdapter, CodexAdapter, OpenCodeAdapter)
+- [ ] Additional agent adapters (CodexAdapter, OpenCodeAdapter)
 - [ ] Parallel spec execution (multiple worktrees, one agent per spec)
 - [ ] Independent verifier agent (catch "defined but never called" pattern)
 - [ ] Cross-spec dependency tracking
