@@ -94,12 +94,12 @@ Focus: **make it not break**, address the failure modes above.
 
 Focus: **close the two biggest gaps vs gnhf** — cross-iteration learning and token-based cost control. Also adopt the cheap, high-value ergonomics from `ralphloop.sh` and `gnhf`.
 
-- [ ] Cross-iteration notes (`run-notes.md`): auto-append summary + learnings after each iteration; next iteration reads it. Solves "fresh context = repeated mistakes"
-- [ ] `--max-tokens`: parse token counts from claude output, abort when cumulative limit reached
-- [ ] Rich exit summary: diff stats (files changed, lines added/deleted), token usage, branch diff, review commands
-- [ ] Prevent system sleep during run (`caffeinate` on macOS, `systemd-inhibit` on Linux)
-- [ ] Exponential backoff on hard errors (replace current "3 failures = warning + reset")
-- [ ] `STEERING.md`: agent reads this file each iteration for mid-flight course corrections (inspired by ralphloop.sh)
+- [x] Cross-iteration notes (`run-notes.md`): auto-append summary + learnings after each iteration; next iteration reads it. Solves "fresh context = repeated mistakes"
+- [x] `--max-tokens`: parse token counts from claude output, abort when cumulative limit reached
+- [x] Rich exit summary: diff stats (files changed, lines added/deleted), token usage, branch diff, review commands
+- [x] Prevent system sleep during run (`caffeinate` on macOS, `systemd-inhibit` on Linux, `SetThreadExecutionState` on Windows)
+- [x] Exponential backoff on hard errors (replace current "3 failures = warning + reset")
+- [x] `STEERING.md`: agent reads this file each iteration for mid-flight course corrections (inspired by ralphloop.sh)
 
 ## v0.4 — Smart Specs
 
