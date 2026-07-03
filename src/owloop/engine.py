@@ -1,4 +1,4 @@
-"""Python port of scripts/owloop.sh — the autonomous build/plan loop engine.
+"""Python port of scripts/owloop.sh — the autonomous build loop engine.
 
 The engine spawns one fresh agent iteration (via an `AgentAdapter`) per round,
 watches its output for the ``<promise>DONE</promise>`` completion signal,
@@ -27,6 +27,7 @@ from typing import Any
 
 from owloop import spec_queue
 from owloop.adapters import AgentAdapter
+from owloop.paths import resolve_logs_dir, resolve_owloop_dir, resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.sleep_inhibitor import SleepInhibitor
 
@@ -59,24 +60,6 @@ Do NOT touch files listed in the spec's Exclusions section.
 Do NOT modify, delete, or comment out existing tests.
 """
 
-PLAN_PROMPT = """\
-# Owloop — Planning Mode
-
-You are running inside an Owloop autonomous loop in planning mode.
-
-Read these files if they exist (in order):
-1. `AGENTS.md` — agent instructions for this project
-2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
-
-Study `specs/` and compare against the current codebase (gap analysis).
-Create or update `IMPLEMENTATION_PLAN.md` with a prioritized task breakdown.
-Do NOT implement anything.
-
-When the plan is complete, output `<promise>DONE</promise>`.
-If you are blocked or need a human decision, output
-`<promise>BLOCKED:reason</promise>` or `<promise>DECIDE:question</promise>`.
-"""
-
 EventCallback = Callable[[str, dict], None]
 
 
@@ -91,7 +74,6 @@ def _file_timestamp() -> str:
 @dataclass
 class EngineConfig:
     project_dir: Path
-    mode: str = "build"  # "build" | "plan"
     max_iterations: int = 0  # 0 = unlimited
     max_duration_minutes: int = 0  # 0 = unlimited
     max_tokens: int = 0  # 0 = unlimited
@@ -151,10 +133,24 @@ class OwloopEngine:
         self.on_event = on_event or (lambda *_args: None)
         self.cwd = config.project_dir
         self.main_repo_dir = config.project_dir
-        self.log_dir = config.project_dir / "logs"
         self.session_log: Path | None = None
         self._recent_file_sets: list[set[str]] = []
         self.tokens_used = 0
+
+    @property
+    def owloop_dir(self) -> Path:
+        """Resolved owloop metadata directory against the current cwd."""
+        return resolve_owloop_dir(self.cwd)
+
+    @property
+    def specs_dir(self) -> Path:
+        """Resolved specs directory against the current cwd."""
+        return resolve_specs_dir(self.cwd)
+
+    @property
+    def log_dir(self) -> Path:
+        """Resolved logs directory against the current cwd."""
+        return resolve_logs_dir(self.cwd)
 
     def _emit(self, kind: str, **data: Any) -> None:
         self.on_event(kind, data)
@@ -195,21 +191,35 @@ class OwloopEngine:
         if not self._is_git_repo():
             issues.append("current directory is not a git repository")
 
-        specs_dir = self.cwd / "specs"
-        has_plan = (self.cwd / "IMPLEMENTATION_PLAN.md").is_file()
-        if not has_plan and not spec_queue.get_root_specs(specs_dir):
-            issues.append("no .md files in specs/ and no IMPLEMENTATION_PLAN.md")
+        if not spec_queue.get_root_specs(self.specs_dir):
+            issues.append("no .md files in specs/")
 
         return issues
+
+    def _copy_dot_dir(self, worktree_path: Path, name: str, event_name: str) -> None:
+        """Copy a dot-directory from the main repo into a new worktree.
+
+        Git does not track ``.owloop/`` or ``.claude/`` by default, so the
+        worktree needs its own copies for prompts, specs, and agent settings.
+        """
+        source = self.main_repo_dir / name
+        target = worktree_path / name
+        if source.is_dir() and not target.exists():
+            shutil.copytree(source, target)
+            self._emit(event_name, path=str(target))
 
     def _copy_claude_config(self, worktree_path: Path) -> None:
         """Copy the main repo's .claude/ into a new worktree so project-level
         permissions/settings still apply there."""
-        claude_dir = self.main_repo_dir / ".claude"
-        target = worktree_path / ".claude"
-        if claude_dir.is_dir() and not target.exists():
-            shutil.copytree(claude_dir, target)
-            self._emit("claude_config_copied", path=str(target))
+        self._copy_dot_dir(worktree_path, ".claude", "claude_config_copied")
+
+    def _copy_owloop_dir(self, worktree_path: Path) -> None:
+        """Copy the main repo's .owloop/ into a new worktree.
+
+        This keeps specs, logs, and prompt files in the worktree so the loop
+        can read and write them without touching the original checkout.
+        """
+        self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied")
 
     def setup_worktree(self) -> bool:
         """Create/enter an isolated git worktree unless disabled or already inside one.
@@ -261,11 +271,8 @@ class OwloopEngine:
 
         wt_date = datetime.now().strftime("%Y%m%d")
         wt_branch = f"owloop/{wt_date}"
-        wt_path = (
-            self.config.project_dir.parent
-            / f"{self.config.project_dir.name}-owloop-wt"
-            / f"owloop-{wt_date}"
-        )
+        wt_base = self.config.project_dir.parent / f"{self.config.project_dir.name}-owloop-wt"
+        wt_path = wt_base / f"owloop-{wt_date}"
 
         self._emit("worktree_creating", path=str(wt_path), branch=wt_branch)
 
@@ -273,13 +280,16 @@ class OwloopEngine:
             self.cwd = wt_path
             self._emit("worktree_reused", path=str(wt_path))
             self._copy_claude_config(wt_path)
+            self._copy_owloop_dir(wt_path)
             return True
 
+        wt_base.mkdir(parents=True, exist_ok=True)
         created = self._run_git("worktree", "add", str(wt_path), "-b", wt_branch)
         if created.returncode == 0:
             self.cwd = wt_path
             self._emit("worktree_created", path=str(wt_path), branch=wt_branch)
             self._copy_claude_config(wt_path)
+            self._copy_owloop_dir(wt_path)
             return True
 
         reused = self._run_git("worktree", "add", str(wt_path), wt_branch)
@@ -287,26 +297,24 @@ class OwloopEngine:
             self.cwd = wt_path
             self._emit("worktree_branch_reused", path=str(wt_path), branch=wt_branch)
             self._copy_claude_config(wt_path)
+            self._copy_owloop_dir(wt_path)
             return True
 
         self._emit("worktree_failed", stderr=created.stderr)
         return True
 
-    def _write_prompt_files(self) -> None:
-        (self.cwd / "PROMPT_build.md").write_text(BUILD_PROMPT, encoding="utf-8")
-        (self.cwd / "PROMPT_plan.md").write_text(PLAN_PROMPT, encoding="utf-8")
+    def _write_prompt_file(self) -> None:
+        owloop_dir = resolve_owloop_dir(self.cwd)
+        (owloop_dir / "PROMPT_build.md").write_text(BUILD_PROMPT, encoding="utf-8")
 
     def _current_branch(self) -> str:
         result = self._run_git("branch", "--show-current")
         return result.stdout.strip() or "main"
 
     def _spec_status(self) -> dict:
-        specs_dir = self.cwd / "specs"
-        has_plan = (self.cwd / "IMPLEMENTATION_PLAN.md").is_file()
-        specs = spec_queue.get_root_specs(specs_dir)
-        incomplete = spec_queue.get_incomplete_root_specs(specs_dir)
+        specs = spec_queue.get_root_specs(self.specs_dir)
+        incomplete = spec_queue.get_incomplete_root_specs(self.specs_dir)
         return {
-            "has_plan": has_plan,
             "has_specs": len(specs) > 0,
             "spec_count": len(specs),
             "incomplete_count": len(incomplete),
@@ -406,11 +414,10 @@ class OwloopEngine:
                 self._run_git("push", "-u", "origin", branch)
 
     def run_iteration(self, iteration: int) -> IterationResult:
-        prompt_file = self.cwd / (
-            "PROMPT_plan.md" if self.config.mode == "plan" else "PROMPT_build.md"
-        )
+        owloop_dir = resolve_owloop_dir(self.cwd)
+        prompt_file = owloop_dir / "PROMPT_build.md"
         log_file = self.log_dir / (
-            f"owloop_{self.config.mode}_iter_{iteration}_{_file_timestamp()}.log"
+            f"owloop_build_iter_{iteration}_{_file_timestamp()}.log"
         )
 
         self._emit("iteration_start", iteration=iteration, timestamp=_timestamp())
@@ -463,7 +470,7 @@ class OwloopEngine:
     def run(self) -> RunSummary:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.main_repo_dir = self._resolve_main_repo_dir()
-        self.session_log = self.log_dir / f"owloop_{self.config.mode}_session_{_file_timestamp()}.log"
+        self.session_log = self.log_dir / f"owloop_build_session_{_file_timestamp()}.log"
 
         issues = self.preflight_check()
         if issues:
@@ -486,14 +493,13 @@ class OwloopEngine:
                 stopped_reason="dirty_workspace_declined",
             )
 
-        self._write_prompt_files()
+        self._write_prompt_file()
 
         branch = self._current_branch()
         status = self._spec_status()
 
         self._emit(
             "session_info",
-            mode=self.config.mode,
             model=self.adapter.name,
             branch=branch,
             cwd=str(self.cwd),
@@ -504,12 +510,7 @@ class OwloopEngine:
             **status,
         )
 
-        if (
-            self.config.mode == "build"
-            and not status["has_plan"]
-            and status["has_specs"]
-            and status["incomplete_count"] == 0
-        ):
+        if status["has_specs"] and status["incomplete_count"] == 0:
             self._emit("all_specs_complete", spec_count=status["spec_count"])
             return RunSummary(
                 iterations=0,
@@ -562,10 +563,6 @@ class OwloopEngine:
                     consecutive_failures = 0
                     backoff_level = 0
                     self._check_fix_loop()
-                    if self.config.mode == "plan":
-                        stopped_reason = "plan_complete"
-                        self._emit("plan_complete")
-                        break
                 elif result.promise_state == "BLOCKED":
                     stopped_reason = "blocked"
                     blocker = result.promise_payload

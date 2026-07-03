@@ -20,7 +20,6 @@ def _git_init(repo: Path) -> None:
 
 
 def _make_engine(repo: Path, adapter: MockAdapter, **kwargs) -> OwloopEngine:
-    kwargs.setdefault("mode", "plan")
     config = EngineConfig(project_dir=repo, worktree=False, **kwargs)
     return OwloopEngine(config=config, adapter=adapter)
 
@@ -108,8 +107,8 @@ def test_run_iteration_injects_context_and_logs_note(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     adapter = MockAdapter(
         responses=[
@@ -122,10 +121,10 @@ def test_run_iteration_injects_context_and_logs_note(tmp_path: Path) -> None:
             )
         ]
     )
-    engine = _make_engine(repo, adapter, mode="build")
+    engine = _make_engine(repo, adapter)
     engine.log_dir.mkdir(parents=True, exist_ok=True)
     engine.session_log = engine.log_dir / "session.log"
-    engine._write_prompt_files()
+    engine._write_prompt_file()
 
     (repo / "STEERING.md").write_text("Steer here.", encoding="utf-8")
     (repo / "run-notes.md").write_text("Note here.", encoding="utf-8")
@@ -147,8 +146,8 @@ def test_run_appends_run_notes_after_iteration(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     adapter = MockAdapter(
         responses=[
@@ -161,7 +160,7 @@ def test_run_appends_run_notes_after_iteration(tmp_path: Path) -> None:
             )
         ]
     )
-    engine = _make_engine(repo, adapter, mode="plan", max_iterations=1)
+    engine = _make_engine(repo, adapter, max_iterations=1)
     events: list[tuple[str, dict]] = []
     engine.on_event = lambda kind, data: events.append((kind, data))
 
@@ -180,10 +179,10 @@ def test_run_uses_commit_message_as_summary_when_available(tmp_path: Path) -> No
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
-    # Pre-seed a second commit so _check_fix_loop is safe even in build mode.
+    # Pre-seed a second commit so _check_fix_loop is safe in build mode.
     (repo / "dummy.txt").write_text("x", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "agent commit message"], cwd=repo, check=True, capture_output=True)
@@ -199,7 +198,7 @@ def test_run_uses_commit_message_as_summary_when_available(tmp_path: Path) -> No
             )
         ]
     )
-    engine = _make_engine(repo, adapter, mode="plan", max_iterations=1)
+    engine = _make_engine(repo, adapter, max_iterations=1)
 
     engine.run()
 
@@ -211,8 +210,8 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     sleeps: list[float] = []
 
@@ -242,7 +241,6 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
     engine = _make_engine(
         repo,
         adapter,
-        mode="build",
         max_iterations=4,
         max_consecutive_failures=3,
         base_retry_delay=2.0,
@@ -259,8 +257,8 @@ def test_run_exponential_backoff_continues_to_grow(tmp_path: Path, monkeypatch) 
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     sleeps: list[float] = []
 
@@ -281,7 +279,6 @@ def test_run_exponential_backoff_continues_to_grow(tmp_path: Path, monkeypatch) 
     engine = _make_engine(
         repo,
         adapter,
-        mode="build",
         max_iterations=5,
         max_consecutive_failures=3,
         base_retry_delay=2.0,
@@ -298,8 +295,8 @@ def test_run_blocked_signal_stops_loop_with_payload(tmp_path: Path, monkeypatch)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
@@ -314,7 +311,7 @@ def test_run_blocked_signal_stops_loop_with_payload(tmp_path: Path, monkeypatch)
             )
         ]
     )
-    engine = _make_engine(repo, adapter, mode="build", max_iterations=5)
+    engine = _make_engine(repo, adapter, max_iterations=5)
     events: list[tuple[str, dict]] = []
     engine.on_event = lambda kind, data: events.append((kind, data))
 
@@ -331,8 +328,8 @@ def test_run_decide_signal_stops_loop_with_payload(tmp_path: Path, monkeypatch) 
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
@@ -347,7 +344,7 @@ def test_run_decide_signal_stops_loop_with_payload(tmp_path: Path, monkeypatch) 
             )
         ]
     )
-    engine = _make_engine(repo, adapter, mode="build", max_iterations=5)
+    engine = _make_engine(repo, adapter, max_iterations=5)
     events: list[tuple[str, dict]] = []
     engine.on_event = lambda kind, data: events.append((kind, data))
 
@@ -364,8 +361,8 @@ def test_run_no_signal_counts_as_failure(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / "specs").mkdir()
-    (repo / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
 
     monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
@@ -379,7 +376,7 @@ def test_run_no_signal_counts_as_failure(tmp_path: Path, monkeypatch) -> None:
             )
         ]
     )
-    engine = _make_engine(repo, adapter, mode="build", max_iterations=1)
+    engine = _make_engine(repo, adapter, max_iterations=1)
     events: list[tuple[str, dict]] = []
     engine.on_event = lambda kind, data: events.append((kind, data))
 

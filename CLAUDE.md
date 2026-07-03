@@ -52,4 +52,4 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 - **Auto Mode, not YOLO** — always `--permission-mode auto`, never `--dangerously-skip-permissions`. This is the core premise of the fork; don't regress it.
 - **Worktree isolation, zero extra deps** — the engine uses plain `git worktree add` / `git worktree list`, nothing beyond git itself.
 - **Constraint-oriented specs** — every spec template carries Requirements, shell-verifiable Acceptance Criteria, Exclusions, Style, and Verification. Exclusions are what keep an unattended loop from wandering; never make that section optional.
-- **Fresh context per iteration** — each loop round is a brand-new `claude -p` process. State lives on disk (`specs/`, `logs/`, `IMPLEMENTATION_PLAN.md`), never accumulated in memory across iterations. Don't design features that assume continuity between rounds.
+- **Fresh context per iteration** — each loop round is a brand-new `claude -p` process. State lives on disk (`.owloop/specs/`, `.owloop/logs/`), never accumulated in memory across iterations. Don't design features that assume continuity between rounds.

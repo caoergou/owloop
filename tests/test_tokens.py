@@ -63,7 +63,7 @@ def test_mock_adapter_passes_through_tokens(tmp_path):
     config = EngineConfig(project_dir=repo, max_tokens=2000, worktree=False)
     engine = OwloopEngine(config, adapter, on_event=None)
     engine.log_dir.mkdir(parents=True, exist_ok=True)
-    engine._write_prompt_files()
+    engine._write_prompt_file()
     events = []
     engine.on_event = lambda kind, data: events.append((kind, data))
     result = engine.run_iteration(1)

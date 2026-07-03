@@ -20,7 +20,6 @@ def _render_to_text(app_method, state=None):
 
 def test_render_status_includes_current_spec_name():
     state = AppState(
-        mode="build",
         model="claude-sonnet",
         branch="feat/owl",
         iteration=2,

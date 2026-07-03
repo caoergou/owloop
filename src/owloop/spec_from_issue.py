@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from owloop.paths import resolve_specs_dir, resolve_templates_dir
+
 
 class IssueToSpecConverter:
     """Fetch a GitHub issue and render it as an owloop spec."""
@@ -21,8 +23,8 @@ class IssueToSpecConverter:
                 templates/ live).
         """
         self.project_dir = Path(project_dir)
-        self.specs_dir = self.project_dir / "specs"
-        self.template_path = self.project_dir / "templates" / "spec-template.md"
+        self.specs_dir = resolve_specs_dir(self.project_dir)
+        self.template_path = resolve_templates_dir(self.project_dir) / "spec-template.md"
 
     def from_github(self, issue_url_or_number: str, repo: str | None = None) -> dict[str, str]:
         """Fetch a GitHub issue and return structured spec data.

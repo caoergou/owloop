@@ -89,7 +89,6 @@ def _format_elapsed(seconds: float) -> str:
 
 @dataclass
 class AppState:
-    mode: str = "build"
     model: str = ""
     branch: str = ""
     cwd: str = ""
@@ -239,7 +238,6 @@ class OwloopTUI:
         s = self.state
 
         if kind == "session_info":
-            s.mode = data["mode"]
             s.model = data["model"]
             s.branch = data["branch"]
             s.cwd = data["cwd"]
@@ -247,7 +245,7 @@ class OwloopTUI:
             s.max_iterations = data["max_iterations"]
             s.max_tokens = data.get("max_tokens", 0)
             s.specs = data["specs"]
-            self._log(f"{wake_message()} — mode {s.mode} · model {s.model} · branch {s.branch}")
+            self._log(f"{wake_message()} · model {s.model} · branch {s.branch}")
         elif kind == "worktree_already_active":
             self._log(f"Running in isolated worktree: {data['path']}")
         elif kind == "worktree_skipped":
@@ -347,12 +345,6 @@ class OwloopTUI:
                 s.specs = data["specs"]
             s.phase = "working"
             s.current_action = "Preparing next iteration"
-        elif kind == "plan_complete":
-            s.done = True
-            s.phase = "complete"
-            s.current_action = "Planning complete"
-            self._log("planning complete! run 'owloop run' to start building")
-            self._flash("🌅 planning complete", f"bold {AMBER}")
         elif kind == "interrupted":
             s.phase = "error"
             self._log("stopped (Ctrl+C)")
@@ -412,7 +404,6 @@ class OwloopTUI:
         table = Table.grid(padding=(0, 1))
         table.add_column(style=f"dim {GRAY}")
         table.add_column()
-        table.add_row("Mode", Text(s.mode, style=f"bold {MOON_WHITE}"))
         table.add_row("Model", Text(s.model or "—", style=CYAN))
         table.add_row(
             "Iteration",

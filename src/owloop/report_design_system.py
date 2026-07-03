@@ -13,26 +13,30 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ColorTokens:
-    """Semantic color tokens. Values are CSS-ready hex strings."""
+    """Semantic color tokens from .github/BRAND.md."""
 
-    night: str = "#0b1021"
+    night: str = "#0b1026"
+    night_landing: str = "#080c1d"
     night_card: str = "#121a2e"
-    dim_blue: str = "#2a3a5c"
+    dim_blue: str = "#3a4270"
     amber: str = "#d4a025"
-    amber_light: str = "#f0c75e"
-    moon_white: str = "#e8e6dc"
-    moon_dim: str = "#9ca3af"
+    amber_bright: str = "#f0c563"
+    moon_white: str = "#f2ecd8"
+    moon_dim: str = "#8890b3"
     success: str = "#8fd19e"
     danger: str = "#e0777d"
-    info: str = "#7eb8da"
+    gray: str = "#8890b3"
+    cyan: str = "#8fb8de"
 
 
 @dataclass(frozen=True)
 class FontTokens:
-    """Typography tokens."""
+    """Typography tokens from .github/BRAND.md."""
 
-    mono: str = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace'
-    sans: str = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    display: str = '"Cinzel Decorative", Georgia, serif'
+    sans: str = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    tagline: str = 'Caveat, "Brush Script MT", cursive'
+    mono: str = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
     base_size: str = "16px"
     line_height: str = "1.6"
 
@@ -49,6 +53,12 @@ class SpacingTokens:
     xxl: str = "3rem"     # 48px
 
 
+def google_fonts_link() -> str:
+    """Return the <link> tag for Google Fonts used by the brand."""
+    families = "family=Cinzel+Decorative:wght@400;700&family=Caveat:wght@400;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600"
+    return f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?{families}&display=swap">'
+
+
 def css_variables(colors: ColorTokens | None = None, fonts: FontTokens | None = None) -> str:
     """Return the CSS :root block with all design tokens."""
     c = colors or ColorTokens()
@@ -56,17 +66,21 @@ def css_variables(colors: ColorTokens | None = None, fonts: FontTokens | None = 
     return f"""
 :root {{
   --owl-night: {c.night};
+  --owl-night-landing: {c.night_landing};
   --owl-night-card: {c.night_card};
   --owl-dim-blue: {c.dim_blue};
   --owl-amber: {c.amber};
-  --owl-amber-light: {c.amber_light};
+  --owl-amber-bright: {c.amber_bright};
   --owl-moon: {c.moon_white};
   --owl-moon-dim: {c.moon_dim};
   --owl-success: {c.success};
   --owl-danger: {c.danger};
-  --owl-info: {c.info};
-  --owl-font-mono: {f.mono};
+  --owl-gray: {c.gray};
+  --owl-cyan: {c.cyan};
+  --owl-font-display: {f.display};
   --owl-font-sans: {f.sans};
+  --owl-font-tagline: {f.tagline};
+  --owl-font-mono: {f.mono};
   --owl-base-size: {f.base_size};
   --owl-line-height: {f.line_height};
 }}
@@ -80,7 +94,7 @@ def base_styles() -> str:
 * {{ box-sizing: border-box; }}
 html {{ scroll-behavior: smooth; }}
 body {{
-  font-family: var(--owl-font-mono);
+  font-family: var(--owl-font-sans);
   font-size: var(--owl-base-size);
   line-height: var(--owl-line-height);
   background: var(--owl-night);
@@ -140,7 +154,7 @@ p {{ margin: 0.5rem 0; }}
 }}
 .badge-success {{ background: rgba(143, 209, 158, 0.15); color: var(--owl-success); }}
 .badge-danger {{ background: rgba(224, 119, 125, 0.15); color: var(--owl-danger); }}
-.badge-info {{ background: rgba(126, 184, 218, 0.15); color: var(--owl-info); }}
+.badge-info {{ background: rgba(126, 184, 218, 0.15); color: var(--owl-cyan); }}
 .insight {{
   background: var(--owl-night-card);
   border-left: 4px solid var(--owl-amber);
@@ -149,7 +163,7 @@ p {{ margin: 0.5rem 0; }}
   margin: 1rem 0;
 }}
 .insight h4 {{
-  color: var(--owl-amber-light);
+  color: var(--owl-amber-bright);
   margin: 0 0 0.5rem 0;
   font-family: var(--owl-font-sans);
 }}
@@ -208,14 +222,22 @@ def tailwind_cdn() -> str:
     theme: {
       extend: {
         colors: {
-          'owl-night': '#0b1021',
+          'owl-night': '#0b1026',
           'owl-card': '#121a2e',
-          'owl-dim': '#2a3a5c',
+          'owl-dim': '#3a4270',
           'owl-amber': '#d4a025',
-          'owl-moon': '#e8e6dc',
+          'owl-amber-bright': '#f0c563',
+          'owl-moon': '#f2ecd8',
+          'owl-success': '#8fd19e',
+          'owl-danger': '#e0777d',
+          'owl-gray': '#8890b3',
+          'owl-cyan': '#8fb8de',
         },
         fontFamily: {
-          mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          display: ['"Cinzel Decorative"', 'Georgia', 'serif'],
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          tagline: ['Caveat', 'cursive'],
+          mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
         }
       }
     }

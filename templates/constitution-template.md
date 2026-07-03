@@ -19,17 +19,17 @@ When the user is chatting with you outside of a owloop loop:
 - Help create specifications via `/speckit.specify`
 - Discuss project ideas and architecture
 
-### 2. Owloop Loop Mode  
+### 2. Owloop Loop Mode
 When you're running inside a owloop loop (fed via stdin):
 - Be fully autonomous — don't ask for permission
-- Read IMPLEMENTATION_PLAN.md and pick the highest priority incomplete task
+- Read specs in numerical order and pick the highest priority incomplete task
 - Implement the task completely
 - Run tests and verify acceptance criteria
 - Commit and push (if Git Autonomy enabled)
 - Output `<promise>DONE</promise>` ONLY when the task is 100% complete
 - If criteria not met, fix issues and try again
 
-**How to detect:** If the prompt instructs you to read IMPLEMENTATION_PLAN.md and pick a task, you're in Owloop Loop Mode.
+**How to detect:** If the prompt instructs you to read specs and pick a task, you're in Owloop Loop Mode.
 
 ---
 
@@ -89,10 +89,7 @@ AI coding agents work autonomously:
 
 **Usage:**
 ```bash
-# Planning: Create task list from specs
-owloop plan
-
-# Building: Implement tasks one by one
+# Build: implement specs one by one
 owloop run             # Unlimited
 owloop run -n 20       # Max 20 iterations
 ```
@@ -112,22 +109,14 @@ Use the SpecKit approach:
    - Acceptance criteria
    - Magic phrase: `<promise>DONE</promise>`
 
-### Phase 2: Run Planning Mode
-
-```bash
-./scripts/owloop plan
-```
-
-This analyzes specs vs current code and creates IMPLEMENTATION_PLAN.md.
-
-### Phase 3: Run Build Mode
+### Phase 2: Run Build Mode
 
 ```bash
 ./scripts/owloop
 ```
 
 Each iteration:
-1. Reads specs in numerical order (or IMPLEMENTATION_PLAN.md if exists)
+1. Reads specs in numerical order
 2. Picks the highest priority incomplete spec (or if that one seems unachievable or needs any of the other ones as a precondition, chooses that one instead)
 3. Looks for a note in that spec about NR_OF_TRIES and increments it; if that note isn't found, adds it (at the very bottom). If NR_OF_TRIES > 0, also look at `history/` folder to understand what we struggled with or learned in previous tries. If NR_OF_TRIES = 10, this spec is unachievable (too hard or too big) — split it into simpler specs
 4. Implements completely

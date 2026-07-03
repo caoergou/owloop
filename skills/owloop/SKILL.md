@@ -40,13 +40,13 @@ Owloop is a **loop engineering** tool: it combines spec-driven development with 
 uv tool install owloop
 # or: pip install owloop
 
-# Initialize in your project
+# Initialize in your project (creates only .owloop/)
 owloop init
 
 # Turn a vague goal into a concrete spec
 owloop spec "refactor error handling"
 
-# Or edit specs/01-example.md manually, then run
+# Or edit .owloop/specs/01-example.md manually, then run
 owloop run
 ```
 
@@ -67,9 +67,10 @@ Loop iteration N:
 - **Pre-flight spec linting** — `owloop check` validates specs before the loop starts
 - **Fresh context every iteration** — no context overflow, no degradation
 - **Cross-iteration notes** — `run-notes.md` carries learnings between iterations
-- **State on disk** — `specs/`, `IMPLEMENTATION_PLAN.md`, `logs/`
+- **State on disk** — `.owloop/specs/`, `.owloop/logs/` (legacy `specs/` and `logs/` still supported)
 - **Auto Mode** — `--permission-mode auto`, never YOLO
 - **Worktree isolation** — runs in a separate `git worktree`, main checkout untouched
+- **AI-generated reports** — `owloop report` analyzes the run with Claude and produces a reviewable HTML artifact
 - **Fix-loop detection** — same files modified 3+ rounds warns of possible death spiral
 - **Token budget cap** — `--max-tokens` stops the run before costs spiral
 - **Sleep prevention** — keeps your machine awake during overnight runs
@@ -79,16 +80,17 @@ Loop iteration N:
 
 | Command | Description |
 |---|---|
-| `owloop init` | Initialize owloop in current project (creates `specs/`, templates) |
-| `owloop spec "goal"` | Turn a vague goal into a concrete spec via agent clarification |
+| `owloop init` | Initialize owloop in current project (creates `.owloop/`) |
+| `owloop spec "goal"` | Turn a vague goal into a concrete spec via agent clarification and approval |
 | `owloop check` | Pre-flight linter: validate all specs before running the loop |
 | `owloop run` | Start the autonomous loop with TUI |
 | `owloop run -n 20` | Limit to 20 iterations |
 | `owloop run --max-duration 120` | Stop after 2 hours |
 | `owloop run --max-tokens 200000` | Stop after token budget reached |
-| `owloop plan` | Generate implementation plan from specs |
 | `owloop status` | Show specs and completion progress |
-| `owloop report` | Generate HTML summary report for the latest run |
+| `owloop report` | Generate AI-powered HTML summary report (default) |
+| `owloop report --no-ai` | Generate fast, offline HTML summary report |
+| `owloop report --open` | Generate AI report and open with lavish-axi |
 | `owloop spec-from-issue 42` | Generate a spec draft from a GitHub issue |
 
 ## Writing Specs

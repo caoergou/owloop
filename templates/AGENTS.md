@@ -31,11 +31,4 @@ Specs are numbered: `001-xxx`, `002-xxx`, etc.
 
 ---
 
-## Optional: Planning Mode
-
-Only if you need detailed task breakdown:
-```bash
-owloop plan
-```
-
-**Most projects don't need this** — specs are the plan.
+Specs are the plan. No separate planning step is needed.

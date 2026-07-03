@@ -4,6 +4,13 @@ import subprocess
 
 from owloop.git_stats import CommitInfo, parse_git_stat
 from owloop.report import ReportGenerator
+from owloop.report_ai import (
+    KeyChange,
+    NextAction,
+    ReportInsights,
+    ReviewFocus,
+    Risk,
+)
 
 
 def _make_repo_with_commits(tmp_path):
@@ -86,3 +93,48 @@ def test_report_includes_review_commands_and_branch_diff(tmp_path):
     assert "git diff --stat HEAD~2..HEAD" in html
     assert "Branch diff" in html
     assert "files" in html
+
+
+def test_report_renders_ai_insights(tmp_path):
+    repo = _make_repo_with_commits(tmp_path)
+    logs_dir = repo / "logs"
+    logs_dir.mkdir()
+    summary = {
+        "branch": "main",
+        "iterations": 2,
+        "cwd": str(repo),
+        "main_repo_dir": str(repo),
+        "stopped_reason": "max_iterations",
+        "issues": None,
+        "tokens_used": 1234,
+    }
+    (logs_dir / "owloop_summary_latest.json").write_text(__import__("json").dumps(summary), encoding="utf-8")
+
+    insights = ReportInsights(
+        summary="Two small changes.",
+        key_changes=[
+            KeyChange(
+                file="src/core.py",
+                change_type="refactor",
+                complexity="medium",
+                risk_level="medium",
+                description="Extracted helper.",
+                review_suggestions=["Check edge cases"],
+            )
+        ],
+        risks=[Risk(level="medium", description="Behavior may shift.", files=["src/core.py"])],
+        review_focus=[ReviewFocus(priority=1, area="Exception paths", reason="Behavior could shift.")],
+        next_actions=[NextAction(action="Run pytest", urgency="now")],
+    )
+
+    generator = ReportGenerator(repo)
+    report_path = generator.generate(insights=insights)
+    html = report_path.read_text(encoding="utf-8")
+
+    assert "AI Review Insights" in html
+    assert "src/core.py" in html
+    assert "Key Changes" in html
+    assert "Risks" in html
+    assert "Review Focus" in html
+    assert "Next Actions" in html
+    assert "Run pytest" in html

@@ -31,12 +31,15 @@ def _done_spec_result(name: str = "refactor errors") -> AgentResult:
 
 
 def test_generate_writes_spec_on_done_signal(tmp_path: Path) -> None:
+    (tmp_path / ".owloop").mkdir()
     adapter = MockAdapter(responses=[_done_spec_result("unify errors")])
     generator = SpecGenerator(tmp_path, adapter)
 
     path = generator.generate("unify error handling")
 
     assert path.exists()
+    assert path.parent.name == "specs"
+    assert path.parent.parent.name == ".owloop"
     assert path.name == "01-unify-errors.md"
     content = path.read_text(encoding="utf-8")
     assert "# Spec: unify errors" in content
@@ -44,6 +47,7 @@ def test_generate_writes_spec_on_done_signal(tmp_path: Path) -> None:
 
 
 def test_generate_asks_clarification_then_writes_spec(tmp_path: Path) -> None:
+    (tmp_path / ".owloop").mkdir()
     adapter = MockAdapter(responses=[
         AgentResult(
             stdout="<promise>DECIDE:Which module should I refactor?</promise>",
@@ -67,6 +71,7 @@ def test_generate_asks_clarification_then_writes_spec(tmp_path: Path) -> None:
 
     assert len(asked) == 1
     assert asked[0] == ["Which module should I refactor?"]
+    assert path.parent.parent.name == ".owloop"
     assert path.name == "01-refactor-helpers.md"
 
 

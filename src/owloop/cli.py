@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +16,9 @@ from rich.text import Text
 from owloop import _brand
 from owloop.adapters import get_adapter
 from owloop.engine import EngineConfig, OwloopEngine
+from owloop.paths import resolve_specs_dir
 from owloop.report import ReportGenerator
+from owloop.report_ai import AIReportInsightsGenerator
 from owloop.reporter import ConsoleReporter
 from owloop.spec_from_issue import IssueToSpecConverter
 from owloop.spec_generator import SpecGenerationError, SpecGenerator
@@ -52,6 +55,60 @@ Output when complete: `<promise>DONE</promise>`
 
 
 CHECKED_BOX_RE = re.compile(r"- \[[xX]\]")
+
+MAX_TOKENS_UNITS = {
+    "k": 1_000,
+    "w": 10_000,
+    "m": 1_000_000,
+}
+
+
+def parse_max_tokens(value: str) -> int:
+    """Parse a token limit, supporting shorthand like 10k, 1w, 2m.
+
+    Args:
+        value: Raw user input. Plain integers pass through; suffixes
+            ``k`` (thousand), ``w`` (ten-thousand), and ``m`` (million)
+            are expanded.
+
+    Returns:
+        Token count as an integer.
+
+    Raises:
+        click.BadParameter: if the value cannot be parsed.
+    """
+    value = value.strip().lower()
+    if not value:
+        raise click.BadParameter("token limit cannot be empty")
+
+    if value.isdigit():
+        return int(value)
+
+    suffix = value[-1]
+    if suffix not in MAX_TOKENS_UNITS:
+        raise click.BadParameter(
+            f"invalid token limit: {value!r}. Use a number or add k/w/m (e.g. 10k, 1w, 2m)"
+        )
+
+    number_part = value[:-1]
+    if not number_part or not number_part.replace(".", "", 1).isdigit():
+        raise click.BadParameter(
+            f"invalid token limit: {value!r}. Use a number or add k/w/m (e.g. 10k, 1w, 2m)"
+        )
+
+    number = float(number_part)
+    return int(number * MAX_TOKENS_UNITS[suffix])
+
+
+class MaxTokensParamType(click.ParamType):
+    """Click parameter type that parses token limit shorthand."""
+
+    name = "tokens"
+
+    def convert(self, value: object, param: click.Parameter | None, ctx: click.Context | None) -> int:
+        if isinstance(value, int):
+            return value
+        return parse_max_tokens(str(value))
 
 
 def classify_spec(content: str) -> str:
@@ -149,7 +206,6 @@ def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool) -> None
         console.print("Commands:")
         console.print("  [bold]owloop init[/]    Initialize owloop in current project")
         console.print("  [bold]owloop run[/]     Start the autonomous loop")
-        console.print("  [bold]owloop plan[/]    Generate implementation plan from specs")
         console.print("  [bold]owloop status[/]  Show current specs and progress")
         console.print("  [bold]owloop version[/] Show installed version")
         console.print()
@@ -158,19 +214,18 @@ def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool) -> None
 
 @main.command()
 @click.option(
-    "--specs-dir",
-    default="specs",
-    help="Directory for spec files.",
-    show_default=True,
-)
-@click.option(
     "--example/--no-example",
     default=True,
     help="Create an example spec file.",
     show_default=True,
 )
-def init(specs_dir: str, example: bool) -> None:
-    """Initialize owloop in the current project."""
+def init(example: bool) -> None:
+    """Initialize owloop in the current project.
+
+    Creates a single ``.owloop/`` metadata directory in the project root.
+    All specs, logs, and runtime prompts live inside it so the original
+    project stays clean.
+    """
     ascii, no_color, _compact = _cli_options()
     console = Console(no_color=no_color)
     cwd = Path.cwd()
@@ -179,21 +234,26 @@ def init(specs_dir: str, example: bool) -> None:
         console.print("[red]Error:[/] Not a git repository. Run [bold]git init[/] first.")
         raise SystemExit(1)
 
-    specs_path = cwd / specs_dir
-    logs_path = cwd / "logs"
+    owloop_path = cwd / ".owloop"
+    specs_path = owloop_path / "specs"
+    logs_path = owloop_path / "logs"
 
     created = []
 
+    if not owloop_path.exists():
+        owloop_path.mkdir(parents=True)
+        created.append(".owloop/")
+
     if not specs_path.exists():
         specs_path.mkdir(parents=True)
-        created.append(f"{specs_dir}/")
+        created.append(".owloop/specs/")
 
     if not logs_path.exists():
         logs_path.mkdir(parents=True)
-        created.append("logs/")
+        created.append(".owloop/logs/")
 
     gitignore = cwd / ".gitignore"
-    gitignore_entries = ["logs/", "PROMPT_build.md", "PROMPT_plan.md"]
+    gitignore_entries = [".owloop/logs/", ".owloop/PROMPT_build.md"]
     if gitignore.exists():
         existing = gitignore.read_text(encoding="utf-8")
         to_add = [e for e in gitignore_entries if e not in existing]
@@ -208,15 +268,13 @@ def init(specs_dir: str, example: bool) -> None:
         created.append(".gitignore")
 
     if example:
-        # Additional scenario-specific templates (legacy refactor, ML hygiene, etc.)
-        # live in the project's templates/ directory.
         example_spec = specs_path / "01-example.md"
         if not example_spec.exists():
             example_spec.write_text(
                 SPEC_TEMPLATE.format(name="example-task", priority=1),
                 encoding="utf-8",
             )
-            created.append(f"{specs_dir}/01-example.md")
+            created.append(".owloop/specs/01-example.md")
 
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
@@ -235,7 +293,7 @@ def init(specs_dir: str, example: bool) -> None:
 
     console.print()
     console.print(f"[bold {_brand.AMBER}]Next steps:[/]")
-    console.print(f"  1. Edit [bold]{specs_dir}/01-example.md[/] with your task")
+    console.print("  1. Edit [bold].owloop/specs/01-example.md[/] with your task")
     console.print("  2. Run [bold]owloop run[/]")
     console.print()
 
@@ -250,9 +308,18 @@ def init(specs_dir: str, example: bool) -> None:
     "--max-rounds", type=int, default=3,
     help="Maximum clarification rounds.", show_default=True,
 )
-def spec(goal: str, model: str, max_rounds: int) -> None:
-    """Turn a vague goal into a concrete spec via agent clarification."""
-    ascii, no_color, _compact = _cli_options()
+@click.option(
+    "--yes", "-y", is_flag=True, default=False,
+    help="Approve the generated spec and start the loop immediately.",
+)
+def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
+    """Turn a vague goal into a concrete spec via agent clarification.
+
+    Claude scans the codebase, calibrates baselines, and drafts a complete
+    constraint-oriented spec. The spec is shown for approval before the loop
+    starts unless --yes is passed.
+    """
+    ascii, no_color, compact = _cli_options()
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
@@ -278,9 +345,38 @@ def spec(goal: str, model: str, max_rounds: int) -> None:
         console.print(f"\n[red]Error:[/] {exc}")
         raise SystemExit(1) from None
 
+    spec_content = spec_path.read_text(encoding="utf-8")
     console.print()
     console.print(f"[{_brand.GREEN}]✓ Spec generated:[/] {spec_path}")
-    console.print("[dim]Review it, then run[/] [bold]owloop run[/]")
+    console.print()
+    console.print(Panel(
+        spec_content,
+        title="[bold]Spec review[/]",
+        border_style=_brand.AMBER,
+        padding=(1, 2),
+    ))
+
+    start_loop = yes
+    if not yes:
+        if sys.stdin.isatty():
+            console.print("\n[bold]Start the loop now?[/] [y/N] ", end="")
+            try:
+                reply = input().strip().lower() or "n"
+            except EOFError:
+                reply = "n"
+            start_loop = reply.startswith("y")
+        else:
+            console.print("\n[dim]Non-interactive mode: review the spec and run[/] [bold]owloop run[/]")
+
+    if start_loop:
+        console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
+        _run_engine(
+            max_iterations=0, worktree=True, model=model, agent="claude",
+            idle_timeout=3600, max_duration=0, max_tokens=0,
+            ascii=ascii, no_color=no_color, compact=compact,
+        )
+    else:
+        console.print("\n[dim]Review the spec, then run[/] [bold]owloop run[/]")
     console.print()
 
 
@@ -288,13 +384,12 @@ STOPPED_REASON_EXIT_1 = {"preflight_failed", "dirty_workspace_declined"}
 
 
 def _run_engine(
-    mode: str, max_iterations: int, worktree: bool, model: str, agent: str,
+    max_iterations: int, worktree: bool, model: str, agent: str,
     idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
-        mode=mode,
         max_iterations=max_iterations,
         max_duration_minutes=max_duration,
         max_tokens=max_tokens,
@@ -323,11 +418,7 @@ def _run_engine(
         console = Console(no_color=no_color)
         console.print()
         console.print(_banner_text(ascii=ascii, no_color=no_color))
-        console.print(
-            f"[{_brand.AMBER}]Starting autonomous loop...[/]"
-            if mode == "build"
-            else f"[{_brand.AMBER}]Planning mode — analyzing specs...[/]"
-        )
+        console.print(f"[{_brand.AMBER}]Starting autonomous loop...[/]")
         reporter = ConsoleReporter(console, ascii=ascii)
         engine = OwloopEngine(config, adapter, on_event=reporter.on_event)
         try:
@@ -342,7 +433,7 @@ def _run_engine(
 
 
 def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Shared options for run and plan commands."""
+    """Shared options for the run command."""
     f = click.option(
         "--agent", type=click.Choice(["claude"]), default="claude",
         help="Coding agent adapter.", show_default=True,
@@ -360,8 +451,8 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
         help="Stop loop after N minutes total (0 = unlimited).", show_default=True,
     )(f)
     f = click.option(
-        "--max-tokens", type=int, default=0,
-        help="Stop loop after N total tokens (0 = unlimited).", show_default=True,
+        "--max-tokens", type=MaxTokensParamType(), default=0,
+        help="Stop loop after N total tokens (0 = unlimited; supports k/w/m shorthand).", show_default=True,
     )(f)
     f = click.option(
         "--worktree/--no-worktree", default=True,
@@ -380,32 +471,15 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact = _cli_options()
-    specs_dir = Path.cwd() / "specs"
+    specs_dir = resolve_specs_dir(Path.cwd())
     if not specs_dir.exists() or not list(specs_dir.glob("*.md")):
         console = Console(no_color=no_color)
-        console.print("[red]Error:[/] No specs found. Create specs in [bold]specs/[/] first.")
+        console.print("[red]Error:[/] No specs found. Create specs in [bold].owloop/specs/[/] first.")
         console.print("[dim]Run [bold]owloop init[/] to get started.[/]")
         raise SystemExit(1)
 
     _run_engine(
-        "build", max_iterations, worktree, model, agent,
-        idle_timeout, max_duration, max_tokens,
-        ascii=ascii, no_color=no_color, compact=compact,
-    )
-
-
-@main.command()
-@click.option(
-    "--max-iterations", "-n", type=int, default=1,
-    help="Maximum planning iterations.", show_default=True,
-)
-@_common_run_options
-def plan(max_iterations: int, worktree: bool, model: str, agent: str,
-         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
-    """Generate an implementation plan from specs."""
-    ascii, no_color, compact = _cli_options()
-    _run_engine(
-        "plan", max_iterations, worktree, model, agent,
+        max_iterations, worktree, model, agent,
         idle_timeout, max_duration, max_tokens,
         ascii=ascii, no_color=no_color, compact=compact,
     )
@@ -416,10 +490,10 @@ def status() -> None:
     """Show current specs and their completion status."""
     ascii, no_color, _compact = _cli_options()
     console = Console(no_color=no_color)
-    specs_dir = Path.cwd() / "specs"
+    specs_dir = resolve_specs_dir(Path.cwd())
 
     if not specs_dir.exists():
-        console.print("[dim]No specs/ directory. Run [bold]owloop init[/] first.[/]")
+        console.print("[dim]No specs directory. Run [bold]owloop init[/] first.[/]")
         raise SystemExit(1)
 
     specs = sorted(specs_dir.glob("*.md"))
@@ -507,12 +581,12 @@ def check(strict: bool, run_baseline: bool) -> None:
     """Validate all specs before running the loop."""
     ascii, no_color, _compact = _cli_options()
     console = Console(no_color=no_color)
-    specs_dir = Path.cwd() / "specs"
+    specs_dir = resolve_specs_dir(Path.cwd())
 
     if not specs_dir.is_dir():
         console.print()
         console.print(_banner_text(ascii=ascii, no_color=no_color))
-        console.print("[dim]No specs/ directory. Run [bold]owloop init[/] first.[/]")
+        console.print("[dim]No specs directory. Run [bold]owloop init[/] first.[/]")
         console.print()
         raise SystemExit(0)
 
@@ -530,18 +604,74 @@ def check(strict: bool, run_baseline: bool) -> None:
     "--output",
     "-o",
     type=click.Path(path_type=Path),
-    help="Output path for the HTML report (default: logs/owloop_report.html).",
+    help="Output path for the HTML report (default: .lavish/owloop_report.html with --ai).",
 )
-def report(output: Path | None) -> None:
-    """Generate an HTML summary report for the latest owloop run."""
+@click.option(
+    "--ai/--no-ai",
+    default=True,
+    help="Generate AI-powered insights for the report.",
+    show_default=True,
+)
+@click.option(
+    "--open",
+    "open_report",
+    is_flag=True,
+    default=False,
+    help="Open the report with lavish-axi after generation (requires lavish-axi).",
+)
+@click.option(
+    "--model",
+    default=DEFAULT_MODEL,
+    help="Claude model to use for AI insights (or set CLAUDE_MODEL).",
+    show_default=True,
+)
+def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None:
+    """Generate an HTML summary report for the latest owloop run.
+
+    By default the report includes AI-generated insights (summary, risks,
+    review focus) and is styled as a reviewable artifact. Use --no-ai for a
+    fast, offline report.
+    """
     ascii, no_color, _compact = _cli_options()
     console = Console(no_color=no_color)
-    generator = ReportGenerator(Path.cwd())
+    project_dir = Path.cwd()
+
+    insights = None
+    if ai:
+        adapter = get_adapter(
+            "claude",
+            model=model,
+            claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+            idle_timeout=3600,
+        )
+        ai_generator = AIReportInsightsGenerator(project_dir, adapter)
+        try:
+            insights = ai_generator.generate()
+        except FileNotFoundError:
+            console.print("[red]Error:[/] No run summary found. Run [bold]owloop run[/] first.")
+            raise SystemExit(1) from None
+        except RuntimeError as exc:
+            console.print(f"[{_brand.AMBER}]⚠ AI insights failed:[/] {exc}")
+            console.print("[dim]Falling back to static report. Use --no-ai to skip AI.[/]")
+
+    if output is None and ai:
+        output = project_dir / ".lavish" / "owloop_report.html"
+
+    generator = ReportGenerator(project_dir)
     try:
-        report_path = generator.generate(output)
+        report_path = generator.generate(output, insights=insights, use_tailwind=ai)
     except FileNotFoundError:
         console.print("[red]Error:[/] No run summary found. Run [bold]owloop run[/] first.")
         raise SystemExit(1) from None
+
+    if open_report and ai:
+        import shutil
+        if shutil.which("lavish-axi"):
+            console.print(f"[{_brand.AMBER}]Opening report with lavish-axi...[/]")
+            subprocess.run(["lavish-axi", str(report_path)], check=False)
+        else:
+            console.print("[{_brand.AMBER}]⚠ lavish-axi not found:[/] report saved but not opened")
+
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[{_brand.GREEN}]✓ Report generated:[/] {report_path}")

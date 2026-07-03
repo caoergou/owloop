@@ -161,15 +161,15 @@ Present the user with options (suggest the most appropriate one based on task ty
 
 With all information collected:
 
-1. **Read the template**: Read `templates/spec-template.md` for the canonical section structure.
+1. **Read the template**: Read `.owloop/templates/spec-template.md` (or fall back to `templates/spec-template.md` in legacy projects) for the canonical section structure.
 
 2. **Generate a short name**: Extract a 2-4 word English kebab-case slug from the intent. Examples: `add-rate-limiting`, `fix-login-redirect`, `extract-validation-handler`.
 
 3. **Determine file number** with consistent zero-padding:
 
    ```bash
-   mkdir -p specs
-   last=$(find specs -maxdepth 1 -type f -name '[0-9]*.md' 2>/dev/null \
+   mkdir -p .owloop/specs
+   last=$(find .owloop/specs -maxdepth 1 -type f -name '[0-9]*.md' 2>/dev/null \
      | sed -E 's#.*/([0-9]+)-.*#\1#' | sort -n | tail -1)
 
    if [ -z "$last" ]; then

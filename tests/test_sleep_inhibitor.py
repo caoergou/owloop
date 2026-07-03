@@ -184,7 +184,7 @@ def test_engine_starts_and_stops_inhibitor(tmp_path: Path, monkeypatch) -> None:
     adapter = MockAdapter(
         responses=[
             AgentResult(
-                stdout="plan done\n<promise>DONE</promise>",
+                stdout="build done\n<promise>DONE</promise>",
                 returncode=0,
                 success=True,
                 has_completion_signal=True,
@@ -192,7 +192,7 @@ def test_engine_starts_and_stops_inhibitor(tmp_path: Path, monkeypatch) -> None:
             )
         ]
     )
-    config = EngineConfig(project_dir=repo, worktree=False, mode="plan", max_iterations=1)
+    config = EngineConfig(project_dir=repo, worktree=False, max_iterations=1)
     engine = OwloopEngine(config=config, adapter=adapter)
 
     summary = engine.run()
@@ -228,7 +228,7 @@ def test_engine_stops_inhibitor_on_keyboard_interrupt(tmp_path: Path, monkeypatc
     monkeypatch.setattr("owloop.engine.SleepInhibitor", FakeInhibitor)
 
     adapter = RaisingAdapter()
-    config = EngineConfig(project_dir=repo, worktree=False, mode="build")
+    config = EngineConfig(project_dir=repo, worktree=False)
     engine = OwloopEngine(config=config, adapter=adapter)
 
     summary = engine.run()

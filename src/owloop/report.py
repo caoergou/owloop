@@ -4,32 +4,22 @@ from __future__ import annotations
 
 import html
 import json
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from owloop._brand import OWL_MEDIUM
 from owloop.git_stats import CommitInfo, get_recent_commits, total_diff_stats
-from owloop.report_design_system import base_styles, tailwind_cdn
-
-
-@dataclass
-class ReportInsights:
-    """Optional AI-generated content slots.
-
-    These are intentionally separate from the raw data so that:
-    - The report generator can render without any LLM call (fast, free, offline).
-    - An external caller (e.g. the engine or a future `--report-ai` flag) can
-      fill the slots with natural-language analysis when desired.
-    """
-
-    summary: str = ""
-    risks: list[str] | None = None
-    review_focus: list[str] | None = None
-
-    def has_content(self) -> bool:
-        return bool(self.summary or self.risks or self.review_focus)
+from owloop.paths import resolve_logs_dir, resolve_specs_dir
+from owloop.report_ai import (
+    KeyChange,
+    NextAction,
+    ReportInsights,
+    ReviewFocus,
+    Risk,
+)
+from owloop.report_design_system import base_styles, google_fonts_link, tailwind_cdn
+from owloop.spec_queue import get_root_specs, is_root_spec_complete
 
 
 class ReportGenerator:
@@ -37,7 +27,8 @@ class ReportGenerator:
 
     def __init__(self, project_dir: Path) -> None:
         self.project_dir = project_dir
-        self.summary_path = project_dir / "logs" / "owloop_summary_latest.json"
+        logs_dir = resolve_logs_dir(project_dir)
+        self.summary_path = logs_dir / "owloop_summary_latest.json"
 
     def _load_summary(self) -> dict[str, Any]:
         if self.summary_path.exists():
@@ -59,7 +50,7 @@ class ReportGenerator:
         commits = get_recent_commits(self.project_dir, iterations)
         total_files, total_ins, total_del = total_diff_stats(commits)
 
-        report_file = output_path or (self.project_dir / "logs" / "owloop_report.html")
+        report_file = output_path or (resolve_logs_dir(self.project_dir) / "owloop_report.html")
         report_file.parent.mkdir(parents=True, exist_ok=True)
 
         html = self._render_html(
@@ -91,7 +82,9 @@ class ReportGenerator:
         use_tailwind: bool,
     ) -> str:
         owl = "<br>".join(OWL_MEDIUM).replace(" ", "&nbsp;")
-        rows = "\n".join(self._commit_row(c) for c in commits)
+        commit_rows = "\n".join(self._commit_row(c) for c in commits)
+        spec_rows = self._spec_status_rows()
+        diff_summary = self._diff_summary(iterations)
         status_badge = self._status_badge(stopped_reason)
         token_card = self._token_card(tokens_used)
         insights_section = self._insights_section(insights)
@@ -103,17 +96,73 @@ class ReportGenerator:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>owloop report — {html.escape(branch)}</title>
+{google_fonts_link()}
 {tailwind}
 <style>
 {base_styles()}
+.section {{ margin-top: 2.5rem; }}
+.section-title {{
+  font-family: var(--owl-font-sans);
+  color: var(--owl-amber);
+  font-size: 1.4rem;
+  border-bottom: 1px solid var(--owl-dim-blue);
+  padding-bottom: 0.4rem;
+  margin-bottom: 1rem;
+}}
+.grid-2 {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}}
+.diff-stat {{
+  background: var(--owl-night-card);
+  border: 1px solid var(--owl-dim-blue);
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}}
+.insight-summary {{
+  background: var(--owl-night-card);
+  border-left: 4px solid var(--owl-amber);
+  padding: 1rem 1.25rem;
+  border-radius: 0 8px 8px 0;
+  margin: 1rem 0;
+}}
+.insight-summary h4 {{
+  color: var(--owl-amber-bright);
+  margin: 0 0 0.5rem 0;
+  font-family: var(--owl-font-sans);
+}}
+.action-list {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}}
+.action-card {{
+  background: var(--owl-night-card);
+  border: 1px solid var(--owl-dim-blue);
+  border-radius: 8px;
+  padding: 1rem;
+}}
+.action-card p {{ margin: 0.5rem 0 0 0; }}
+h3 {{
+  color: var(--owl-amber-bright);
+  font-family: var(--owl-font-sans);
+  font-size: 1.1rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}}
 </style>
 </head>
 <body>
 <div class="container">
   <header>
     <div class="owl">{owl}</div>
-    <h1>owloop report</h1>
-    <p>Your code evolves while you sleep.</p>
+    <h1 style="font-family: var(--owl-font-display);">owloop report</h1>
+    <p style="font-family: var(--owl-font-tagline); font-size: 1.3rem;">Your code evolves while you sleep.</p>
   </header>
 
   <section class="meta">
@@ -126,15 +175,34 @@ class ReportGenerator:
 
   {insights_section}
 
-  <h2>Commits</h2>
-  <table>
-    <thead>
-      <tr><th>Commit</th><th>Message</th><th>Author</th><th>Date</th><th>Changes</th></tr>
-    </thead>
-    <tbody>
-      {rows if rows else '<tr><td colspan="5" class="empty">No commits recorded for this run.</td></tr>'}
-    </tbody>
-  </table>
+  <section class="section">
+    <h2 class="section-title">Spec Status</h2>
+    <table>
+      <thead>
+        <tr><th>Spec</th><th>Priority</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {spec_rows}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">Diff Summary</h2>
+    {diff_summary}
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">Commits</h2>
+    <table>
+      <thead>
+        <tr><th>Commit</th><th>Message</th><th>Author</th><th>Date</th><th>Changes</th></tr>
+      </thead>
+      <tbody>
+        {commit_rows if commit_rows else '<tr><td colspan="5" class="empty">No commits recorded for this run.</td></tr>'}
+      </tbody>
+    </table>
+  </section>
 
   <footer>
     <p>Generated by owloop on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
@@ -173,25 +241,125 @@ class ReportGenerator:
         if not insights.has_content():
             return ""
 
-        parts = ['<section class="insights"><h2>Insights</h2>']
+        parts = ['<section class="section"><h2 class="section-title">AI Review Insights</h2>']
+
         if insights.summary:
             parts.append(
-                f'<div class="insight"><h4>Summary</h4><p>{html.escape(insights.summary)}</p></div>'
+                f'<div class="insight insight-summary">'
+                f'<h4>Summary</h4><p>{html.escape(insights.summary)}</p></div>'
             )
+
+        if insights.key_changes:
+            parts.append(self._key_changes_table(insights.key_changes))
+
         if insights.risks:
-            parts.append(self._insight_list("Risks to review", insights.risks, "del"))
+            parts.append(self._risks_table(insights.risks))
+
         if insights.review_focus:
-            parts.append(self._insight_list("Review focus", insights.review_focus, "stats"))
+            parts.append(self._review_focus_table(insights.review_focus))
+
+        if insights.next_actions:
+            parts.append(self._next_actions_list(insights.next_actions))
+
         parts.append("</section>")
         return "\n".join(parts)
 
-    @staticmethod
-    def _insight_list(title: str, items: list[str], marker_class: str) -> str:
-        lines = [f'<div class="insight"><h4>{html.escape(title)}</h4><ul>']
-        for item in items:
-            lines.append(f'<li><span class="{marker_class}">•</span> {html.escape(item)}</li>')
-        lines.append("</ul></div>")
+    def _key_changes_table(self, changes: list[KeyChange]) -> str:
+        rows = []
+        for change in changes:
+            suggestions = "<ul>" + "".join(
+                f"<li>{html.escape(s)}</li>" for s in change.review_suggestions
+            ) + "</ul>" if change.review_suggestions else "<span class=\"empty\">—</span>"
+            rows.append(
+                f'<tr>'
+                f'<td><code>{html.escape(change.file)}</code></td>'
+                f'<td><span class="badge badge-{self._level_color(change.complexity)}">{html.escape(change.change_type)}</span></td>'
+                f'<td>{self._level_badge(change.complexity)}</td>'
+                f'<td>{self._level_badge(change.risk_level)}</td>'
+                f'<td>{html.escape(change.description)}</td>'
+                f'<td>{suggestions}</td>'
+                f'</tr>'
+            )
+        return (
+            '<h3>Key Changes</h3>'
+            '<table>'
+            '<thead><tr><th>File</th><th>Type</th><th>Complexity</th><th>Risk</th><th>Description</th><th>Review Suggestions</th></tr></thead>'
+            '<tbody>' + "\n".join(rows) + '</tbody>'
+            '</table>'
+        )
+
+    def _risks_table(self, risks: list[Risk]) -> str:
+        rows = []
+        for risk in risks:
+            files = ", ".join(f"<code>{html.escape(f)}</code>" for f in risk.files) or "—"
+            rows.append(
+                f'<tr>'
+                f'<td>{self._level_badge(risk.level)}</td>'
+                f'<td>{html.escape(risk.description)}</td>'
+                f'<td>{files}</td>'
+                f'</tr>'
+            )
+        return (
+            '<h3>Risks</h3>'
+            '<table>'
+            '<thead><tr><th>Level</th><th>Description</th><th>Files</th></tr></thead>'
+            '<tbody>' + "\n".join(rows) + '</tbody>'
+            '</table>'
+        )
+
+    def _review_focus_table(self, focus_items: list[ReviewFocus]) -> str:
+        rows = []
+        for item in focus_items:
+            rows.append(
+                f'<tr>'
+                f'<td><span class="badge badge-info">P{item.priority}</span></td>'
+                f'<td>{html.escape(item.area)}</td>'
+                f'<td>{html.escape(item.reason)}</td>'
+                f'</tr>'
+            )
+        return (
+            '<h3>Review Focus</h3>'
+            '<table>'
+            '<thead><tr><th>Priority</th><th>Area</th><th>Reason</th></tr></thead>'
+            '<tbody>' + "\n".join(rows) + '</tbody>'
+            '</table>'
+        )
+
+    def _next_actions_list(self, actions: list[NextAction]) -> str:
+        urgency_order = {"now": 0, "before_merge": 1, "nice_to_have": 2}
+        sorted_actions = sorted(actions, key=lambda a: urgency_order.get(a.urgency, 1))
+        lines = ['<h3>Next Actions</h3><div class="action-list">']
+        for action in sorted_actions:
+            lines.append(
+                f'<div class="action-card">'
+                f'<span class="badge badge-{self._urgency_color(action.urgency)}">{html.escape(action.urgency)}</span>'
+                f'<p>{html.escape(action.action)}</p>'
+                f'</div>'
+            )
+        lines.append('</div>')
         return "\n".join(lines)
+
+    @staticmethod
+    def _level_color(level: str) -> str:
+        level = level.lower()
+        if level == "high":
+            return "danger"
+        if level == "medium":
+            return "info"
+        return "success"
+
+    def _level_badge(self, level: str) -> str:
+        color = self._level_color(level)
+        return f'<span class="badge badge-{color}">{html.escape(level.lower())}</span>'
+
+    @staticmethod
+    def _urgency_color(urgency: str) -> str:
+        urgency = urgency.lower()
+        if urgency == "now":
+            return "danger"
+        if urgency == "before_merge":
+            return "info"
+        return "success"
 
     def _commit_row(self, commit: CommitInfo) -> str:
         return (
@@ -205,3 +373,47 @@ class ReportGenerator:
             f'<span class="del">-{commit.deletions}</span></td>'
             f"</tr>"
         )
+
+    def _spec_status_rows(self) -> str:
+        specs_dir = resolve_specs_dir(self.project_dir)
+        specs = get_root_specs(specs_dir)
+        if not specs:
+            return '<tr><td colspan="3" class="empty">No spec files found.</td></tr>'
+        rows = []
+        for spec in specs:
+            done = is_root_spec_complete(spec)
+            status = (
+                '<span class="badge badge-success">done</span>'
+                if done
+                else '<span class="badge badge-info">pending</span>'
+            )
+            priority = self._extract_priority(spec)
+            rows.append(
+                f'<tr>'
+                f'<td>{html.escape(spec.name)}</td>'
+                f'<td>{html.escape(priority)}</td>'
+                f'<td>{status}</td>'
+                f'</tr>'
+            )
+        return "\n".join(rows)
+
+    @staticmethod
+    def _extract_priority(spec: Path) -> str:
+        for line in spec.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.strip().startswith("## Priority:"):
+                return line.split(":", 1)[-1].strip()
+        return "—"
+
+    def _diff_summary(self, iterations: int) -> str:
+        if iterations <= 0:
+            return '<p class="empty">No commits to diff.</p>'
+        import subprocess
+        result = subprocess.run(
+            ["git", "diff", "--stat", f"HEAD~{iterations}..HEAD"],
+            cwd=self.project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return '<p class="empty">Could not generate diff summary.</p>'
+        return f'<pre class="diff-stat"><code>{html.escape(result.stdout.strip())}</code></pre>'

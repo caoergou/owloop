@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from owloop.adapters import AgentAdapter
+from owloop.paths import resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.spec_queue import find_next_spec_number
 
@@ -19,12 +20,14 @@ SPEC_GENERATION_PROMPT = """\
 # Owloop — Spec Generation Mode
 
 You are helping the user turn a vague goal into a concrete, runnable owloop spec.
+You MUST use the full codebase scan + baseline calibration workflow below.
 
 Read these files if they exist (in order):
 1. `AGENTS.md` — agent instructions for this project
 2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
-Search the codebase to understand the current state before making assumptions.
+Then scan the entire codebase to understand the current state before making
+assumptions. Use Glob/Grep/Read as needed. Do not skip this step.
 
 The user's goal:
 ```
@@ -34,47 +37,81 @@ The user's goal:
 Previous clarifications (if any):
 {clarifications}
 
-## Your task
+## Step 1 — Intent check
+Restate the goal in one concrete, actionable sentence. If it is still vague
+(e.g. "optimize", "improve", "refactor things"), output up to 3 focused
+questions in this exact format, separated by ` | `:
 
-Decide whether the goal is already concrete enough to write a spec, or whether
-you need clarifying answers.
+<promise>DECIDE:Which module should I optimize? | What metric defines success? | Which test command proves the change is correct?</promise>
 
-### If you need clarification
+## Step 2 — Feasibility gate
+Decide whether "done" can be expressed as a shell command that returns pass/fail.
+- If NO → explain why and output `<promise>DECIDE:...>` with the blocking question.
+- If YES → continue to Step 3.
 
-Output up to 3 focused questions in this exact format, separated by ` | `:
+## Step 3 — Scope & sizing
+Identify the files/directories involved and estimate how many files will change.
+If the task touches 6+ files or 300+ lines, split it and describe the first
+smaller spec you will write. Do NOT write an oversized spec.
 
-<promise>DECIDE:What concrete error patterns should be unified? | Should the public API surface stay unchanged? | Which test command proves the refactor is correct?</promise>
+## Step 4 — Baseline calibration
+Before writing acceptance criteria, run the proposed verification commands NOW
+and record the current values. Scan `pyproject.toml`, `package.json`, `Makefile`,
+and README to find the correct test/lint/build commands.
 
-Questions must be specific and informed by the codebase. Do not ask things you
-could determine by reading the code.
+Record the baseline in a `## Baseline` section, e.g.:
+- `ruff check src/`: 84 errors at start, target ≤ 5
+- `pytest tests/`: 3 failures at start, target 0 failures
 
-### If the goal is concrete enough
+## Step 5 — Constraints
+Define concrete Exclusions (files/modules that must NOT be touched) and Style
+rules. Exclusions must name specific files or directories, not generic rules.
 
-Write a complete owloop spec in markdown. Use this exact structure:
+## Step 6 — Stuck behavior
+Choose one stuck-behavior instruction and include it verbatim in the spec:
+1. Document and move on: "If you cannot make progress after 2 attempts at the
+   same error, add a `## Blockers` section to this spec describing what's
+   blocking you, commit your partial work, and output `<promise>DONE</promise>`."
+2. Partial commit: "If only some acceptance criteria pass, commit the passing
+   changes, update the acceptance criteria to reflect remaining work, and
+   output `<promise>DONE</promise>`."
+3. Revert and stop: "If tests fail after implementation, `git checkout .` to
+   revert all changes and output `<promise>DONE</promise>` with a note about
+   what went wrong."
+
+## Step 7 — Write the spec
+Use this exact structure:
 
 ```markdown
-# Spec: my-feature
+# Spec: [short kebab-case name]
 
-## Priority: 3
+## Priority: [1-5, default 3]
 
 ## Requirements
-- [ ] What to do (concrete, scoped)
+- [ ] Concrete, scoped task description
+- [ ] Search the codebase for existing implementations before creating new ones
 
 ## Acceptance Criteria
-- [ ] `exact shell command` → expected pass/fail behavior
-- [ ] `exact shell command` → expected output
+- [ ] `exact shell command` → expected pass/fail behavior or concrete output
+- [ ] `exact shell command` → expected pass/fail behavior or concrete output
 
 ## Exclusions
-- Do NOT modify files outside the scope described above
+- Do NOT modify [specific files/directories]
 - Do NOT change external API behavior
 - Do NOT modify pyproject.toml, uv.lock, or other config files
-- Do NOT modify existing tests
+- Do NOT modify, delete, or comment out existing tests
 
 ## Style
-- Follow existing project conventions
+- Follow existing project conventions (name the specific adjacent file/pattern)
+
+## Stuck Behavior
+- [Chosen instruction from Step 6]
 
 ## Verification
 Run the acceptance criteria commands after each change.
+
+## Baseline
+- [Recorded baselines from Step 4]
 
 ## Assumptions
 - Any assumptions you made while turning the vague goal into this spec
@@ -82,11 +119,15 @@ Run the acceptance criteria commands after each change.
 Output when complete: `<promise>DONE</promise>`
 ```
 
-The acceptance criteria must be executable shell commands. Avoid subjective
-language like "improve" or "better"; use pass/fail checks.
+## Step 8 — Self-check before outputting
+Verify:
+- Every acceptance criterion is a runnable shell command with a concrete expected output.
+- The Exclusions section is non-empty and names specific files/directories.
+- Scope is 1-5 files / < 300 lines; if not, you should have asked to split it.
+- Baseline was recorded and targets are realistic.
 
-If you write the spec, end your response with `<promise>DONE</promise>` on its
-own line. If you need clarification, use only the `<promise>DECIDE:...>` line.
+If the spec passes the self-check, end your response with `<promise>DONE</promise>`
+on its own line. If you need clarification, use only the `<promise>DECIDE:...>` line.
 """
 
 SPEC_FILENAME_RE = re.compile(r"#\s*Spec:\s*(.+)", re.IGNORECASE)
@@ -216,7 +257,7 @@ class SpecGenerator:
         )
 
     def _write_spec(self, markdown: str) -> Path:
-        specs_dir = self.project_dir / "specs"
+        specs_dir = resolve_specs_dir(self.project_dir)
         specs_dir.mkdir(parents=True, exist_ok=True)
 
         slug = self._spec_name_from_markdown(markdown)

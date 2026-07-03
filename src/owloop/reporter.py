@@ -43,15 +43,12 @@ class ConsoleReporter:
 
         if kind == "session_info":
             c.print()
-            c.print(f"[bold {_brand.AMBER}]Mode:[/]          {data['mode']}")
             c.print(f"[bold {_brand.AMBER}]Model:[/]         {data['model']}")
             c.print(f"[bold {_brand.AMBER}]Branch:[/]        {data['branch']}")
             c.print(f"[bold {_brand.AMBER}]Directory:[/]     {data['cwd']}")
             if data["max_iterations"]:
                 c.print(f"[bold {_brand.AMBER}]Max iterations:[/] {data['max_iterations']}")
-            if data["has_plan"]:
-                c.print(f"[{_brand.GREEN}]{self._mark('ok')} IMPLEMENTATION_PLAN.md (will be used)[/]")
-            elif data["has_specs"]:
+            if data["has_specs"]:
                 c.print(
                     f"[{_brand.GREEN}]{self._mark('ok')} specs/"
                     f" ({data['spec_count']} total, {data['incomplete_count']} incomplete)[/]"
@@ -128,10 +125,6 @@ class ConsoleReporter:
             c.print(f"[{_brand.AMBER}]{self._mark('clock')} token budget reached ({data['tokens']:,} / {data['limit']:,}), stopping loop[/]")
         elif kind == "push_retry":
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} push failed, creating remote branch {data['branch']}...[/]")
-        elif kind == "plan_complete":
-            c.print()
-            c.print(f"[{_brand.GREEN}]{self._mark('ok')} planning complete![/]")
-            c.print(f"[{_brand.CYAN}]run 'owloop run' to start building.[/]")
         elif kind == "interrupted":
             c.print("\n[dim]owloop stopped[/]")
 

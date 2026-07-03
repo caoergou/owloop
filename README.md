@@ -39,8 +39,9 @@ owloop run → pick spec → fresh agent context → verify with shell commands 
 uv tool install owloop
 # or: pip install owloop
 
-owloop init        # creates specs/ and templates
-# edit specs/01-example.md with your task
+owloop init        # creates .owloop/ only
+owloop spec "refactor error handling"   # cc scans code, drafts spec, asks for approval
+# edit .owloop/specs/01-example.md if needed, then:
 owloop run         # start the loop
 ```
 
@@ -49,17 +50,18 @@ owloop run         # start the loop
 
 | Command | Description |
 |---|---|
-| `owloop init` | Initialize project (creates `specs/`, `.gitignore` entries) |
-| `owloop spec "goal"` | Turn a vague goal into a concrete spec via agent clarification |
+| `owloop init` | Initialize project (creates `.owloop/`, `.gitignore` entries) |
+| `owloop spec "goal"` | Turn a vague goal into a concrete spec via agent clarification and approval |
 | `owloop check` | Validate all specs before running the loop (pre-flight linter) |
 | `owloop run` | Start the autonomous loop with TUI |
 | `owloop run -n 20` | Limit to 20 iterations |
 | `owloop run --max-duration 120` | Stop after 2 hours |
 | `owloop run --max-tokens 200000` | Stop after token budget reached |
 | `owloop run --idle-timeout 1800` | Kill hung agent after 30min silence |
-| `owloop plan` | Generate implementation plan from specs |
 | `owloop status` | Show specs and completion progress |
-| `owloop report` | Generate HTML summary report for the latest run |
+| `owloop report` | Generate AI-powered HTML summary report (default) |
+| `owloop report --no-ai` | Generate fast, offline HTML summary report |
+| `owloop report --open` | Generate AI report and open with lavish-axi |
 | `owloop spec-from-issue 42` | Generate a spec draft from a GitHub issue |
 | `owloop version` | Show installed version |
 
@@ -93,12 +95,13 @@ graph LR
 
 | Property | How |
 |---|---|
-| **Natural-language specs** | `owloop spec "goal"` reads the codebase, asks clarifying questions, drafts a concrete spec. |
+| **Natural-language specs** | `owloop spec "goal"` scans the codebase, calibrates baselines, drafts a complete spec, and waits for approval. |
 | **Pre-flight linting** | `owloop check` validates specs before the loop starts — no wasted tokens on bad specs. |
 | **Fresh context** | Each iteration starts a brand-new agent process. No context rot. |
 | **Cross-iteration notes** | `run-notes.md` carries learnings between iterations — fresh context without repeating mistakes. |
 | **Deterministic completion** | `grep` for `<promise>DONE</promise>` — no AI judgment, no surprises. |
 | **Worktree isolation** | Runs in a separate `git worktree`. Your main checkout stays untouched. |
+| **AI-generated reports** | `owloop report` analyzes the run with Claude and produces a reviewable HTML artifact. |
 | **Auto Mode** | `--permission-mode auto`: Ollie asks before risky moves, never YOLO. |
 | **Fix-loop detection** | Same files modified 3+ rounds → Ollie warns of a death spiral. |
 | **Token budget cap** | `--max-tokens` stops the run before costs spiral. |
@@ -126,8 +129,20 @@ Specs are **constraint-oriented**: define what's off-limits, then make every acc
 - Do NOT change API response formats
 - Do NOT touch models/, schemas/, services/
 
+## Style
+- Follow existing Flask error handler pattern in backend/app/__init__.py
+
+## Stuck Behavior
+- If you cannot make progress after 2 attempts at the same error, add a
+  `## Blockers` section to this spec, commit partial work, and output
+  `<promise>DONE</promise>`.
+
 ## Verification
 After each change: uv run ruff check backend/
+
+## Baseline
+- `grep -c "except ValidationError" backend/app/api/*.py`: 69 at start, target ≤ 5
+- `uv run ruff check backend/`: 0 errors at start, target 0
 
 Output when complete: `<promise>DONE</promise>`
 ```
