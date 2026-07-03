@@ -17,7 +17,10 @@
   --shadow: rgba(0, 0, 0, 0.45);
   --glow: rgba(212, 160, 37, 0.18);
 
-  --font-display: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  --font-brand: "Cinzel Decorative", Georgia, "Times New Roman", serif;
+  --font-heading: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-tagline: "Caveat", "Brush Script MT", cursive;
+  --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -31,7 +34,7 @@ html {
 
 body {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   background: var(--night);
   color: var(--moon);
   line-height: 1.6;
@@ -43,6 +46,11 @@ body {
 ::selection {
   background: rgba(212, 160, 37, 0.35);
   color: #fff;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
 }
 
 .container {
@@ -157,6 +165,13 @@ body {
   fill: var(--amber-dim);
 }
 
+.nav-logo-text {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+}
+
 .owl-animated {
   animation: owl-float 5s ease-in-out infinite;
   transform-origin: center bottom;
@@ -250,15 +265,55 @@ body {
 
 /* ── Hero ── */
 .hero {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   padding: 8rem 0 5rem;
+  overflow: hidden;
+}
+
+.hero-aurora {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hero-aurora::before {
+  content: "";
+  position: absolute;
+  top: -20%;
+  right: -10%;
+  width: 70vw;
+  height: 70vw;
+  background: radial-gradient(circle at 50% 50%, rgba(212, 160, 37, 0.18), transparent 55%);
+  filter: blur(80px);
+  animation: aurora-drift 18s ease-in-out infinite alternate;
+}
+
+.hero-aurora::after {
+  content: "";
+  position: absolute;
+  bottom: -10%;
+  left: -5%;
+  width: 50vw;
+  height: 50vw;
+  background: radial-gradient(circle at 50% 50%, rgba(126, 199, 230, 0.08), transparent 50%);
+  filter: blur(90px);
+  animation: aurora-drift 22s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes aurora-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-4%, 3%) scale(1.05); }
 }
 
 .hero-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: 1fr 1.1fr;
+  grid-template-columns: 1fr 1.05fr;
   gap: 4rem;
   align-items: center;
 }
@@ -266,46 +321,168 @@ body {
 .hero-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--dim);
+  gap: 0.55rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--moon-dim);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 1.5rem;
+  letter-spacing: 0.1em;
+  margin-bottom: 1.75rem;
+  background: rgba(13, 19, 43, 0.5);
+  backdrop-filter: blur(8px);
 }
 
 .pulse {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 10px var(--success);
-  animation: pulse-glow 2s ease-in-out infinite;
+  box-shadow: 0 0 12px var(--success);
+  animation: pulse-glow 2.2s ease-in-out infinite;
 }
 
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.65; transform: scale(0.85); }
+  50% { opacity: 0.55; transform: scale(0.8); }
 }
 
 .hero-title {
-  font-size: clamp(2.8rem, 5.5vw, 4.5rem);
+  font-size: clamp(2.4rem, 4.6vw, 4.2rem);
   font-weight: 700;
   line-height: 1.05;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.035em;
   margin: 0 0 1.25rem;
   color: var(--moon);
 }
 
-.hero-lead {
-  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+.hero-title .gradient {
+  display: block;
+  background: linear-gradient(135deg, var(--amber) 0%, var(--amber-bright) 50%, #fff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--moon-dim);
-  max-width: 480px;
-  margin: 0 0 2rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 1.5rem;
+}
+
+.hero-subtitle::before,
+.hero-subtitle::after {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--dim-2));
+}
+
+.hero-subtitle::after {
+  background: linear-gradient(90deg, var(--dim-2), transparent);
+}
+
+.hero-lead {
+  font-family: var(--font-tagline);
+  font-size: clamp(1.25rem, 1.8vw, 1.55rem);
+  color: var(--moon-dim);
+  max-width: 500px;
+  margin: 0 0 2.25rem;
+  line-height: 1.4;
+}
+
+.hero-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 520px;
+}
+
+.hero-owl {
+  position: relative;
+  width: min(100%, 480px);
+  aspect-ratio: 1 / 1;
+  z-index: 1;
+}
+
+.hero-owl svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 30px 60px rgba(0, 0, 0, 0.5));
+}
+
+.hero-owl-glow {
+  position: absolute;
+  inset: 5%;
+  background: radial-gradient(circle at 50% 55%, rgba(212, 160, 37, 0.22), transparent 60%);
+  filter: blur(30px);
+  animation: owl-glow 6s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes owl-glow {
+  0% { opacity: 0.7; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1.05); }
+}
+
+.hero-orb {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, rgba(212, 160, 37, 0.15), rgba(212, 160, 37, 0.05) 40%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.float-card {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  background: rgba(13, 19, 43, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  font-size: 0.82rem;
+  color: var(--moon);
+  font-weight: 500;
+  z-index: 2;
+  animation: float 5s ease-in-out infinite;
+}
+
+.float-card svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.float-card.success { color: var(--success); border-color: rgba(125, 216, 122, 0.25); }
+.float-card.amber { color: var(--amber-bright); border-color: rgba(212, 160, 37, 0.25); }
+.float-card.cyan { color: var(--cyan); border-color: rgba(126, 199, 230, 0.25); }
+
+.float-card-1 { top: 12%; right: 0; animation-delay: 0s; }
+.float-card-2 { bottom: 22%; left: -5%; animation-delay: 1.2s; }
+.float-card-3 { bottom: 8%; right: 8%; animation-delay: 2.4s; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
 }
 
 .hero-actions {
@@ -321,7 +498,7 @@ body {
   gap: 0.5rem;
   padding: 0.8rem 1.5rem;
   border-radius: 0.6rem;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   font-weight: 600;
   font-size: 0.95rem;
   text-decoration: none;
@@ -1302,6 +1479,19 @@ button:focus-visible {
     justify-content: center;
   }
 
+  .hero-visual {
+    min-height: 420px;
+    order: -1;
+  }
+
+  .hero-owl {
+    width: min(100%, 360px);
+  }
+
+  .float-card-1 { top: 5%; right: 5%; }
+  .float-card-2 { bottom: 18%; left: 2%; }
+  .float-card-3 { bottom: 5%; right: 5%; }
+
   .steps {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1364,6 +1554,38 @@ button:focus-visible {
     padding-top: 7rem;
   }
 
+  .hero-visual {
+    min-height: 340px;
+  }
+
+  .hero-owl {
+    width: min(100%, 280px);
+  }
+
+  .float-card {
+    padding: 0.55rem 0.8rem;
+    font-size: 0.75rem;
+  }
+
+  .float-card svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .float-card-1 { top: 2%; right: 0; }
+  .float-card-2 { bottom: 15%; left: -2%; }
+  .float-card-3 { bottom: 2%; right: 0; }
+
+  .hero-subtitle {
+    font-size: 0.7rem;
+    gap: 0.5rem;
+  }
+
+  .hero-subtitle::before,
+  .hero-subtitle::after {
+    width: 16px;
+  }
+
   .steps,
   .feature-grid {
     grid-template-columns: 1fr;
@@ -1406,7 +1628,11 @@ button:focus-visible {
   .owl-tilt,
   .owl-pupil,
   .hero-terminal-wrap::before,
-  .timeline-progress {
+  .timeline-progress,
+  .hero-aurora::before,
+  .hero-aurora::after,
+  .hero-owl-glow,
+  .float-card {
     animation: none;
   }
 

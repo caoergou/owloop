@@ -20,8 +20,11 @@ Calm, reliable, slightly whimsical; never hyper or corporate.
 | Cyan | `#8fb8de` | model info, secondary data |
 
 ## Typography
-- Display / UI: Space Grotesk (geometric, slightly quirky — matches the owl personality)
-- Code: JetBrains Mono / system monospace
+- Brand / display: **Cinzel Decorative** (regal serif, capital letterforms)
+- Headings / UI: **Inter**
+- Tagline / lead copy: **Caveat** (hand-written, for the "Your code evolves while you sleep" line)
+- Code: **JetBrains Mono** / system monospace
 
 ## Imagery
-Night sky, moon phases, owl silhouette, infinite loop (∞).
+Night sky, moon phases, Ollie the owl perched on a branch, infinite loop (∞).  
+Ollie wears subtle round glasses — a quiet nod to a certain famous wizard — while keeping the overall look minimalist and premium.

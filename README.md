@@ -190,6 +190,10 @@ All changes are validated on Linux, macOS, and Windows via GitHub Actions.
 
 ## 🦉 Brand
 
+<p align="center">
+  <img src=".github/owl.svg" alt="Ollie the owl" width="160">
+</p>
+
 owloop's identity — Ollie the owl, the night/amber palette, and the "your code evolves while you sleep" story — is documented in [.github/BRAND.md](.github/BRAND.md).
 
 ## Credits

@@ -32,7 +32,7 @@ def _normalize(art: list[str]) -> list[str]:
 
 OWL_SMALL = _normalize([
     "  ▄▄████▄▄  ",
-    " ██ ◉  ◉ ██ ",
+    " ██(◉)(◉)██ ",
     "███  ╰▽╯  ███",
     " ██ ╭──╮ ██ ",
     "  ▀█ ║║║ █▀∞",
@@ -42,7 +42,7 @@ OWL_SMALL = _normalize([
 
 OWL_MEDIUM = _normalize([
     "     ▄▄████▄▄     ",
-    "    ██ ◉  ◉ ██  ∞ ",
+    "    ██(◉)(◉)██  ∞ ",
     "   ███  ╰▽╯  ███   ",
     "    ██ ╭──╮ ██    ",
     "     ▀█ ║║║ █▀     ",
@@ -52,7 +52,7 @@ OWL_MEDIUM = _normalize([
 
 OWL_BLINK = _normalize([
     "     ▄▄████▄▄     ",
-    "    ██ ─  ─ ██  ∞ ",
+    "    ██(─)(─)██  ∞ ",
     "   ███  ╰▽╯  ███   ",
     "    ██ ╭──╮ ██    ",
     "     ▀█ ║║║ █▀     ",
@@ -62,7 +62,7 @@ OWL_BLINK = _normalize([
 
 OWL_SLEEP = _normalize([
     "     ▄▄████▄▄    z ",
-    "    ██ ─  ─ ██   Z ",
+    "    ██(─)(─)██   Z ",
     "   ███  ╰▽╯  ███   ",
     "    ██ ╭──╮ ██     ",
     "     ▀█ ║║║ █▀      ",
@@ -72,7 +72,7 @@ OWL_SLEEP = _normalize([
 
 OWL_FACE = _normalize([
     "  ▄▄████▄▄  ",
-    " ██ ◉  ◉ ██ ",
+    " ██(◉)(◉)██ ",
     "███ ╰▽╯ ███",
 ])
 
@@ -127,7 +127,7 @@ def exit_hints(branch: str, iterations: int, cwd: str | PathLike[str], main_repo
 
 ASCII_OWL_SMALL = [
     "   .---.   ",
-    "  / o o \\ ",
+    "  /(o)(o)\\ ",
     " |   >   | ",
     " |  ===  | ",
     "  \\_____/ ",
