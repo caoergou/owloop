@@ -50,9 +50,9 @@ These are real, documented problems. owloop must address each one to be worth us
 | **Agent self-assessment is unreliable** | Agent reports "PR #51 created" — PR doesn't exist | Completion = grep for `<promise>DONE</promise>`, not agent narrative | ✅ Implemented |
 | **"Defined but never called"** | Agent writes function, passes self-review, but function is never wired into call chain | Acceptance Criteria must include integration verification | ⚠️ Spec-dependent |
 | **Optimism inflation** | After 100 loops, agent claims "99.8% accuracy" with no measurement | Fresh context prevents accumulation, but spec quality still matters | ⚠️ Spec-dependent |
-| **Cost runaway** | Overnight run burns through weekly quota | Token tracking + budget cap | ❌ Not implemented |
+| **Cost runaway** | Overnight run burns through weekly quota | Token tracking + budget cap | ✅ Implemented |
 | **Review cost underestimated** | 50 commits = 70min of commit-by-commit review | Iteration cap keeps output reviewable | ✅ Implemented |
-| **Spec quality is the real bottleneck** | "Build a REST API" → endless loop; vague criteria = vague results | `/owloop-spec` skill with baseline calibration | 🔄 In progress |
+| **Spec quality is the real bottleneck** | "Build a REST API" → endless loop; vague criteria = vague results | `/owloop-spec` skill with baseline calibration | ✅ Implemented |
 
 ### Geoffrey Huntley's own warning
 
@@ -86,9 +86,9 @@ Focus: **make it not break**, address the failure modes above.
 - [x] Legacy bash engine removed (Python engine is the sole engine)
 - [x] Skills bilingual rewrite (Chinese + English trigger support)
 - [x] Skills restructured per agentskills.io spec (references/ directory)
-- [ ] Token tracking and budget cap (`--max-tokens`, per-iteration token counting)
-- [ ] `owloop report` — lavish HTML summary with per-iteration diffs
-- [ ] PyPI release (`uvx owloop` works without git install)
+- [x] Token tracking and budget cap (`--max-tokens`, per-iteration token counting)
+- [x] `owloop report` — HTML summary with per-iteration diff stats and token usage
+- [x] PyPI release workflow (`uvx owloop` installable on tag)
 
 ## v0.3 — Memory & Cost Control
 
@@ -126,7 +126,7 @@ Intentionally later: `gnhf` shows that agent-agnostic orchestration adds signifi
 
 ## v1.0 — Production
 
-- [ ] CI/CD pipeline (lint, test, publish on tag)
+- [x] CI/CD pipeline (lint, test, publish on tag)
 - [ ] Comprehensive docs site
 - [ ] skills.sh registration (need to contact vercel-labs for indexing)
 - [ ] Community spec library (reusable spec templates for common refactoring patterns)
