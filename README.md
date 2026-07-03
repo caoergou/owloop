@@ -8,6 +8,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-d4a025)](https://python.org)
 [![CI](https://github.com/caoergou/owloop/actions/workflows/ci.yml/badge.svg)](https://github.com/caoergou/owloop/actions/workflows/ci.yml)
 [![Agent Skill](https://img.shields.io/badge/agent--skill-owloop-d4a025)](https://agentskills.io)
+[![Website](https://img.shields.io/badge/website-eric.run.place%2Fowloop-d4a025)](https://eric.run.place/owloop/)
 
 *Your code evolves while you sleep.*
 

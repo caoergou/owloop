@@ -9,48 +9,18 @@
 
   if (!output || !inputLine || !typed) return;
 
-  // Rich terminal frames: each frame is either a string (typed line) or an object
-  // { html: "...", delay: ms } for lines rendered instantly with markup.
-  const frames = [
-    { type: "input", text: "owloop run --max-tokens 200000" },
-    { type: "output", text: "🦉 Ollie is waking up...", delay: 300 },
-    { type: "output", text: "→ worktree: /project-owloop-wt/owloop-2026-07-03", delay: 180 },
-    { type: "output", text: "→ model: claude-sonnet-5", delay: 180 },
-    { type: "output", text: "→ specs: 3 incomplete", delay: 180 },
-    { type: "blank" },
-    { type: "output", text: "Iteration 1 · 001-fix-lint.md", className: "iteration" },
-    { type: "cmd", text: "uv run ruff check src/ tests/" },
-    { type: "output", text: "All checks passed.", className: "success" },
-    { type: "cmd", text: "uv run pytest -q" },
-    { type: "output", text: "14 passed in 0.12s", className: "success" },
-    { type: "promise", text: "<promise>DONE</promise>" },
-    { type: "output", text: "✓ committed 6 files", className: "success" },
-    { type: "blank" },
-    { type: "output", text: "Iteration 2 · 002-add-types.md", className: "iteration" },
-    { type: "cmd", text: "uv run pyright src/owloop" },
-    { type: "output", text: "0 errors, 0 warnings", className: "success" },
-    { type: "cmd", text: "uv run pytest -q" },
-    { type: "output", text: "14 passed in 0.11s", className: "success" },
-    { type: "promise", text: "<promise>DONE</promise>" },
-    { type: "output", text: "✓ committed 12 files", className: "success" },
-    { type: "blank" },
-    { type: "output", text: "Iteration 3 · 003-unify-errors.md", className: "iteration" },
-    { type: "cmd", text: "uv run pytest tests/test_errors.py -q" },
-    { type: "output", text: "8 passed in 0.08s", className: "success" },
-    { type: "promise", text: "<promise>DONE</promise>" },
-    { type: "output", text: "✓ committed 4 files", className: "success" },
-    { type: "blank" },
-    { type: "dawn", text: "🌅 Complete. 3 specs done · 0 failures · 12.4k tokens" },
-    { type: "output", text: "→ report: logs/owloop_report.html", delay: 180 },
-    { type: "output", text: "→ branch: owloop/2026-07-03", delay: 180 },
-  ];
-
-  const typeSpeed = 22;
-  const linePause = 420;
-  const fastPause = 160;
+  const typeSpeed = 20;
+  const linePause = 380;
+  const fastPause = 120;
 
   let timeoutId = null;
   let running = false;
+
+  function sleep(ms) {
+    return new Promise((resolve) => {
+      timeoutId = window.setTimeout(resolve, ms);
+    });
+  }
 
   function clearTerminal() {
     output.innerHTML = "";
@@ -62,16 +32,19 @@
     }
   }
 
-  function sleep(ms) {
-    return new Promise((resolve) => {
-      timeoutId = window.setTimeout(resolve, ms);
-    });
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
-  function makeLine(content, className) {
+  function appendLine(content, className) {
     const line = document.createElement("span");
     line.className = "line" + (className ? " " + className : "");
     line.innerHTML = content;
+    output.appendChild(line);
+    scrollToBottom();
     return line;
   }
 
@@ -84,39 +57,23 @@
   }
 
   function appendPrompt(cmd) {
-    const line = makeLine(
+    appendLine(
       `<span class="prompt">$</span> <span class="cmd">${escapeHtml(cmd)}</span>`,
       "cmd-line"
     );
-    output.appendChild(line);
-    scrollToBottom();
   }
 
-  function appendPromise(text) {
-    const line = makeLine(
-      `<span class="code">${escapeHtml(text)}</span>`,
-      "promise-line"
-    );
-    output.appendChild(line);
-    scrollToBottom();
-  }
-
-  function appendDawn(text) {
-    const line = makeLine(escapeHtml(text), "dawn");
-    output.appendChild(line);
+  function appendBlock(text, className) {
+    const block = document.createElement("pre");
+    block.className = "tui-block" + (className ? " " + className : "");
+    block.textContent = text;
+    output.appendChild(block);
     scrollToBottom();
   }
 
   function scrollToBottom() {
     const body = output.closest(".terminal-body");
     if (body) body.scrollTop = body.scrollHeight;
-  }
-
-  function escapeHtml(str) {
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
   }
 
   async function typeCommand(cmd) {
@@ -131,62 +88,136 @@
     appendPrompt(cmd);
   }
 
+  const tuiFrames = [
+`┌─────────────────────────────────────────────┐
+│  🦉 owloop  ·  build mode                   │
+│                                             │
+│     ▄▄████▄▄                                │
+│    ██ ◉  ◉ ██  ∞                            │
+│   ███  ╰▽╯  ███                             │
+│                                             │
+│  Specs: 3      Done: 0      Iteration: 1    │
+│  Current: 001-fix-lint.md                   │
+│  [⠋] running acceptance criteria...         │
+└─────────────────────────────────────────────┘`,
+`┌─────────────────────────────────────────────┐
+│  🦉 owloop  ·  build mode                   │
+│                                             │
+│     ▄▄████▄▄                                │
+│    ██ ◉  ◉ ██  ∞                            │
+│   ███  ╰▽╯  ███                             │
+│                                             │
+│  Specs: 3      Done: 1      Iteration: 2    │
+│  Current: 002-add-types.md                  │
+│  [⠙] running acceptance criteria...         │
+└─────────────────────────────────────────────┘`,
+`┌─────────────────────────────────────────────┐
+│  🦉 owloop  ·  build mode                   │
+│                                             │
+│     ▄▄████▄▄                                │
+│    ██ ◉  ◉ ██  ∞                            │
+│   ███  ╰▽╯  ███                             │
+│                                             │
+│  Specs: 3      Done: 2      Iteration: 3    │
+│  Current: 003-unify-errors.md               │
+│  [⠹] running acceptance criteria...         │
+└─────────────────────────────────────────────┘`,
+`┌─────────────────────────────────────────────┐
+│  🦉 owloop  ·  build mode                   │
+│                                             │
+│     ▄▄████▄▄                                │
+│    ██ ◉  ◉ ██  ∞                            │
+│   ███  ╰▽╯  ███                             │
+│                                             │
+│  Specs: 3      Done: 3      Iteration: 3    │
+│                                             │
+│  🌅 Complete. 3 specs done · 0 failures     │
+└─────────────────────────────────────────────┘`,
+  ];
+
+  async function showTuiFrame(idx) {
+    const existing = output.querySelectorAll(".tui-block");
+    existing.forEach((el) => el.remove());
+    appendBlock(tuiFrames[idx], "tui-frame");
+  }
+
   async function runAnimation() {
-    if (running) {
-      if (timeoutId) window.clearTimeout(timeoutId);
+    if (running && timeoutId) {
+      window.clearTimeout(timeoutId);
       timeoutId = null;
     }
     running = true;
     clearTerminal();
 
-    for (const frame of frames) {
-      if (frame.type === "blank") {
-        const spacer = document.createElement("span");
-        spacer.className = "line";
-        spacer.innerHTML = "&nbsp;";
-        output.appendChild(spacer);
-        scrollToBottom();
-        await sleep(fastPause);
-        continue;
-      }
+    // 1. Project context
+    await typeCommand("cd ~/projects/legacy-api");
+    await sleep(linePause);
 
-      if (frame.type === "input") {
-        await typeCommand(frame.text);
-        await sleep(linePause);
-        continue;
-      }
+    await typeCommand("ls specs/");
+    appendPlain("001-fix-lint.md      002-add-types.md     003-unify-errors.md", "output");
+    await sleep(linePause);
 
-      if (frame.type === "cmd") {
-        appendPrompt(frame.text);
-        await sleep(fastPause);
-        continue;
-      }
+    // 2. Start the loop
+    await typeCommand("owloop run");
+    await sleep(fastPause);
 
-      if (frame.type === "promise") {
-        appendPromise(frame.text);
-        await sleep(linePause);
-        continue;
-      }
+    appendPlain("🦉 Ollie is waking up...", "dim");
+    appendPlain("→ worktree: /project-owloop-wt/owloop-2026-07-03", "dim");
+    appendPlain("→ model: claude-sonnet-5", "dim");
+    await sleep(linePause);
 
-      if (frame.type === "dawn") {
-        appendDawn(frame.text);
-        if (status) {
-          status.textContent = "● complete";
-          status.style.color = "var(--amber-bright)";
-        }
-        await sleep(linePause * 1.5);
-        continue;
-      }
+    // 3. TUI frames with iteration detail
+    await showTuiFrame(0);
+    await sleep(900);
+    appendLine(
+      `<span class="success">✓</span> <span class="dim">001-fix-lint.md</span> · ruff + pytest passed · committed`,
+      "output"
+    );
+    await sleep(linePause);
 
-      // default output
-      appendPlain(frame.text, frame.className);
-      await sleep(frame.delay ?? linePause);
+    await showTuiFrame(1);
+    await sleep(900);
+    appendLine(
+      `<span class="success">✓</span> <span class="dim">002-add-types.md</span> · pyright + pytest passed · committed`,
+      "output"
+    );
+    await sleep(linePause);
+
+    await showTuiFrame(2);
+    await sleep(900);
+    appendLine(
+      `<span class="success">✓</span> <span class="dim">003-unify-errors.md</span> · pytest passed · committed`,
+      "output"
+    );
+    await sleep(linePause);
+
+    await showTuiFrame(3);
+    await sleep(linePause * 1.5);
+
+    // 4. Morning review
+    appendPlain("", "blank");
+    await typeCommand("git diff --stat HEAD~3..HEAD");
+    appendBlock(
+` src/owloop/errors.py   |  42 +++++++
+ src/owloop/handlers.py |  88 +++++++++++
+ src/owloop/types.py    | 156 ++++++++++++++++++
+ tests/test_errors.py   |  34 +++++
+ 4 files changed, 320 insertions(+), 0 deletions(-)`,
+      "diff"
+    );
+    await sleep(linePause);
+
+    await typeCommand("owloop report");
+    appendPlain("🌅 Report generated: logs/owloop_report.html", "dawn");
+
+    if (status) {
+      status.textContent = "● complete";
+      status.style.color = "var(--amber-bright)";
     }
 
     running = false;
   }
 
-  // Replay when user clicks the terminal area (if they want)
   const terminal = document.querySelector(".terminal");
   if (terminal) {
     terminal.addEventListener("click", () => {
@@ -194,22 +225,21 @@
     });
   }
 
-  // Copy install command
   if (copyBtn) {
-    copyBtn.addEventListener("click", async () => {
+    copyBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       const text = copyBtn.dataset.copy;
       if (!text) return;
       try {
         await navigator.clipboard.writeText(text);
         copyBtn.classList.add("copied");
-        setTimeout(() => copyBtn.classList.remove("copied"), 1500);
+        window.setTimeout(() => copyBtn.classList.remove("copied"), 1500);
       } catch {
         // ignore
       }
     });
   }
 
-  // Start on first idle so content is visible without JS, then enhanced.
   if ("requestIdleCallback" in window) {
     requestIdleCallback(runAnimation, { timeout: 500 });
   } else {

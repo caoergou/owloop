@@ -98,23 +98,41 @@ body {
   opacity: 0.7;
 }
 
-.shooting-star {
+.motes {
   position: absolute;
-  top: var(--top, 18%);
-  left: -10%;
-  width: 120px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent);
-  transform: rotate(-25deg);
-  opacity: 0;
-  animation: shoot 9s ease-out var(--delay, 2s) infinite;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
-@keyframes shoot {
-  0% { left: -10%; opacity: 0; }
-  10% { opacity: 1; }
-  30% { left: 110%; opacity: 0; }
-  100% { left: 110%; opacity: 0; }
+.motes span {
+  position: absolute;
+  left: var(--x);
+  top: -8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--amber-bright);
+  box-shadow: 0 0 8px var(--amber-bright);
+  opacity: 0;
+  animation: mote-fall var(--duration, 16s) ease-in var(--delay, 0s) infinite;
+}
+
+@keyframes mote-fall {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.7;
+  }
+  90% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateY(110vh) translateX(24px);
+    opacity: 0;
+  }
 }
 
 /* ── Navigation ── */
@@ -170,6 +188,33 @@ body {
 
 .nav-logo-icon .owl-ear {
   fill: var(--amber-dim);
+}
+
+.owl-animated {
+  animation: owl-float 5s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@keyframes owl-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.owl-eye-wrap {
+  transform-origin: center;
+}
+
+.owl-eyelid {
+  fill: var(--amber);
+  transform-origin: center;
+  transform-box: fill-box;
+  transform: scaleY(0);
+  animation: owl-blink 4s ease-in-out infinite;
+}
+
+@keyframes owl-blink {
+  0%, 45%, 55%, 100% { transform: scaleY(0); }
+  48%, 52% { transform: scaleY(1); }
 }
 
 .nav-links {
@@ -657,8 +702,13 @@ body {
   background: rgba(212, 160, 37, 0.1);
   border: 1px solid rgba(212, 160, 37, 0.25);
   border-radius: 0.75rem;
-  font-size: 1.25rem;
+  color: var(--amber-bright);
   margin-bottom: 1.25rem;
+}
+
+.feature-icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 .feature-card h3 {
@@ -850,7 +900,8 @@ body {
 }
 
 .timeline-moon {
-  font-size: 1.4rem;
+  width: 26px;
+  height: 26px;
   filter: drop-shadow(0 0 10px rgba(212, 160, 37, 0.4));
   z-index: 2;
 }
@@ -1099,6 +1150,44 @@ body {
   color: var(--violet);
 }
 
+.tui-block {
+  margin: 0.5rem 0 0.25rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--dim);
+  border-radius: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: clamp(0.7rem, 1.2vw, 0.82rem);
+  line-height: 1.5;
+  color: var(--moon);
+  white-space: pre;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dim) transparent;
+}
+
+.tui-block::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tui-block::-webkit-scrollbar-thumb {
+  background: var(--dim);
+  border-radius: 2px;
+}
+
+.tui-block.diff {
+  color: var(--moon-dim);
+  border-left: 2px solid var(--amber);
+}
+
+/* ── Accessibility ── */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
 /* ── Responsive ── */
 @media (max-width: 980px) {
   .hero-grid {
@@ -1212,10 +1301,17 @@ body {
   }
 
   .nebula,
-  .shooting-star,
+  .motes span,
   .pulse,
-  .terminal-cursor {
+  .terminal-cursor,
+  .owl-animated,
+  .owl-eyelid,
+  .timeline-progress {
     animation: none;
+  }
+
+  .owl-eyelid {
+    transform: scaleY(0);
   }
 
   .btn,
