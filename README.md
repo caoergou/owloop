@@ -69,17 +69,19 @@ owloop run         # start the loop
 ## 🦉 How It Works
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#d4a025', 'primaryTextColor': '#0b1026', 'primaryBorderColor': '#3a4270', 'lineColor': '#3a4270', 'secondaryColor': '#121a2e', 'tertiaryColor': '#121a2e', 'fontFamily': 'Inter, system-ui, sans-serif' }}}%%
 graph LR
-    A["🦉 Pick spec"] --> B["claude -p<br/>fresh context"]
-    B --> C{"DONE?"}
-    C -- yes --> D["✅ Commit"] --> E{"More specs?"}
-    C -- no --> R["🔄 Retry ≤3"] --> A
+    A["🦉 Pick spec"]:::owl --> B["fresh agent context"]:::neutral
+    B --> C{"DONE?"}:::neutral
+    C -- yes --> D["✅ Commit"]:::neutral --> E{"More specs?"}:::neutral
+    C -- no --> R["🔄 Retry ≤3"]:::retry --> A
     E -- yes --> A
-    E -- no --> F["🌅 Complete"]
+    E -- no --> F["🌅 Complete"]:::done
 
-    style A fill:#d4a025,color:#0b1026,stroke:#d4a025
-    style F fill:#8fd19e20,stroke:#8fd19e
-    style R fill:#e0777d20,stroke:#e0777d
+    classDef owl fill:#d4a025,stroke:#d4a025,color:#0b1026
+    classDef done fill:#8fd19e33,stroke:#8fd19e,color:#f2ecd8
+    classDef retry fill:#e0777d33,stroke:#e0777d,color:#f2ecd8
+    classDef neutral fill:#121a2e,stroke:#3a4270,color:#f2ecd8
 ```
 
 | Property | How |
