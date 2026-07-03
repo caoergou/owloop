@@ -23,7 +23,9 @@ from typing import Callable
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 DONE_SIGNAL_RE = re.compile(r"<promise>(?:ALL_)?DONE</promise>")
 
-DEFAULT_IDLE_TIMEOUT = 1800  # 30 minutes with zero output → assume stuck
+DEFAULT_IDLE_TIMEOUT = 3600  # 60 minutes — claude -p buffers all output until
+# the end of a turn, so "no output" ≠ "stuck". Real-test showed spec 01 took
+# 18 minutes with zero intermediate output. 60min gives headroom for large specs.
 
 OnLine = Callable[[str], None]
 
