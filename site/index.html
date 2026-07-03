@@ -158,6 +158,42 @@
   </header>
 
   <main>
+    <section class="section demo-section" id="demo">
+      <div class="container">
+        <p class="section-overline">See it in action</p>
+        <h2 class="section-title">From goal to commits, unattended.</h2>
+
+        <div class="hero-terminal-wrap">
+          <div class="terminal">
+            <div class="terminal-glow"></div>
+            <div class="terminal-header">
+              <div class="terminal-controls">
+                <span class="terminal-dot red"></span>
+                <span class="terminal-dot amber"></span>
+                <span class="terminal-dot green"></span>
+              </div>
+              <span class="terminal-title">owloop — overnight run</span>
+              <span class="terminal-badge" id="terminal-status">● ready</span>
+            </div>
+            <div class="terminal-body">
+              <div class="terminal-output" id="terminal-output"></div>
+              <div class="terminal-input-line" id="terminal-input-line" style="display:none">
+                <span class="prompt">$</span>
+                <span class="terminal-typed" id="terminal-typed"></span>
+                <span class="terminal-cursor">▌</span>
+              </div>
+            </div>
+            <div class="terminal-statusbar">
+              <span>owloop v0.2.1</span>
+              <span>model: claude-sonnet-4</span>
+              <span>budget: 200k tokens</span>
+              <button class="replay-btn" id="terminal-replay" type="button" title="Replay demo">↻ Replay</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="how">
       <div class="container">
         <p class="section-overline">How it works</p>
@@ -381,5 +417,6 @@
     </div>
   </footer>
 
+  <script src="/owloop/terminal-demo.js"></script>
 </body>
 </html>
