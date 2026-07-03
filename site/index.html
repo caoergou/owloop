@@ -20,9 +20,9 @@
     <div class="container nav-inner">
       <a class="nav-logo" href="#" aria-label="owloop home">
         <svg class="nav-logo-icon owl-animated" viewBox="0 0 40 40" aria-hidden="true">
-          <g class="owl-tilt">
             <!-- Body -->
             <ellipse cx="20" cy="24.5" rx="7.2" ry="8.2" fill="var(--amber)"/>
+          <g class="owl-head">
             <!-- Head -->
             <circle cx="20" cy="17" r="6.2" fill="var(--amber)"/>
             <!-- Ear tufts -->
@@ -102,19 +102,19 @@
             <!-- Branch -->
             <line x1="60" y1="315" x2="340" y2="315" stroke="#6b5a3e" stroke-width="10" stroke-linecap="round"/>
 
-            <g class="owl-tilt">
-              <!-- Body -->
-              <ellipse cx="200" cy="245" rx="70" ry="82" fill="#d4a025"/>
+            <!-- Body (static on branch) -->
+            <ellipse cx="200" cy="245" rx="70" ry="82" fill="#d4a025"/>
 
-              <!-- Wing suggestion -->
-              <path d="M145 225 Q132 255 148 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
-              <path d="M255 225 Q268 255 252 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
+            <!-- Wing suggestion -->
+            <path d="M145 225 Q132 255 148 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
+            <path d="M255 225 Q268 255 252 280" stroke="#b5851b" stroke-width="5" fill="none" stroke-linecap="round"/>
 
-              <!-- Feet -->
-              <ellipse cx="175" cy="318" rx="11" ry="5" fill="#b5851b"/>
-              <ellipse cx="225" cy="318" rx="11" ry="5" fill="#b5851b"/>
+            <!-- Feet -->
+            <ellipse cx="175" cy="318" rx="11" ry="5" fill="#b5851b"/>
+            <ellipse cx="225" cy="318" rx="11" ry="5" fill="#b5851b"/>
 
-              <!-- Head -->
+            <!-- Head (animated - tilts and blinks) -->
+            <g class="owl-head">
               <circle cx="200" cy="170" r="60" fill="#d4a025"/>
 
               <!-- Ear tufts -->
@@ -385,9 +385,12 @@
       <div class="container cta-card">
         <div class="cta-owl owl-animated" aria-hidden="true">
           <svg viewBox="0 0 120 120">
-            <g class="owl-tilt">
               <!-- Body -->
               <ellipse cx="60" cy="75" rx="24" ry="27" fill="var(--amber)"/>
+              <!-- Feet -->
+              <ellipse cx="52" cy="99" rx="4" ry="2" fill="#b5851b"/>
+              <ellipse cx="68" cy="99" rx="4" ry="2" fill="#b5851b"/>
+            <g class="owl-head">
               <!-- Head -->
               <circle cx="60" cy="50" r="21" fill="var(--amber)"/>
               <!-- Ears -->
@@ -404,9 +407,6 @@
               <circle cx="69" cy="50" r="2.5" fill="#080c1d"/>
               <!-- Beak -->
               <polygon points="60,58 57,63 63,63" fill="#b5851b"/>
-              <!-- Feet -->
-              <ellipse cx="52" cy="99" rx="4" ry="2" fill="#b5851b"/>
-              <ellipse cx="68" cy="99" rx="4" ry="2" fill="#b5851b"/>
             </g>
           </svg>
         </div>

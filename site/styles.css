@@ -207,14 +207,20 @@ h1, h2, h3, h4, h5, h6 {
 .owl-tilt {
   transform-box: fill-box;
   transform-origin: center;
-  animation: owl-tilt-breathe 6s ease-in-out infinite;
 }
 
-@keyframes owl-tilt-breathe {
-  0%, 100% { transform: rotate(-2deg) scale(1); }
-  25% { transform: rotate(0deg) scale(1.015); }
-  50% { transform: rotate(2deg) scale(1); }
-  75% { transform: rotate(0deg) scale(1.015); }
+.owl-head {
+  transform-box: fill-box;
+  transform-origin: 50% 85%;
+  animation: owl-head-tilt 5s ease-in-out infinite;
+}
+
+@keyframes owl-head-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(4deg); }
+  40% { transform: rotate(0deg); }
+  60% { transform: rotate(-5deg); }
+  80% { transform: rotate(-1deg); }
 }
 
 .owl-pupil {
@@ -1470,6 +1476,70 @@ button:focus-visible {
   font-style: italic;
 }
 
+/* ── Report browser preview ── */
+.report-browser {
+  display: none;
+  position: absolute;
+  bottom: 3rem;
+  left: 5%;
+  right: 5%;
+  z-index: 20;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  transform: translateY(30px) scale(0.96);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.report-browser.open { opacity: 1; transform: translateY(0) scale(1); }
+
+.browser-chrome {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: #1c1c1e;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.browser-dots { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.browser-urlbar {
+  flex: 1; padding: 0.3rem 0.7rem;
+  background: rgba(255,255,255,0.06); border-radius: 0.4rem;
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--moon-dim);
+  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.browser-close {
+  color: var(--moon-dim); cursor: pointer; font-size: 0.85rem;
+  padding: 0.2rem 0.4rem; border-radius: 0.25rem; transition: all 0.15s;
+}
+.browser-close:hover { background: rgba(224,119,125,0.2); color: var(--danger); }
+
+.browser-body {
+  background: var(--night); padding: 1.5rem;
+  font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5; color: var(--moon);
+}
+.rpt-header { text-align: center; border-bottom: 2px solid var(--amber); padding-bottom: 1rem; margin-bottom: 1.25rem; }
+.rpt-owl { font-size: 1.8rem; margin-bottom: 0.3rem; }
+.rpt-title { font-size: 1.4rem; font-weight: 700; color: var(--amber); font-family: var(--font-heading); }
+.rpt-tagline { color: var(--moon-dim); font-size: 0.8rem; font-style: italic; margin-top: 0.2rem; }
+
+.rpt-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin-bottom: 1.25rem; }
+.rpt-card { background: #121a2e; border: 1px solid var(--dim-2); border-radius: 0.5rem; padding: 0.6rem 0.7rem; }
+.rpt-card-val { font-weight: 700; font-size: 0.85rem; margin-bottom: 0.15rem; }
+.rpt-card-label { font-size: 0.7rem; color: var(--moon-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.rpt-green { color: var(--success); }
+.rpt-red { color: var(--danger); }
+
+.rpt-section { margin-bottom: 1rem; }
+.rpt-section-title { font-size: 0.95rem; font-weight: 600; color: var(--amber); border-bottom: 1px solid var(--dim-2); padding-bottom: 0.25rem; margin-bottom: 0.5rem; font-family: var(--font-heading); }
+.rpt-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.rpt-table th, .rpt-table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid rgba(58,66,112,0.4); }
+.rpt-table th { color: var(--amber); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.rpt-table code { color: var(--cyan); background: rgba(255,255,255,0.06); padding: 0.1rem 0.25rem; border-radius: 0.2rem; }
+.rpt-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+.rpt-badge-green { background: rgba(143,209,158,0.15); color: var(--success); }
+.rpt-footer { text-align: center; color: var(--moon-dim); font-size: 0.7rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid rgba(58,66,112,0.3); }
+
 /* ── Accessibility ── */
 a:focus-visible,
 button:focus-visible {
@@ -1487,7 +1557,7 @@ button:focus-visible {
   .terminal-cursor,
   .owl-animated,
   .owl-eyelid,
-  .owl-tilt,
+  .owl-head,
   .owl-pupil,
   .hero-terminal-wrap::before,
   .hero-aurora::before,
