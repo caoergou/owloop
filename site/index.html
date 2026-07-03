@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>owloop — Your code evolves while you sleep</title>
+  <meta name="description" content="owloop is a spec-driven autonomous coding loop. Write specs, start the loop, and wake up to clean commits.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/owloop/styles.css">
+</head>
+<body>
+  <div class="stars" aria-hidden="true"></div>
+
+  <header class="hero">
+    <div class="container">
+      <pre class="ollie-ascii" aria-label="Ollie the owl">
+     ▄▄████▄▄     
+    ██ ◉  ◉ ██  ∞ 
+   ███  ╰▽╯  ███   
+    ██ ╭──╮ ██    
+     ▀█ ║║║ █▀     
+      ▀██▄▄██▀     
+       ╱╲  ╱╲      
+      </pre>
+      <h1 class="title">owloop</h1>
+      <p class="tagline">Your code evolves while you sleep.</p>
+      <p class="subtagline">Write specs. Start the loop. Wake up to clean commits.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/caoergou/owloop#-quick-start" target="_blank" rel="noopener">Get Started</a>
+        <a class="btn btn-secondary" href="#terminal-demo">View Demo</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="section problem-solution">
+      <div class="container">
+        <div class="card-grid two-col">
+          <div class="card problem">
+            <h2>🌑 The problem</h2>
+            <p>You have 20 lint categories, 200 missing type annotations, and copy-pasted error handling. You know what to do — you just don't have the hours.</p>
+          </div>
+          <div class="card solution">
+            <h2>🌕 The solution</h2>
+            <p>Write specs. Start the loop. Wake up to clean commits.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section how-it-works">
+      <div class="container">
+        <h2>How It Works</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-number">1</div>
+            <h3>Write a spec</h3>
+            <p>Define requirements, shell-verifiable acceptance criteria, and exclusions.</p>
+          </div>
+          <div class="step">
+            <div class="step-number">2</div>
+            <h3>Run <code>owloop run</code></h3>
+            <p>Ollie picks up your spec queue and starts the overnight loop.</p>
+          </div>
+          <div class="step">
+            <div class="step-number">3</div>
+            <h3>Fresh iterations</h3>
+            <p>Each task spawns a clean agent context. Ollie commits only when shell checks pass.</p>
+          </div>
+          <div class="step">
+            <div class="step-number">4</div>
+            <h3>Review the report</h3>
+            <p>Open the rich HTML report in the morning and merge the worktree.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="terminal-demo" class="section terminal-section">
+      <div class="container">
+        <h2>See it in action</h2>
+        <div class="terminal" role="img" aria-label="Simulated terminal showing owloop run output">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot amber"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">ollie@night:~</span>
+          </div>
+          <div class="terminal-body">
+            <pre class="terminal-output" id="terminal-output"><noscript>$ owloop run
+🦉 Ollie is waking up...
+Iteration 1: 001-fix-lint.md → ✅ committed
+Iteration 2: 002-add-types.md → ✅ committed
+Iteration 3: 003-unify-errors.md → ✅ committed
+🌅 Complete. 3 specs done, 0 failures.</noscript></pre>
+            <span class="terminal-cursor" id="terminal-cursor" aria-hidden="true">_</span>
+          </div>
+        </div>
+        <button class="btn btn-secondary replay-btn" id="replay-btn" type="button">Replay</button>
+      </div>
+    </section>
+
+    <section class="section features">
+      <div class="container">
+        <h2>Features</h2>
+        <div class="feature-grid">
+          <div class="feature">Spec-driven queue</div>
+          <div class="feature">Fresh context per iteration</div>
+          <div class="feature">Git worktree isolation</div>
+          <div class="feature">Deterministic completion</div>
+          <div class="feature">Fix-loop detection</div>
+          <div class="feature">Token budget cap</div>
+          <div class="feature">Rich HTML report</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section comparison">
+      <div class="container">
+        <h2>Compared To</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>owloop</th>
+                <th><code>/goal</code></th>
+                <th>gnhf</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Completion</strong></td>
+                <td>grep (deterministic)</td>
+                <td>Haiku model (probabilistic)</td>
+                <td>grep</td>
+              </tr>
+              <tr>
+                <td><strong>Context</strong></td>
+                <td>Fresh per iteration</td>
+                <td>Same session</td>
+                <td>Fresh per iteration</td>
+              </tr>
+              <tr>
+                <td><strong>Specs</strong></td>
+                <td>Constraint-oriented</td>
+                <td>Free-form</td>
+                <td>Free-form</td>
+              </tr>
+              <tr>
+                <td><strong>Best for</strong></td>
+                <td>Backlog of verifiable tasks</td>
+                <td>One focused task</td>
+                <td>Multi-agent overnight</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p><a href="https://github.com/caoergou/owloop" target="_blank" rel="noopener">GitHub</a> · <a href="/owloop/LICENSE">MIT License</a></p>
+      <p class="credits">Built on <a href="https://ghuntley.com/ralph/" target="_blank" rel="noopener">Ralph Wiggum methodology</a> · Ollie watches while you sleep 🦉</p>
+    </div>
+  </footer>
+
+  <script src="/owloop/terminal-demo.js"></script>
+</body>
+</html>
