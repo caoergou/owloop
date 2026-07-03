@@ -17,6 +17,7 @@ from owloop.adapters import get_adapter
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.report import ReportGenerator
 from owloop.reporter import ConsoleReporter
+from owloop.spec_from_issue import IssueToSpecConverter
 from owloop.spec_linter import LintReport, SpecLinter
 from owloop.tui import OwloopTUI
 
@@ -500,6 +501,64 @@ def report(output: Path | None) -> None:
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[{_brand.GREEN}]✓ Report generated:[/] {report_path}")
+    console.print()
+
+
+@main.command("spec-from-issue")
+@click.argument("issue")
+@click.option(
+    "--repo",
+    help="GitHub owner/repo (defaults to the local git remote).",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output path override.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print the spec instead of writing it.",
+)
+def spec_from_issue(
+    issue: str,
+    repo: str | None,
+    output: Path | None,
+    dry_run: bool,
+) -> None:
+    """Generate a spec draft from a GitHub issue."""
+    _ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
+    project_dir = Path.cwd()
+    converter = IssueToSpecConverter(project_dir)
+
+    try:
+        data = converter.from_github(issue, repo=repo)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise SystemExit(1) from None
+    except RuntimeError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise SystemExit(1) from None
+
+    if dry_run:
+        try:
+            rendered = converter.render_spec(data)
+        except FileNotFoundError as exc:
+            console.print(f"[red]Error:[/] {exc}")
+            raise SystemExit(1) from None
+        console.print(rendered)
+        return
+
+    try:
+        spec_path = converter.write_spec(data, output_path=output)
+    except FileNotFoundError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise SystemExit(1) from None
+
+    console.print()
+    console.print(f"[{_brand.GREEN}]✓ Spec generated:[/] {spec_path}")
     console.print()
 
 
