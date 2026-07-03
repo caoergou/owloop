@@ -1,31 +1,59 @@
 ---
 name: owloop
-description: Autonomous AI coding with constraint-oriented, spec-driven development. Implements Geoffrey Huntley's iterative bash loop methodology where agents work through specs one at a time, outputting a completion signal only when acceptance criteria are 100% met.
-license: MIT
+description: "Loop engineering tool: spec-driven autonomous coding loop that runs overnight. Write specs, start the loop, wake up to verified code."
+keywords:
+  - autonomous
+  - loop
+  - overnight
+  - spec-driven
+  - loop-engineering
+  - ralph-wiggum
+  - coding-agent
+  - verification
+  - fresh-context
+  - worktree
+  - claude-code
+  - refactoring
 metadata:
   author: caoergou
-  version: "1.0"
+  version: "0.1.0"
   repository: https://github.com/caoergou/owloop
+license: MIT
 ---
 
 # Owloop
 
-> Autonomous AI coding with constraint-oriented, spec-driven development
+> Loop engineering: spec-driven autonomous coding loop that runs overnight. Write specs, start the loop, wake up to verified code.
 
 ## What is Owloop?
 
-Owloop combines **Geoffrey Huntley's iterative bash loop** with **spec-driven development** for fully autonomous AI-assisted software development.
+Owloop combines **Geoffrey Huntley's iterative bash loop** with **spec-driven development** for fully autonomous AI-assisted software development — a discipline we call **loop engineering**: designing the spec, the verification command, and the exclusions so an unattended agent loop converges instead of wandering.
 
 The key insight: **Fresh context each iteration**. Each loop starts a new agent process with a clean context window, preventing context overflow and degradation.
 
-## When to Use This Skill
+## When to Use owloop
 
-Use Owloop when:
+- You have a codebase that needs mechanical improvements (lint fixes, type annotations, dead code removal, error handling unification)
+- You want to run these improvements overnight without babysitting
+- You need verification that changes actually work (shell-verifiable acceptance criteria)
+- You're tired of `/goal` stopping early because the Haiku evaluator misjudges completion
+- You want fresh context per iteration (no context window overflow on long runs)
+- You have multiple specifications/features to implement and want the AI to work through them autonomously
 
-- You have multiple specifications/features to implement
-- You want the AI to work autonomously through tasks
-- You need consistent, verifiable completion of acceptance criteria
-- You want to avoid context window problems in long sessions
+## When NOT to Use owloop
+
+- Tasks requiring product judgment or design decisions
+- Security-sensitive changes
+- Anything where "done" can't be expressed as a shell command
+
+## How owloop Compares
+
+| | owloop | /goal | gnhf | roborev |
+|---|---|---|---|---|
+| Completion check | grep (deterministic) | Haiku model (probabilistic) | grep | AI review |
+| Context management | Fresh per iteration | Same session | Fresh per iteration | Fresh per iteration |
+| Spec format | Constraint-oriented | Free-form prompt | Free-form prompt | Review guidelines |
+| Install footprint | Zero (uvx) | Built-in | npm -g | brew/go install |
 
 ## How It Works
 
