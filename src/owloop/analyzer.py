@@ -192,7 +192,7 @@ class Analyzer:
                 return {}
         try:
             with pyproject_path.open("rb") as f:
-                data = tomllib.load(f)
+                data: dict[str, Any] = tomllib.load(f)
         except Exception:  # pragma: no cover - malformed pyproject
             return {}
         return data
