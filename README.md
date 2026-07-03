@@ -6,6 +6,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-d4a025)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-d4a025)](https://python.org)
+[![CI](https://github.com/caoergou/owloop/actions/workflows/ci.yml/badge.svg)](https://github.com/caoergou/owloop/actions/workflows/ci.yml)
 [![Agent Skill](https://img.shields.io/badge/agent--skill-owloop-d4a025)](https://agentskills.io)
 
 **Write specs. Start the loop. Wake up to clean commits.**
@@ -46,6 +47,15 @@ owloop run         # start the loop
 | `owloop run --idle-timeout 1800` | Kill hung agent after 30min silence |
 | `owloop plan` | Generate implementation plan from specs |
 | `owloop status` | Show specs and completion progress |
+| `owloop version` | Show installed version |
+
+**Global options**
+
+| Option | Description |
+|---|---|
+| `--ascii` | Use ASCII art instead of Unicode glyphs (better on older Windows terminals) |
+| `--no-color` | Disable colored terminal output |
+| `--compact` | Force the compact single-column TUI layout |
 
 </details>
 
@@ -146,6 +156,19 @@ owloop runs in a separate `git worktree` with `--permission-mode auto`. Your mai
 Not directly — owloop is built around `claude -p`. For multi-agent support, [gnhf](https://github.com/kunchenguid/gnhf) is the better fit.
 
 </details>
+
+## 🛠️ Development
+
+owloop uses `uv` for dependency management and ships with `ruff`, `mypy`, and `pytest-cov` as dev tools.
+
+```bash
+uv sync --group dev          # install dev dependencies
+uv run pytest -q             # run tests with coverage
+uv run ruff check src/owloop tests
+uv run mypy src/owloop tests
+```
+
+All changes are validated on Linux, macOS, and Windows via GitHub Actions.
 
 ## Credits
 

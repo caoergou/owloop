@@ -33,15 +33,19 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 
 - `uv run owloop` — smoke-test the CLI (banner + subcommand list)
 - `uv run owloop <cmd> --help` — inspect a subcommand
-- `uv run pytest` — run the test suite
+- `uv run pytest -q` — run the test suite with coverage
+- `uv run ruff check src/owloop tests` — lint and import sorting
+- `uv run mypy src/owloop tests` — static type checking
 - `python prototypes/tui_concept.py` — preview the TUI concept; self-exits after ~20s, or Ctrl+C
 
 ## Brand
 
+- Mascot: **Ollie** the owl — the overnight pair programmer who watches your repo while you sleep.
 - Primary color: amber `#d4a025` (Rich markup `[bold #d4a025]`, panel/table `border_style`)
 - Status icons: 🦉 working · 🌙 iteration done · 💤 stuck/retrying · 🌅 run complete
-- Owl ASCII art for banners (`OWLOOP_BANNER` in `cli.py`; `OWL_OPEN` / `OWL_BLINK` / `OWL_SLEEP` frames in `tui.py`)
-- Tone: professional and terse. The existing banner is deliberately small — don't inflate new output with extra colors, borders, or emoji.
+- Brand assets live in `src/owloop/_brand.py`: palette, owl ASCII art (`OWL_SMALL` / `OWL_MEDIUM` / `OWL_BLINK` / `OWL_SLEEP`), moon phases, spinner frames, and state-aware messages.
+- ASCII fallbacks and `--no-color` mode must remain functional; don't rely on emoji or Unicode block characters for critical information.
+- Tone: professional and terse. The banner is deliberately small — don't inflate new output with extra colors, borders, or emoji.
 
 ## Design principles
 
