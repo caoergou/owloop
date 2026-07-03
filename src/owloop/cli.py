@@ -15,6 +15,7 @@ from rich.text import Text
 from owloop import _brand
 from owloop.adapters import get_adapter
 from owloop.engine import EngineConfig, OwloopEngine
+from owloop.report import ReportGenerator
 from owloop.reporter import ConsoleReporter
 from owloop.tui import OwloopTUI
 
@@ -408,6 +409,29 @@ def version() -> None:
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[bold]owloop[/] [{_brand.AMBER}]v{v}[/]")
+    console.print()
+
+
+@main.command()
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output path for the HTML report (default: logs/owloop_report.html).",
+)
+def report(output: Path | None) -> None:
+    """Generate an HTML summary report for the latest owloop run."""
+    ascii, no_color, _compact = _cli_options()
+    console = Console(no_color=no_color)
+    generator = ReportGenerator(Path.cwd())
+    try:
+        report_path = generator.generate(output)
+    except FileNotFoundError:
+        console.print("[red]Error:[/] No run summary found. Run [bold]owloop run[/] first.")
+        raise SystemExit(1) from None
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[{_brand.GREEN}]✓ Report generated:[/] {report_path}")
     console.print()
 
 

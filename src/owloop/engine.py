@@ -14,6 +14,7 @@ so the engine itself never shells out to `claude` directly.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -112,6 +113,17 @@ class RunSummary:
     stopped_reason: str
     issues: list[str] | None = None
     tokens_used: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "iterations": self.iterations,
+            "branch": self.branch,
+            "cwd": str(self.cwd),
+            "main_repo_dir": str(self.main_repo_dir),
+            "stopped_reason": self.stopped_reason,
+            "issues": self.issues,
+            "tokens_used": self.tokens_used,
+        }
 
 
 class OwloopEngine:
@@ -469,7 +481,7 @@ class OwloopEngine:
             stopped_reason = "interrupted"
             self._emit("interrupted", iteration=iteration)
 
-        return RunSummary(
+        summary = RunSummary(
             iterations=iteration,
             branch=branch,
             cwd=self.cwd,
@@ -477,3 +489,11 @@ class OwloopEngine:
             stopped_reason=stopped_reason,
             tokens_used=self.tokens_used,
         )
+        self._write_summary(summary)
+        return summary
+
+    def _write_summary(self, summary: RunSummary) -> None:
+        """Persist the latest run summary so `owloop report` can read it."""
+        summary_path = self.log_dir / "owloop_summary_latest.json"
+        with summary_path.open("w") as f:
+            json.dump(summary.as_dict(), f, indent=2)
