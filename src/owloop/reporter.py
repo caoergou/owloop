@@ -10,6 +10,7 @@ from rich.text import Text
 
 from owloop import _brand
 from owloop.engine import RunSummary
+from owloop.git_stats import get_recent_commits, total_diff_stats
 
 
 class ConsoleReporter:
@@ -132,6 +133,24 @@ class ConsoleReporter:
 
     FAILED_REASONS = {"preflight_failed", "dirty_workspace_declined"}
 
+    def _gather_summary_stats(self, summary: RunSummary) -> tuple[list, tuple[int, int, int]]:
+        """Fetch recent commits and total diff stats from ``summary.cwd``."""
+        commits = get_recent_commits(summary.cwd, summary.iterations)
+        total_files, total_ins, total_del = total_diff_stats(commits)
+        return commits, (total_files, total_ins, total_del)
+
+    def _commit_lines(self, commits: list) -> list[str]:
+        """Format commits as short hash + message lines."""
+        if not commits:
+            return ["No commits recorded for this run."]
+        return [f"{commit.hash}  {commit.message}" for commit in commits]
+
+    def _review_commands(self, iterations: int) -> list[str]:
+        return [
+            f"git log --oneline HEAD~{iterations}..HEAD",
+            f"git diff --stat HEAD~{iterations}..HEAD",
+        ]
+
     def print_summary(self, summary: RunSummary) -> None:
         c = self.console
         failed = summary.stopped_reason in self.FAILED_REASONS
@@ -139,13 +158,36 @@ class ConsoleReporter:
         owl_art = _brand.ASCII_OWL_SMALL if self.ascii else _brand.OWL_SLEEP
         owl = Text("\n".join(owl_art), justify="center")
 
+        commits, (total_files, total_ins, total_del) = self._gather_summary_stats(summary)
+        commit_lines = self._commit_lines(commits)
+        commands = self._review_commands(summary.iterations)
+
         facts = Table.grid(padding=(0, 2))
         facts.add_column(style=f"dim {_brand.GRAY}", justify="right")
         facts.add_column(style=_brand.MOON_WHITE)
         facts.add_row("Branch", summary.branch)
         facts.add_row("Iterations", str(summary.iterations))
+        facts.add_row("Stopped reason", summary.stopped_reason)
+        facts.add_row("Diff", f"{total_files} files · [green]+{total_ins}[/] · [red]-{total_del}[/]")
         if summary.tokens_used:
             facts.add_row("Tokens", f"{summary.tokens_used:,}")
+
+        commits_table = Table.grid(padding=(0, 2))
+        commits_table.add_column(style=f"bold {_brand.CYAN}")
+        commits_table.add_column(style=_brand.MOON_WHITE)
+        for line in commit_lines:
+            if line.startswith("No commits"):
+                commits_table.add_row("", f"[dim]{line}[/dim]")
+            else:
+                hash_part, _, message = line.partition("  ")
+                commits_table.add_row(hash_part, message)
+
+        commands_table = Table.grid(padding=(0, 2))
+        commands_table.add_column(style=f"dim {_brand.GRAY}", justify="right")
+        commands_table.add_column(style=_brand.MOON_WHITE)
+        commands_table.add_row("Review", commands[0])
+        for command in commands[1:]:
+            commands_table.add_row("", command)
 
         hints = _brand.exit_hints(
             branch=summary.branch,
@@ -154,6 +196,24 @@ class ConsoleReporter:
             main_repo_dir=str(summary.main_repo_dir),
         )
 
+        sections: list = [Align.center(facts)]
+        if commits:
+            sections.append(Align.center(Text("Commits", style=f"bold {_brand.AMBER}")))
+            sections.append(Align.center(commits_table))
+        sections.append(Align.center(commands_table))
+        if hints:
+            sections.append(Align.center(Text("\n".join(hints), style=f"dim {_brand.GRAY}")))
+
+        if summary.stopped_reason == "max_tokens":
+            sections.append(
+                Align.center(
+                    Text(
+                        f"{self._mark('warn')} Token budget exhausted — review costs before the next run",
+                        style=f"bold {_brand.RED}",
+                    )
+                )
+            )
+
         if failed:
             owl.stylize(f"dim {_brand.RED}")
             body = Group(
@@ -161,14 +221,13 @@ class ConsoleReporter:
                 Align.center(Text(f"{self._mark('fail')} {_brand.OLLIE_NAME} failed to start", style=f"bold {_brand.RED}")),
                 Align.center(Text("\n".join(f"· {issue}" for issue in (summary.issues or [])), style=f"dim {_brand.GRAY}")),
             )
-            c.print(Panel(body, border_style=_brand.RED, padding=(1, 4), width=56))
+            c.print(Panel(body, border_style=_brand.RED, padding=(1, 4), width=64))
             return
 
         owl.stylize(f"dim {_brand.AMBER}")
         body = Group(
             owl,
             Align.center(Text(self._status("complete"), style=f"bold {_brand.AMBER}")),
-            Align.center(facts),
-            Align.center(Text("\n".join(hints), style=f"dim {_brand.GRAY}")),
+            *sections,
         )
-        c.print(Panel(body, border_style=_brand.AMBER, padding=(1, 4), width=56))
+        c.print(Panel(body, border_style=_brand.AMBER, padding=(1, 4), width=64))
