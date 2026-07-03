@@ -1,3 +1,4 @@
 logs/
 PROMPT_build.md
 PROMPT_plan.md
+src/owloop/__pycache__/
