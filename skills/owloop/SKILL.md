@@ -89,6 +89,10 @@ Key sections:
 - **Style** — conventions to follow
 - **Verification** — exact commands to run before claiming completion
 
+## Loop Engineering Best Practices
+
+See [references/loop-engineering-guide.md](references/loop-engineering-guide.md) for the full guide on writing specs that converge, baseline calibration, task sizing, stuck behavior, and common failure modes.
+
 ## How It Compares
 
 See [references/comparison.md](references/comparison.md) for detailed comparison with `/goal`, gnhf, and roborev.

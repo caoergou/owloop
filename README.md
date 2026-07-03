@@ -8,8 +8,9 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-d4a025)](https://python.org)
 [![Agent Skill](https://img.shields.io/badge/agent--skill-owloop-d4a025)](https://agentskills.io)
 
-**Spec-driven autonomous coding loop for Claude Code.**<br>
-Fresh context · Shell-verified completion · Worktree isolation
+**Write specs. Start the loop. Wake up to clean commits.**
+
+*Your overnight coding agent — powered by Claude Code.*
 
 [Quick Start](#-quick-start) · [How It Works](#-how-it-works) · [Writing Specs](#-writing-specs) · [Compared To](#-compared-to) · [FAQ](#-faq)
 
@@ -17,7 +18,11 @@ Fresh context · Shell-verified completion · Worktree isolation
 
 ---
 
-Turn your backlog of lint warnings, missing type annotations, and copy-pasted error handling into constraint-oriented specs. Run `owloop run`. Go to sleep. Each iteration spawns a fresh `claude -p`, verifies acceptance criteria with real shell commands, and commits only when they pass.
+> You have 20 lint categories to fix, 200 functions missing type annotations, and error handling copy-pasted everywhere. You know what to do — you just don't have the hours. **owloop does it while you sleep.**
+
+```
+owloop run → pick spec → fresh claude -p → verify with shell commands → commit → next spec → 🌅
+```
 
 ## 🚀 Quick Start
 
