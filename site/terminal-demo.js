@@ -93,7 +93,7 @@
     for (var i = 0; i < text.length; i++) { typed.textContent += text[i]; await sleep(TYPE_SPEED); }
     await sleep(FAST_PAUSE);
     inputLine.style.display = "none";
-    addLine('<span class="prompt">&gt;</span> ' + esc(text), "answer-line");
+    addLine('<span class="prompt">   &gt;</span> ' + esc(text), "answer-line");
   }
 
   async function printLines(lines, pause) {
@@ -215,16 +215,19 @@
       ]);
       await sleep(LINE_PAUSE);
 
-      addLine('<span class="code">⟨clarify⟩</span> <span class="dim">2 questions before I draft the spec:</span>');
+      addText("", "blank");
+      addText("Need clarification (2 questions):", "");
       await sleep(LINE_PAUSE * 0.6);
 
-      await printLines([
-        ["1. Should public API response formats stay unchanged?", ""],
-        ["2. Which test command proves the refactor is correct?", ""],
-      ], LINE_PAUSE * 0.5);
+      addText("", "blank");
+      addText("1. Should public API response formats stay unchanged?", "");
+      await sleep(LINE_PAUSE * 0.4);
+      await typeAns("yes, keep all response shapes");
       await sleep(LINE_PAUSE * 0.5);
 
-      await typeAns("yes, keep API stable | uv run pytest tests/ -q");
+      addText("2. Which test command proves the refactor is correct?", "");
+      await sleep(LINE_PAUSE * 0.4);
+      await typeAns("uv run pytest tests/ -q");
       await sleep(LINE_PAUSE);
 
       addText("Drafting spec with exclusions and acceptance criteria...", "dim");
