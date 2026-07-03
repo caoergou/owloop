@@ -154,7 +154,7 @@
       '<div class="tui-body">' +
         '<div class="tui-left">' +
           '<div class="tui-panel"><div class="tui-panel-title">Status</div>' +
-            '<div class="tui-kv"><span class="tui-key">Model</span><span class="tui-val tui-val-cyan">claude-sonnet-4</span></div>' +
+            '<div class="tui-kv"><span class="tui-key">Model</span><span class="tui-val tui-val-cyan">claude-sonnet-5</span></div>' +
             '<div class="tui-kv"><span class="tui-key">Iteration</span><span class="tui-val">' + f.iter + '</span></div>' +
             '<div class="tui-kv"><span class="tui-key">Branch</span><span class="tui-val tui-val-green">' + esc(f.branch) + '</span></div>' +
             '<div class="tui-kv"><span class="tui-key">Tokens</span><span class="tui-val tui-val-cyan">' + f.tokens + '</span></div>' +
@@ -248,7 +248,7 @@
       await printLines([
         ["Ollie is waking up...", "dim"],
         ["→ worktree: .worktrees/owloop-refactor-errors", "dim"],
-        ["→ model: claude-sonnet-4    budget: 200k tokens", "dim"],
+        ["→ model: claude-sonnet-5    budget: 200k tokens", "dim"],
         ["→ specs: 3 queued", "dim"],
       ], LINE_PAUSE * 0.5);
       await sleep(LINE_PAUSE);
