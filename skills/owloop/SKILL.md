@@ -215,12 +215,12 @@ Trust the AI to self-identify, self-correct, and self-improve. Observe patterns 
 
 ### Auto Mode (Not YOLO)
 
-Owloop still needs full autonomy to run end-to-end without stopping for approval on every edit or command — but that trade-off deserves a deliberate name, not a meme:
+Owloop uses `--permission-mode auto` — Claude Code's official autonomous mode that approves routine tool calls while preserving safety boundaries for destructive operations. This replaces the old `--dangerously-skip-permissions` (YOLO) flag.
 
-- Claude Code: `--dangerously-skip-permissions`
-- Codex: `--dangerously-bypass-approvals-and-sandbox`
+- `--permission-mode auto`: approves reads, writes, lint, test — blocks `rm -rf`, `git push --force`, etc.
+- `--dangerously-skip-permissions`: skips **all** checks — never use this with owloop.
 
-This is **auto mode**: standing approval to keep moving, not a license to skip review. Pair it with worktree isolation below.
+Auto mode is standing approval to keep moving, not a license to skip review. Pair it with worktree isolation below.
 
 ### Worktree Isolation
 
