@@ -9,6 +9,7 @@ tests.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import queue
 import re
@@ -68,7 +69,163 @@ class AgentAdapter(ABC):
         ...
 
 
-class ClaudeCodeAdapter(AgentAdapter):
+class StreamingAgentAdapter(AgentAdapter):
+    """Base class for CLI agents that stream JSON events over a subprocess.
+
+    Owns the subprocess lifecycle, the stdout reader thread, queue-based line
+    streaming, promise-signal extraction, the token-counting fallback, and
+    idle-timeout/process-cleanup handling. Concrete adapters only need to
+    supply `_build_cmd` (how to invoke the CLI) and `_parse_stream_event`
+    (how to turn one raw stdout line into on_line-displayable text).
+    """
+
+    idle_timeout: float
+    token_tracker: TokenTracker
+
+    # Claude receives its prompt via stdin; Kimi receives it as a `--prompt`
+    # CLI arg. Adapters that pass the prompt through argv should set this to
+    # False so `run()` never opens/writes a stdin pipe — writing to a pipe
+    # the child never reads can deadlock once the prompt exceeds the OS pipe
+    # buffer.
+    _write_prompt_to_stdin: bool = True
+
+    @abstractmethod
+    def _build_cmd(self, prompt: str = "") -> list[str]:
+        """Return the argv for invoking the underlying CLI with this prompt."""
+        ...
+
+    @abstractmethod
+    def _parse_stream_event(self, raw: str) -> str | None:
+        """Parse one raw stdout line into on_line-displayable text, or None.
+
+        Implementations may append fragments to `self._result_text_parts` to
+        build the "clean" final transcript used for promise-signal extraction
+        and token counting — this can differ from the returned display text
+        (e.g. Claude's terminal `result` event replaces the whole transcript
+        with a single summary).
+        """
+        ...
+
+    @staticmethod
+    def _killpg(proc: subprocess.Popen) -> None:
+        """Terminate the agent process (and its group when possible)."""
+        if sys.platform == "win32":
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return
+
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+
+    def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
+        self._result_text_parts: list[str] = []
+
+        popen_kwargs: dict = {
+            "cwd": cwd,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+        }
+        if self._write_prompt_to_stdin:
+            popen_kwargs["stdin"] = subprocess.PIPE
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        try:
+            proc = subprocess.Popen(self._build_cmd(prompt), **popen_kwargs)
+        except FileNotFoundError:
+            return AgentResult(
+                stdout="",
+                returncode=127,
+                success=False,
+                has_completion_signal=False,
+                promise_state="",
+                promise_payload="",
+            )
+
+        if self._write_prompt_to_stdin:
+            assert proc.stdin is not None
+            try:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
+
+        assert proc.stdout is not None
+
+        line_queue: queue.Queue[str | None] = queue.Queue()
+
+        def _reader() -> None:
+            try:
+                for raw_line in proc.stdout:  # type: ignore[union-attr]
+                    text = self._parse_stream_event(raw_line)
+                    if text:
+                        for sub_line in text.splitlines():
+                            if sub_line.strip():
+                                line_queue.put(sub_line)
+            finally:
+                line_queue.put(None)
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+
+        output_lines: list[str] = []
+        timed_out = False
+
+        try:
+            while True:
+                try:
+                    line = line_queue.get(timeout=self.idle_timeout)
+                except queue.Empty:
+                    timed_out = True
+                    self._killpg(proc)
+                    break
+                if line is None:
+                    break
+                if line:
+                    output_lines.append(line)
+                    if on_line:
+                        on_line(line)
+
+            if not timed_out:
+                proc.wait()
+        except KeyboardInterrupt:
+            self._killpg(proc)
+            raise
+
+        clean_output = "\n".join(self._result_text_parts) if self._result_text_parts else "\n".join(output_lines)
+        match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
+        parsed = parse_promise_signal(clean_output) if match else None
+        returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
+        tokens_used = self.token_tracker.count_from_text(clean_output)
+
+        return AgentResult(
+            stdout=clean_output,
+            returncode=returncode,
+            success=(returncode == 0 and not timed_out),
+            has_completion_signal=bool(match),
+            done_signal=match.group(0) if match else None,
+            timed_out=timed_out,
+            tokens_used=tokens_used,
+            promise_state=parsed[0] if parsed else "",
+            promise_payload=parsed[1] if parsed else "",
+        )
+
+
+class ClaudeCodeAdapter(StreamingAgentAdapter):
     def __init__(
         self,
         model: str = "claude-sonnet-5",
@@ -118,7 +275,7 @@ class ClaudeCodeAdapter(AgentAdapter):
 
         return issues
 
-    def _build_cmd(self) -> list[str]:
+    def _build_cmd(self, prompt: str = "") -> list[str]:
         return [
             self.claude_cmd,
             "-p",
@@ -130,197 +287,83 @@ class ClaudeCodeAdapter(AgentAdapter):
             "stream-json",
         ]
 
-    @staticmethod
-    def _killpg(proc: subprocess.Popen) -> None:
-        """Terminate the agent process (and its group when possible)."""
-        if sys.platform == "win32":
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            return
-
+    def _parse_stream_event(self, raw: str) -> str | None:
+        """Parse a stream-json line and return displayable text, or None."""
+        raw = raw.strip()
+        if not raw:
+            return None
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-
-    def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
-        popen_kwargs: dict = {
-            "cwd": cwd,
-            "stdin": subprocess.PIPE,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.STDOUT,
-            "text": True,
-            "bufsize": 1,
-        }
-        if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            popen_kwargs["start_new_session"] = True
-
-        try:
-            proc = subprocess.Popen(self._build_cmd(), **popen_kwargs)
-        except FileNotFoundError:
-            return AgentResult(
-                stdout="",
-                returncode=127,
-                success=False,
-                has_completion_signal=False,
-                promise_state="",
-                promise_payload="",
-            )
-
-        assert proc.stdin is not None and proc.stdout is not None
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except BrokenPipeError:
-            pass
-
-        line_queue: queue.Queue[str | None] = queue.Queue()
-        result_text_parts: list[str] = []
-
-        def _parse_stream_event(raw: str) -> str | None:
-            """Parse a stream-json line and return displayable text, or None."""
-            raw = raw.strip()
-            if not raw:
-                return None
-            try:
-                import json as _json
-                event = _json.loads(raw)
-            except (ValueError, TypeError):
-                return None
-
-            etype = event.get("type", "")
-
-            if etype == "assistant":
-                msg = event.get("message", {})
-                parts = []
-                for block in msg.get("content", []):
-                    if block.get("type") == "text":
-                        text = block.get("text", "").strip()
-                        if text and len(text) > 1:
-                            parts.append(text)
-                            if "<promise>" not in text:
-                                result_text_parts.append(text)
-                    elif block.get("type") == "tool_use":
-                        name = block.get("name", "")
-                        inp = block.get("input", {})
-                        if name == "Read":
-                            parts.append(f"[reading {inp.get('file_path', '?')}]")
-                        elif name == "Write":
-                            parts.append(f"[writing {inp.get('file_path', '?')}]")
-                        elif name == "Edit":
-                            parts.append(f"[editing {inp.get('file_path', '?')}]")
-                        elif name in ("Bash", "bash"):
-                            cmd = inp.get("command", "")
-                            cmd = cmd.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
-                            cmd = " ".join(cmd.split()).strip()
-                            if len(cmd) > 100:
-                                cmd = cmd[:97] + "..."
-                            parts.append(f"[running: {cmd}]")
-                        elif name in ("Grep", "Glob", "LSP"):
-                            parts.append(f"[{name.lower()}: {str(inp.get('pattern', inp.get('query', '')))[:60]}]")
-                return "\n".join(parts) if parts else None
-
-            if etype == "tool_result":
-                content = event.get("content", "")
-                if isinstance(content, str) and content.strip():
-                    lines = content.strip().splitlines()
-                    if len(lines) <= 3:
-                        return content.strip()
-                    return f"{lines[0]}\n... ({len(lines)} lines)\n{lines[-1]}"
-                return None
-
-            if etype == "result":
-                text = event.get("result", "")
-                if text:
-                    result_text_parts.clear()
-                    result_text_parts.append(text)
-                usage = event.get("usage", {})
-                cost = event.get("total_cost_usd", 0)
-                in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
-                out_tok = usage.get("output_tokens", 0)
-                model_usage = event.get("modelUsage", {})
-                model_name = next(iter(model_usage), "")
-                parts = []
-                if in_tok or out_tok:
-                    parts.append(f"{in_tok + out_tok:,} tokens ({in_tok:,} in + {out_tok:,} out)")
-                if cost:
-                    parts.append(f"${cost:.4f}")
-                if model_name:
-                    parts.append(model_name)
-                if parts:
-                    return f"[usage: {' · '.join(parts)}]"
-                return None
-
+            event = json.loads(raw)
+        except (ValueError, TypeError):
             return None
 
-        def _reader() -> None:
-            try:
-                for raw_line in proc.stdout:  # type: ignore[union-attr]
-                    text = _parse_stream_event(raw_line)
-                    if text:
-                        for sub_line in text.splitlines():
-                            if sub_line.strip():
-                                line_queue.put(sub_line)
-            finally:
-                line_queue.put(None)
+        etype = event.get("type", "")
 
-        reader_thread = threading.Thread(target=_reader, daemon=True)
-        reader_thread.start()
+        if etype == "assistant":
+            msg = event.get("message", {})
+            parts = []
+            for block in msg.get("content", []):
+                if block.get("type") == "text":
+                    text = block.get("text", "").strip()
+                    if text and len(text) > 1:
+                        parts.append(text)
+                        if "<promise>" not in text:
+                            self._result_text_parts.append(text)
+                elif block.get("type") == "tool_use":
+                    name = block.get("name", "")
+                    inp = block.get("input", {})
+                    if name == "Read":
+                        parts.append(f"[reading {inp.get('file_path', '?')}]")
+                    elif name == "Write":
+                        parts.append(f"[writing {inp.get('file_path', '?')}]")
+                    elif name == "Edit":
+                        parts.append(f"[editing {inp.get('file_path', '?')}]")
+                    elif name in ("Bash", "bash"):
+                        cmd = inp.get("command", "")
+                        cmd = cmd.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+                        cmd = " ".join(cmd.split()).strip()
+                        if len(cmd) > 100:
+                            cmd = cmd[:97] + "..."
+                        parts.append(f"[running: {cmd}]")
+                    elif name in ("Grep", "Glob", "LSP"):
+                        parts.append(f"[{name.lower()}: {str(inp.get('pattern', inp.get('query', '')))[:60]}]")
+            return "\n".join(parts) if parts else None
 
-        output_lines: list[str] = []
-        timed_out = False
+        if etype == "tool_result":
+            content = event.get("content", "")
+            if isinstance(content, str) and content.strip():
+                lines = content.strip().splitlines()
+                if len(lines) <= 3:
+                    return content.strip()
+                return f"{lines[0]}\n... ({len(lines)} lines)\n{lines[-1]}"
+            return None
 
-        try:
-            while True:
-                try:
-                    line = line_queue.get(timeout=self.idle_timeout)
-                except queue.Empty:
-                    timed_out = True
-                    self._killpg(proc)
-                    break
-                if line is None:
-                    break
-                if line:
-                    output_lines.append(line)
-                    if on_line:
-                        on_line(line)
+        if etype == "result":
+            text = event.get("result", "")
+            if text:
+                self._result_text_parts.clear()
+                self._result_text_parts.append(text)
+            usage = event.get("usage", {})
+            cost = event.get("total_cost_usd", 0)
+            in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+            out_tok = usage.get("output_tokens", 0)
+            model_usage = event.get("modelUsage", {})
+            model_name = next(iter(model_usage), "")
+            parts = []
+            if in_tok or out_tok:
+                parts.append(f"{in_tok + out_tok:,} tokens ({in_tok:,} in + {out_tok:,} out)")
+            if cost:
+                parts.append(f"${cost:.4f}")
+            if model_name:
+                parts.append(model_name)
+            if parts:
+                return f"[usage: {' · '.join(parts)}]"
+            return None
 
-            if not timed_out:
-                proc.wait()
-        except KeyboardInterrupt:
-            self._killpg(proc)
-            raise
-
-        clean_output = "\n".join(result_text_parts) if result_text_parts else "\n".join(output_lines)
-        match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
-        parsed = parse_promise_signal(clean_output) if match else None
-        returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
-        tokens_used = self.token_tracker.count_from_text(clean_output)
-
-        return AgentResult(
-            stdout=clean_output,
-            returncode=returncode,
-            success=(returncode == 0 and not timed_out),
-            has_completion_signal=bool(match),
-            done_signal=match.group(0) if match else None,
-            timed_out=timed_out,
-            tokens_used=tokens_used,
-            promise_state=parsed[0] if parsed else "",
-            promise_payload=parsed[1] if parsed else "",
-        )
+        return None
 
 
-class KimiCodeAdapter(AgentAdapter):
+class KimiCodeAdapter(StreamingAgentAdapter):
     """Adapter for Kimi Code CLI (`kimi --prompt`).
 
     Kimi's non-interactive prompt mode uses `--prompt` and `--output-format
@@ -328,6 +371,8 @@ class KimiCodeAdapter(AgentAdapter):
     `--yolo`; the permission mode is taken from the user's Kimi config
     (`default_permission_mode`). For owloop this should be set to `"auto"`.
     """
+
+    _write_prompt_to_stdin = False
 
     def __init__(
         self,
@@ -385,179 +430,67 @@ class KimiCodeAdapter(AgentAdapter):
             cmd.extend(["--prompt", prompt])
         return cmd
 
-    @staticmethod
-    def _killpg(proc: subprocess.Popen) -> None:
-        """Terminate the agent process (and its group when possible)."""
-        if sys.platform == "win32":
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            return
-
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-
-    def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
-        popen_kwargs: dict = {
-            "cwd": cwd,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.STDOUT,
-            "text": True,
-            "bufsize": 1,
-        }
-        if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            popen_kwargs["start_new_session"] = True
-
-        try:
-            proc = subprocess.Popen(self._build_cmd(prompt=prompt), **popen_kwargs)
-        except FileNotFoundError:
-            return AgentResult(
-                stdout="",
-                returncode=127,
-                success=False,
-                has_completion_signal=False,
-                promise_state="",
-                promise_payload="",
-            )
-
-        assert proc.stdout is not None
-        # Kimi reads the prompt from the --prompt argument, not stdin.
-
-        line_queue: queue.Queue[str | None] = queue.Queue()
-        result_text_parts: list[str] = []
-
-        def _parse_stream_event(raw: str) -> str | None:
-            """Parse a Kimi stream-json line and return displayable text, or None."""
-            raw = raw.strip()
-            if not raw:
-                return None
-
-            try:
-                import json as _json
-
-                event = _json.loads(raw)
-            except (ValueError, TypeError):
-                # Kimi sometimes emits raw tool output before the JSON framing.
-                # Surface it as-is so the user can see what happened.
-                stripped = raw.strip()
-                if stripped:
-                    return stripped
-                return None
-
-            role = event.get("role", "")
-
-            if role == "assistant":
-                content = event.get("content", "")
-                if content and isinstance(content, str):
-                    text = content.strip()
-                    if text:
-                        result_text_parts.append(text)
-                        return text
-
-                tool_calls = event.get("tool_calls", [])
-                if tool_calls:
-                    summaries = []
-                    for call in tool_calls:
-                        func = call.get("function", {}) if isinstance(call, dict) else {}
-                        name = func.get("name", "") if isinstance(func, dict) else ""
-                        args = func.get("arguments", "") if isinstance(func, dict) else ""
-                        if name == "Bash":
-                            try:
-                                import json as _json
-
-                                parsed_args = _json.loads(args)
-                                cmd = parsed_args.get("command", "")
-                            except (ValueError, TypeError):
-                                cmd = str(args)
-                            cmd = cmd.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
-                            cmd = " ".join(cmd.split()).strip()
-                            if len(cmd) > 100:
-                                cmd = cmd[:97] + "..."
-                            summaries.append(f"[running: {cmd}]")
-                        elif name:
-                            summaries.append(f"[{name.lower()}]")
-                    return "\n".join(summaries) if summaries else None
-
-            if role == "tool":
-                content = event.get("content", "")
-                if content and isinstance(content, str):
-                    text = content.strip()
-                    if text and "<promise>" in text:
-                        result_text_parts.append(text)
-                    return None  # tool results are verbose; keep them out of the live stream
-
-            if role == "meta":
-                # session.resume_hint and similar metadata; not user-facing
-                return None
-
+    def _parse_stream_event(self, raw: str) -> str | None:
+        """Parse a Kimi stream-json line and return displayable text, or None."""
+        raw = raw.strip()
+        if not raw:
             return None
 
-        def _reader() -> None:
-            try:
-                for raw_line in proc.stdout:  # type: ignore[union-attr]
-                    text = _parse_stream_event(raw_line)
-                    if text:
-                        for sub_line in text.splitlines():
-                            if sub_line.strip():
-                                line_queue.put(sub_line)
-            finally:
-                line_queue.put(None)
-
-        reader_thread = threading.Thread(target=_reader, daemon=True)
-        reader_thread.start()
-
-        output_lines: list[str] = []
-        timed_out = False
-
         try:
-            while True:
-                try:
-                    line = line_queue.get(timeout=self.idle_timeout)
-                except queue.Empty:
-                    timed_out = True
-                    self._killpg(proc)
-                    break
-                if line is None:
-                    break
-                if line:
-                    output_lines.append(line)
-                    if on_line:
-                        on_line(line)
+            event = json.loads(raw)
+        except (ValueError, TypeError):
+            # Kimi sometimes emits raw tool output before the JSON framing.
+            # Surface it as-is so the user can see what happened.
+            stripped = raw.strip()
+            if stripped:
+                return stripped
+            return None
 
-            if not timed_out:
-                proc.wait()
-        except KeyboardInterrupt:
-            self._killpg(proc)
-            raise
+        role = event.get("role", "")
 
-        clean_output = "\n".join(result_text_parts) if result_text_parts else "\n".join(output_lines)
-        match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
-        parsed = parse_promise_signal(clean_output) if match else None
-        returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
-        tokens_used = self.token_tracker.count_from_text(clean_output)
+        if role == "assistant":
+            content = event.get("content", "")
+            if content and isinstance(content, str):
+                text = content.strip()
+                if text:
+                    self._result_text_parts.append(text)
+                    return text
 
-        return AgentResult(
-            stdout=clean_output,
-            returncode=returncode,
-            success=(returncode == 0 and not timed_out),
-            has_completion_signal=bool(match),
-            done_signal=match.group(0) if match else None,
-            timed_out=timed_out,
-            tokens_used=tokens_used,
-            promise_state=parsed[0] if parsed else "",
-            promise_payload=parsed[1] if parsed else "",
-        )
+            tool_calls = event.get("tool_calls", [])
+            if tool_calls:
+                summaries = []
+                for call in tool_calls:
+                    func = call.get("function", {}) if isinstance(call, dict) else {}
+                    name = func.get("name", "") if isinstance(func, dict) else ""
+                    args = func.get("arguments", "") if isinstance(func, dict) else ""
+                    if name == "Bash":
+                        try:
+                            parsed_args = json.loads(args)
+                            cmd = parsed_args.get("command", "")
+                        except (ValueError, TypeError):
+                            cmd = str(args)
+                        cmd = cmd.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+                        cmd = " ".join(cmd.split()).strip()
+                        if len(cmd) > 100:
+                            cmd = cmd[:97] + "..."
+                        summaries.append(f"[running: {cmd}]")
+                    elif name:
+                        summaries.append(f"[{name.lower()}]")
+                return "\n".join(summaries) if summaries else None
+
+        if role == "tool":
+            content = event.get("content", "")
+            if content and isinstance(content, str):
+                text = content.strip()
+                if text and "<promise>" in text:
+                    self._result_text_parts.append(text)
+                return None  # tool results are verbose; keep them out of the live stream
+
+        if role == "meta":
+            # session.resume_hint and similar metadata; not user-facing
+            return None
+
+        return None
 
 
 class MockAdapter(AgentAdapter):

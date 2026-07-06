@@ -1,5 +1,7 @@
 # Feature: refactor: extract common streaming adapter base class to reduce Claude/Kimi duplication
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
