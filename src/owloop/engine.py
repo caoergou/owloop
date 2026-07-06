@@ -71,6 +71,18 @@ assume something doesn't exist without checking.
 ONLY modify files within the scope described in the spec's Requirements section.
 Do NOT touch files listed in the spec's Exclusions section.
 Do NOT modify, delete, or comment out existing tests.
+
+## Final output requirement
+
+After you have committed and pushed, the very last line of your response must be
+exactly one of the following promise signals and nothing else on that line:
+
+- `<promise>DONE</promise>` when the spec is fully implemented and verified.
+- `<promise>BLOCKED:reason</promise>` when an external blocker stops you.
+- `<promise>DECIDE:question</promise>` when you need a human decision.
+
+Do not wrap the promise in a code block, do not add explanatory text after it,
+and do not omit it. The loop relies on this exact line to detect completion.
 """
 
 VERIFIER_PROMPT = """\
