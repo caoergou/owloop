@@ -208,7 +208,8 @@ class ClaudeCodeAdapter(AgentAdapter):
                         text = block.get("text", "").strip()
                         if text and len(text) > 1:
                             parts.append(text)
-                            result_text_parts.append(text)
+                            if "<promise>" not in text:
+                                result_text_parts.append(text)
                     elif block.get("type") == "tool_use":
                         name = block.get("name", "")
                         inp = block.get("input", {})
@@ -241,6 +242,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             if etype == "result":
                 text = event.get("result", "")
                 if text:
+                    result_text_parts.clear()
                     result_text_parts.append(text)
                 usage = event.get("usage", {})
                 cost = event.get("total_cost_usd", 0)

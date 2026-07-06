@@ -235,7 +235,9 @@ class AgentStreamDisplay:
 
     @staticmethod
     def _is_noise(text: str) -> bool:
-        return len(text) < 3 or not any(c.isalnum() for c in text)
+        if len(text) < 3 or not any(c.isalnum() for c in text):
+            return True
+        return "<promise>" in text
 
     def on_line(self, line: str) -> None:
         stripped = line.strip()
@@ -249,15 +251,15 @@ class AgentStreamDisplay:
             self._line_count += 1
             self._char_count += len(stripped)
 
-            self._clear_status()
-
             if stripped.startswith("[usage:"):
                 self._real_tokens = stripped[8:-1]
+                self._clear_status()
                 self._draw_status()
                 return
 
             if self.verbose:
                 elapsed = now - self.start_time
+                self._clear_status()
                 self._print_line(f"  [{elapsed:.1f}s] {stripped}")
                 self._draw_status()
                 return
@@ -266,12 +268,14 @@ class AgentStreamDisplay:
                 self._burst_count += 1
                 if self._burst_count > self.BURST_THRESHOLD:
                     self._burst_suppressed += 1
-                    self._draw_status()
                     return
             else:
-                self._flush_burst()
+                if self._burst_suppressed > 0:
+                    self._clear_status()
+                    self._flush_burst()
                 self._burst_count = 0
 
+            self._clear_status()
             self._print_line(f"  {stripped}")
             self._draw_status()
 
