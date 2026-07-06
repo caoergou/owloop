@@ -62,6 +62,98 @@ def test_run_without_specs_dir():
         assert "No specs found" in result.output
 
 
+def test_run_help_exposes_dry_run_flag():
+    runner = CliRunner()
+    result = runner.invoke(main, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--dry-run" in result.output
+    assert "--one-shot" in result.output
+
+
+def _init_repo_with_spec():
+    import subprocess
+    from pathlib import Path
+    subprocess.run(["git", "init"], check=True, capture_output=True)
+    Path(".owloop/specs").mkdir(parents=True)
+    Path(".owloop/specs/01-test.md").write_text("# spec\n", encoding="utf-8")
+
+
+def test_run_dry_run_flag_forwards_to_engine_runner():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run", "--dry-run"])
+            assert result.exit_code == 0, result.output
+            mock_engine.assert_called_once()
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("dry_run") is True
+
+
+def test_run_one_shot_alias_forwards_dry_run():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run", "--one-shot"])
+            assert result.exit_code == 0, result.output
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("dry_run") is True
+
+
+def test_run_without_dry_run_flag_defaults_false():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run"])
+            assert result.exit_code == 0, result.output
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("dry_run") is False
+
+
+def test_print_dry_run_report_shows_pass_fail_counts():
+    import io
+    from pathlib import Path
+
+    from rich.console import Console
+
+    from owloop.cli import _print_dry_run_report
+    from owloop.engine import DryRunReport, RunSummary
+
+    buffer = io.StringIO()
+    console = Console(no_color=True, file=buffer, width=100)
+    summary = RunSummary(
+        iterations=1,
+        branch="main",
+        cwd=Path("."),
+        main_repo_dir=Path("."),
+        stopped_reason="dry_run_complete",
+        tokens_used=42,
+        dry_run_report=DryRunReport(
+            promise_done=True,
+            acceptance_passed=2,
+            acceptance_failed=1,
+            tokens_used=42,
+            spec_name="01-test.md",
+        ),
+    )
+
+    _print_dry_run_report(console, summary)
+
+    output = buffer.getvalue()
+    assert "Dry-run report" in output
+    assert "2 passed" in output
+    assert "1 failed" in output
+    assert "01-test.md" in output
+
+
 def test_init_requires_git_repo():
     runner = CliRunner()
     with runner.isolated_filesystem():

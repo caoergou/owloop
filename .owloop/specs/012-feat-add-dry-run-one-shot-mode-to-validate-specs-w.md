@@ -1,5 +1,7 @@
 # Feature: feat: add dry-run / one-shot mode to validate specs without burning tokens
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
