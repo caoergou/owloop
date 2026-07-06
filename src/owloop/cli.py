@@ -27,6 +27,7 @@ from owloop.reporter import ConsoleReporter
 from owloop.spec_from_issue import IssueToSpecConverter
 from owloop.spec_generator import SpecGenerationError, SpecGenerator
 from owloop.spec_linter import LintReport, SpecLinter
+from owloop.spec_review import SpecReview
 from owloop.tui import OwloopTUI
 
 DEFAULT_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
@@ -901,7 +902,12 @@ def discover() -> None:
     is_flag=True,
     help="Execute baseline commands and verify they run without error.",
 )
-def check(strict: bool, run_baseline: bool) -> None:
+@click.option(
+    "--review",
+    is_flag=True,
+    help="Run static, executable, and agent review on each spec.",
+)
+def check(strict: bool, run_baseline: bool, review: bool) -> None:
     """Validate all specs before running the loop."""
     ascii, no_color, _compact, verbose = _cli_options()
     console = Console(no_color=no_color)
@@ -913,6 +919,28 @@ def check(strict: bool, run_baseline: bool) -> None:
         console.print("[dim]No specs directory. Run [bold]owloop init[/] first.[/]")
         console.print()
         raise SystemExit(0)
+
+    if review:
+        project_dir = specs_dir.parent
+        reviewer = SpecReview(specs_dir, project_dir=project_dir)
+        has_errors = False
+        has_warnings = False
+        for spec_file in sorted(specs_dir.glob("*.md")):
+            report = reviewer.review(spec_file, auto_fix=True)
+            console.print(f"\n[bold]Review:[/] {spec_file.name}")
+            if report.auto_fixed:
+                console.print(f"  [green]✓ auto-fixed {len(report.auto_fixed)} issue(s)[/]")
+            for finding in report.findings:
+                icon = "✗" if finding.severity == "error" else "⚠"
+                color = _brand.RED if finding.severity == "error" else _brand.AMBER
+                console.print(f"  [{color}]{icon}[/] {finding.message}")
+                if finding.severity == "error":
+                    has_errors = True
+                else:
+                    has_warnings = True
+        if has_errors or (strict and has_warnings):
+            raise SystemExit(1)
+        return
 
     linter = SpecLinter(specs_dir)
     report = linter.lint_all(run_baseline=run_baseline)
