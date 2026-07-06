@@ -391,10 +391,60 @@ def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, verbose
         console.print("[dim]Run[/] [bold]owloop <command> --help[/] [dim]for details.[/]")
 
 
+def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Shared options for the run and go commands."""
+    f = click.option(
+        "--agent", type=click.Choice(["claude", "kimi"]), default="claude",
+        help="Coding agent adapter.", show_default=True,
+    )(f)
+    f = click.option(
+        "--model", default=DEFAULT_MODEL,
+        help="Model to use (or set CLAUDE_MODEL).", show_default=True,
+    )(f)
+    f = click.option(
+        "--verifier-model",
+        help="Claude model for the independent verifier agent (defaults to --model).",
+        default=None,
+    )(f)
+    f = click.option(
+        "--subagents",
+        is_flag=True,
+        default=False,
+        help="Split large iterations into Orient/Implement/Verify subagent phases.",
+    )(f)
+    f = click.option(
+        "--idle-timeout", type=float, default=3600,
+        help="Kill agent after N seconds without output.", show_default=True,
+    )(f)
+    f = click.option(
+        "--max-duration", type=int, default=0,
+        help="Stop loop after N minutes total (0 = unlimited).", show_default=True,
+    )(f)
+    f = click.option(
+        "--max-tokens", type=MaxTokensParamType(), default=0,
+        help="Stop loop after N total tokens (0 = unlimited; supports k/w/m shorthand).", show_default=True,
+    )(f)
+    f = click.option(
+        "--worktree/--no-worktree", default=True,
+        help="Run in an isolated git worktree.", show_default=True,
+    )(f)
+    return f
+
+
 @main.command()
 @click.argument("goal")
-@click.option("--model", default=DEFAULT_MODEL, help="Claude model.", show_default=True)
-def go(goal: str, model: str) -> None:
+@_common_run_options
+def go(
+    goal: str,
+    agent: str,
+    model: str,
+    verifier_model: str | None,
+    subagents: bool,
+    idle_timeout: float,
+    max_duration: int,
+    max_tokens: int,
+    worktree: bool,
+) -> None:
     """One command: init → generate spec(s) → review → start the loop.
 
     \b
@@ -415,7 +465,7 @@ def go(goal: str, model: str) -> None:
         "claude",
         model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
-        idle_timeout=3600,
+        idle_timeout=idle_timeout,
     )
     generator = SpecGenerator(project_dir, adapter)
     stream = AgentStreamDisplay(console, verbose=verbose)
@@ -455,9 +505,11 @@ def go(goal: str, model: str) -> None:
     if start:
         console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
         _run_engine(
-            0, True, model, "claude",
-            3600, 0, 0,
+            0, worktree, model, agent,
+            idle_timeout, max_duration, max_tokens,
             ascii=ascii, no_color=no_color, compact=compact,
+            verifier_model=verifier_model,
+            subagents=subagents,
         )
 
 
@@ -722,46 +774,6 @@ def _run_engine(
 
     if summary.stopped_reason in STOPPED_REASON_EXIT_1:
         raise SystemExit(1)
-
-
-def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Shared options for the run command."""
-    f = click.option(
-        "--agent", type=click.Choice(["claude", "kimi"]), default="claude",
-        help="Coding agent adapter.", show_default=True,
-    )(f)
-    f = click.option(
-        "--model", default=DEFAULT_MODEL,
-        help="Model to use (or set CLAUDE_MODEL).", show_default=True,
-    )(f)
-    f = click.option(
-        "--verifier-model",
-        help="Claude model for the independent verifier agent (defaults to --model).",
-        default=None,
-    )(f)
-    f = click.option(
-        "--subagents",
-        is_flag=True,
-        default=False,
-        help="Split large iterations into Orient/Implement/Verify subagent phases.",
-    )(f)
-    f = click.option(
-        "--idle-timeout", type=float, default=3600,
-        help="Kill agent after N seconds without output.", show_default=True,
-    )(f)
-    f = click.option(
-        "--max-duration", type=int, default=0,
-        help="Stop loop after N minutes total (0 = unlimited).", show_default=True,
-    )(f)
-    f = click.option(
-        "--max-tokens", type=MaxTokensParamType(), default=0,
-        help="Stop loop after N total tokens (0 = unlimited; supports k/w/m shorthand).", show_default=True,
-    )(f)
-    f = click.option(
-        "--worktree/--no-worktree", default=True,
-        help="Run in an isolated git worktree.", show_default=True,
-    )(f)
-    return f
 
 
 @main.command()
