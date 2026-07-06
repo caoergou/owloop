@@ -282,16 +282,23 @@ class AgentStreamDisplay:
 
     def _tick(self) -> None:
         frame = 0
+        first_output_logged = False
         while not self._stop.wait(0.5):
             with self._lock:
                 now = time.monotonic()
                 idle = now - self._last_output
+                elapsed = int(now - self.start_time)
+                mins, secs = divmod(elapsed, 60)
+
                 if idle < self.THINKING_DELAY:
                     continue
 
+                if self.verbose and not first_output_logged and self._char_count == 0:
+                    first_output_logged = True
+                    self.console.print(f"  [dim][{mins}:{secs:02d}] waiting for claude -p to produce output...[/]")
+                    continue
+
                 frame = (frame + 1) % len(self.SPINNERS)
-                elapsed = int(now - self.start_time)
-                mins, secs = divmod(elapsed, 60)
                 tok = self._format_tokens(self._char_count)
 
                 last = ""
@@ -300,8 +307,11 @@ class AgentStreamDisplay:
                     if len(last) > 50:
                         last = last[:47] + "..."
 
+                hint = "waiting for output..." if self._char_count == 0 else ""
                 status = f"  {self.SPINNERS[frame]} {mins}:{secs:02d} · {tok} tokens"
-                if last:
+                if hint:
+                    status += f"  {hint}"
+                elif last:
                     status += f"  │ {last}"
 
                 self._out.write(f"\r\033[K{status}")
@@ -399,6 +409,10 @@ def go(goal: str, model: str) -> None:
     )
     generator = SpecGenerator(project_dir, adapter)
     stream = AgentStreamDisplay(console, verbose=verbose)
+
+    if verbose:
+        console.print(f"  [dim]→ spawning: claude -p --model {model} --permission-mode auto[/]")
+        console.print(f"  [dim]→ cwd: {project_dir}[/]")
 
     try:
         stream.start()

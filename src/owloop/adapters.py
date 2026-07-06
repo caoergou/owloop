@@ -126,6 +126,8 @@ class ClaudeCodeAdapter(AgentAdapter):
             self.model,
             "--permission-mode",
             self.permission_mode,
+            "--output-format",
+            "stream-json",
         ]
 
     @staticmethod
@@ -182,14 +184,64 @@ class ClaudeCodeAdapter(AgentAdapter):
         except BrokenPipeError:
             pass
 
-        # Read stdout on a background thread so the main thread can enforce an
-        # idle timeout (no output for N seconds → assume the agent is stuck).
         line_queue: queue.Queue[str | None] = queue.Queue()
+        result_text_parts: list[str] = []
+
+        def _parse_stream_event(raw: str) -> str | None:
+            """Parse a stream-json line and return displayable text, or None."""
+            raw = raw.strip()
+            if not raw:
+                return None
+            try:
+                import json as _json
+                event = _json.loads(raw)
+            except (ValueError, TypeError):
+                return strip_ansi(raw)
+
+            etype = event.get("type", "")
+
+            if etype == "assistant":
+                msg = event.get("message", {})
+                parts = []
+                for block in msg.get("content", []):
+                    if block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            parts.append(text)
+                            result_text_parts.append(text)
+                    elif block.get("type") == "tool_use":
+                        name = block.get("name", "")
+                        inp = block.get("input", {})
+                        if name == "Read":
+                            parts.append(f"[reading {inp.get('file_path', '?')}]")
+                        elif name == "Write":
+                            parts.append(f"[writing {inp.get('file_path', '?')}]")
+                        elif name == "Edit":
+                            parts.append(f"[editing {inp.get('file_path', '?')}]")
+                        elif name in ("Bash", "bash"):
+                            cmd = inp.get("command", "")
+                            parts.append(f"[running: {cmd[:80]}]")
+                        elif name:
+                            parts.append(f"[{name}]")
+                return "\n".join(parts) if parts else None
+
+            if etype == "result":
+                text = event.get("result", "")
+                if text:
+                    result_text_parts.append(text)
+                return None
+
+            return None
 
         def _reader() -> None:
             try:
                 for raw_line in proc.stdout:  # type: ignore[union-attr]
-                    line_queue.put(strip_ansi(raw_line.rstrip("\n")))
+                    text = _parse_stream_event(raw_line)
+                    if text:
+                        for sub_line in text.splitlines():
+                            line_queue.put(sub_line)
+                    else:
+                        line_queue.put("")
             finally:
                 line_queue.put(None)
 
@@ -209,9 +261,10 @@ class ClaudeCodeAdapter(AgentAdapter):
                     break
                 if line is None:
                     break
-                output_lines.append(line)
-                if on_line:
-                    on_line(line)
+                if line:
+                    output_lines.append(line)
+                    if on_line:
+                        on_line(line)
 
             if not timed_out:
                 proc.wait()
@@ -219,7 +272,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             self._killpg(proc)
             raise
 
-        clean_output = "\n".join(output_lines)
+        clean_output = "\n".join(result_text_parts) if result_text_parts else "\n".join(output_lines)
         match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
         parsed = parse_promise_signal(clean_output) if match else None
         returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
