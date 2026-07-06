@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -430,3 +431,57 @@ def test_copy_dot_dir_syncs_existing_target(tmp_path: Path) -> None:
     assert (existing / "01-old.md").read_text(encoding="utf-8") == "# old"
     assert (existing / "02-new.md").read_text(encoding="utf-8") == "# new"
     assert any(kind == "owloop_dir_copied_synced" for kind, _ in events)
+
+
+def test_resolve_worktree_session_generates_unique_ids(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert session_id
+    assert branch.startswith("owloop/")
+    assert session_id in branch
+    assert session_id in str(path)
+    # Session descriptor should be persisted in the main repo.
+    assert engine._session_file().is_file()
+
+
+def test_resolve_worktree_session_resumes_from_saved_session(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter, resume=True)
+
+    # Pre-populate a previous session descriptor.
+    engine._session_file().parent.mkdir(parents=True, exist_ok=True)
+    engine._session_file().write_text(
+        json.dumps(
+            {"session_id": "abc123", "branch": "owloop/20260706-abc123", "path": "/tmp/wt"}
+        ),
+        encoding="utf-8",
+    )
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert session_id == "abc123"
+    assert branch == "owloop/20260706-abc123"
+    assert str(path) == "/tmp/wt"
+
+
+def test_resolve_worktree_session_resume_falls_back_to_latest_branch(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter, resume=True)
+
+    # No session file; create a local owloop branch so there is something to resume.
+    subprocess.run(["git", "branch", "owloop/20260706-xyz789"], cwd=repo, check=True, capture_output=True)
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert session_id == "xyz789"
+    assert branch == "owloop/20260706-xyz789"
