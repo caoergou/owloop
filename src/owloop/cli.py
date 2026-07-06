@@ -966,7 +966,8 @@ def check(strict: bool, run_baseline: bool, review: bool) -> None:
     "--output",
     "-o",
     type=click.Path(path_type=Path),
-    help="Output path for the HTML report (default: .lavish/owloop_report.html with --ai).",
+    help="Output path for the HTML report (default: .owloop/reports/owloop_report.html with --ai).",
+
 )
 @click.option(
     "--ai/--no-ai",
@@ -1022,7 +1023,7 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
             stream.stop()
 
     if output is None and ai:
-        output = project_dir / ".lavish" / "owloop_report.html"
+        output = project_dir / ".owloop" / "reports" / "owloop_report.html"
 
     generator = ReportGenerator(project_dir)
     try:

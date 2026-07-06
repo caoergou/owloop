@@ -2,12 +2,10 @@
 name: owloop-verify
 description: >-
   Verification pipeline design for Owloop — how to write shell-verifiable
-  acceptance criteria, calibrate baselines, detect common change traps,
-  and build a verification chain that an autonomous loop can evaluate
-  deterministically.
+  acceptance criteria, calibrate baselines, and build a verification chain
+  that an autonomous loop can evaluate deterministically.
   Use when a spec's acceptance criteria are vague, the loop can't tell if
-  it's done, you need to design a verification pipeline, or you want to
-  guard against typical unattended-loop drift.
+  it's done, or you need to design a verification pipeline.
 license: MIT
 compatibility: Requires owloop methodology; works with any agentskills.io-compatible agent
 metadata:
@@ -18,7 +16,9 @@ metadata:
 
 # Owloop Verification
 
-Verification is the keystone of loop engineering. If "done" cannot be checked by a shell command, the loop cannot terminate reliably. This skill teaches how to design verifiable acceptance criteria, calibrate baselines, and guard against the drift that unattended loops naturally produce.
+Verification is the keystone of loop engineering. If "done" cannot be checked by a shell command, the loop cannot terminate reliably.
+
+This skill is the entry point. Detailed reference material lives in the `references/` folder so it can be loaded only when needed.
 
 ## When to Use
 
@@ -27,7 +27,6 @@ Use this skill when:
 - The loop exits without doing real work (already-passing criteria)
 - The loop can never pass (broken infrastructure or impossible targets)
 - You need to design a verification pipeline for a new project
-- You want to add automated change-trap checks to a spec
 
 ## The Golden Rule
 
@@ -38,11 +37,11 @@ Every acceptance criterion must be a **runnable shell command with a concrete ex
 - Bad: "Error handling is properly unified"
 - Bad: "The code works correctly"
 
+For detailed guidance on writing criteria, see [Writing Acceptance Criteria](references/writing-criteria.md).
+
 ## Baseline Calibration
 
 Run the proposed verification command BEFORE the loop starts. Record the current state and set a realistic target.
-
-### Why calibrate?
 
 | Baseline finding | What it means | Action |
 |---|---|---|
@@ -84,8 +83,6 @@ For an autonomous loop, prefer:
 
 Code review and verification overlap: both ask "is this change good enough to merge?" The difference is that verification checks functional correctness, while code review checks engineering quality. In an unattended loop, **only the machine-checkable parts of code review can become gates**.
 
-### What CAN be automated
-
 Add these checks to your verification pipeline when relevant. Treat them as **copy-paste command templates**, not as project-managed executable scripts. Adapt the path and tool names to the project stack.
 
 | Review concern | What to check | Example command |
@@ -101,187 +98,16 @@ Add these checks to your verification pipeline when relevant. Treat them as **co
 
 > **Note:** Do not commit these snippets as `.sh` files inside the project. Project stacks differ too much for one script to be universally correct. Copy the relevant lines into the spec's `## Verification` section and adjust them there.
 
-### What CANNOT be automated
+## Change Traps and Human Review
 
-Do NOT try to express these as acceptance criteria. They require human judgment and should be handled by:
-- Marking the spec `Status: REVIEW_REQUIRED` instead of `COMPLETE`
-- Adding a `## Security Review` or `## Design Review` section
-- Outputting `<promise>BLOCKED:needs-human-review` instead of `<promise>DONE</promise>`
+Unattended loops have predictable failure modes. Before claiming completion, consult:
 
-| Human-judgment concern | Why it can't be automated |
-|---|---|
-| Architecture fit | Requires understanding trade-offs |
-| Naming clarity | Subjective; no shell command can judge |
-| Over-engineering | Requires product context |
-| Security-critical changes | Risk too high for unsupervised agent |
-| UX/design decisions | Needs human taste and context |
+- [Change Trap Checklist](references/change-trap-checklist.md) — 10 common drift patterns and how to detect them.
+- [Human Review Triggers](references/human-review-triggers.md) — when to stop and ask a human, even if all commands pass.
 
-## Change Trap Checklist
+## Pipeline Templates by Stack
 
-Unattended loops have predictable failure modes. Before claiming `<promise>DONE</promise>`, run through this checklist. Skip any item whose command does not apply to the current project stack.
-
-| # | Trap | Why it happens | Quick check |
-|---|---|---|---|
-| 1 | **Assertions removed or weakened** | Agent makes failing tests pass by deleting expectations | `git diff -- tests/ \| grep -E '^-(\s*)(assert\|expect\|EXPECT_)'` |
-| 2 | **Tests commented or skipped** | Agent bypasses failures instead of fixing them | `git diff -- tests/ \| grep -E '(^\+.*#.*test\|^\+.*@pytest\.mark\.skip\|^\+.*\.skip\()' && echo WARNING` |
-| 3 | **Scope creep** | Agent "improves" adjacent code | `git diff --name-only` vs spec scope |
-| 4 | **Lock/config files drift** | Agent adds dependencies or changes tool config | `git diff --stat pyproject.toml uv.lock package.json package-lock.json go.mod Cargo.lock` |
-| 5 | **Debug leftovers** | `print`, `console.log`, `debugger`, `pdb` remain | `git diff --diff-filter=AM -U0 \| grep -E '^\+.*(print\(\|console\.log\|debugger;\|import pdb)'` |
-| 6 | **TODO/FIXME in new code** | Agent defers work instead of finishing | `git diff --diff-filter=AM -U0 \| grep -E '^\+.*(TODO\|FIXME)'` |
-| 7 | **Dead code increase** | Unused imports, variables, functions | `ruff check src/` or `eslint --max-warnings 0` |
-| 8 | **Complexity spike** | Nested conditionals or long functions | `radon cc -nc src/` or ruff complexity rules |
-| 9 | **Secrets or credentials** | Agent hardcodes tokens or passwords | `git diff \| grep -Ei '(password\|secret\|api_key\|token\|private_key\|aws_access_key_id)'` |
-| 10 | **Existing behavior broken** | Change passes new tests but breaks old ones | Run the full test suite, not just the new test |
-
-If any trap is triggered, do one of the following:
-- Fix it and re-verify.
-- If fixing it is outside the spec scope, document it in `## Blockers` and output `<promise>BLOCKED:...>`.
-- If it requires human judgment, output `<promise>BLOCKED:needs-human-review`.
-
-## Human Review Triggers
-
-Even if all shell commands pass, output `<promise>BLOCKED:needs-human-review` instead of `<promise>DONE</promise>` when the spec touches:
-
-- Authentication, authorization, or session handling
-- Database schema or migrations
-- Public API response format, status codes, or serialization
-- External service integrations or network clients
-- CI/CD, deployment, or secret-management configuration
-- Any file outside the spec's stated scope
-- Existing tests that were weakened, skipped, or commented out
-- Backward-compatibility decisions that are ambiguous
-
-When triggered:
-1. Do NOT commit.
-2. Add a `## Review Required` section to the spec explaining what needs human eyes and why.
-3. Output `<promise>BLOCKED:needs-human-review`.
-
-## Verification Pipeline Templates by Stack
-
-Use these as starting points. Copy the relevant blocks into the spec's `## Verification` section and adjust paths/tools to the project.
-
-### Python (uv / ruff / pytest)
-
-```bash
-# 1. Static checks
-uv run ruff check src/ tests/
-uv run mypy src/
-
-# 2. Scope discipline
-git diff --name-only
-
-# 3. Test integrity
-git diff -- tests/ | grep -E '^-(\s*)(assert|expect)' && echo "WARNING: assertions removed"
-
-# 4. Change-trap scan
-git diff --diff-filter=AM -U0 | grep -E '^\+.*(TODO|FIXME|print\(|debugger;|import pdb)'
-
-# 5. Tests
-uv run pytest tests/ -q
-```
-
-### Node / TypeScript (npm / eslint / vitest)
-
-```bash
-# 1. Static checks
-npm run lint
-npm run typecheck
-
-# 2. Scope discipline
-git diff --name-only
-
-# 3. Test integrity
-git diff -- tests/ | grep -E '^-(\s*)(expect|assert|it\(|test\()' && echo "WARNING: tests changed"
-
-# 4. Change-trap scan
-git diff --diff-filter=AM -U0 | grep -E '^\+.*(console\.log|debugger;|TODO|FIXME)'
-
-# 5. Tests
-npm test -- --run
-```
-
-### Go
-
-```bash
-go vet ./...
-go test ./...
-git diff --name-only
-git diff --diff-filter=AM -U0 | grep -E '^\+.*(TODO|FIXME|fmt\.Print)'
-```
-
-### Rust
-
-```bash
-cargo check
-cargo clippy -- -D warnings
-cargo test
-git diff --name-only
-git diff --diff-filter=AM -U0 | grep -E '^\+.*(TODO|FIXME|println!)'
-```
-
-## Writing Acceptance Criteria
-
-### Use exact matching when possible
-
-```bash
-# Exact
-$ uv run pytest tests/test_auth.py -q
-1 passed in 0.03s
-
-# Fuzzy (when exact is fragile)
-$ uv run pytest tests/test_auth.py -q | grep -c passed
-1
-```
-
-### Count-based criteria
-
-```bash
-# Good: bounded count
-$ grep -c "print(" src/ | awk '{s+=$1} END {print s}'
-0
-
-# Good: threshold
-$ uv run ruff check src/ 2>&1 | grep -oP '\d+(?= errors?)' || echo 0
-3
-```
-
-### File existence / content criteria
-
-```bash
-# File exists
-$ test -f src/owloop/adapters.py && echo yes
-yes
-
-# Content present
-$ grep -q "class KimiCodeAdapter" src/owloop/adapters.py && echo yes
-yes
-```
-
-## Common Pitfalls
-
-1. **Criteria that depend on AI judgment**
-   - Bad: "The refactor improves readability."
-   - Good: "`uv run ruff check src/` returns 0 errors."
-
-2. **Criteria that are already true**
-   - Bad: Criterion passes before any work is done.
-   - Fix: Make it stricter or choose a different task.
-
-3. **Criteria that are never true**
-   - Bad: Target is impossible given the baseline.
-   - Fix: Adjust target or split the work.
-
-4. **Flaky criteria**
-   - Bad: Test that passes 80% of the time.
-   - Fix: Exclude flaky tests or make them deterministic.
-
-5. **Criteria outside the agent's control**
-   - Bad: "Deploy to production."
-   - Good: "CI pipeline passes on the branch."
-
-6. **Trusting the agent to self-grade**
-   - Bad: Loop iteration reports "looks good" without running commands.
-   - Good: Every claim is backed by a shell command in the log.
+For ready-to-use verification blocks, see [Pipeline Templates](references/pipeline-templates.md).
 
 ## Verification Checklist for Specs
 
@@ -291,7 +117,7 @@ Before finalizing a spec, ask:
 - [ ] Does each criterion have a concrete expected output?
 - [ ] Did I run the criterion before writing the spec to establish a baseline?
 - [ ] Are pre-existing failures listed in `## Exclusions`?
-- [ ] Is the fastest/cheapest check listed first?
+- [ ] Is the fastest/cheaptest check listed first?
 - [ ] Do the criteria cover both "the change was made" and "nothing else broke"?
 - [ ] Did I include at least one change-trap check?
 - [ ] Did I list human-review triggers if the spec touches auth/DB/API/CI/secrets?
@@ -334,4 +160,7 @@ Expected results:
 
 ## References
 
-- [Automated Code Review Checklist](references/code-review-checklist.md)
+- [Writing Acceptance Criteria](references/writing-criteria.md)
+- [Change Trap Checklist](references/change-trap-checklist.md)
+- [Human Review Triggers](references/human-review-triggers.md)
+- [Pipeline Templates](references/pipeline-templates.md)

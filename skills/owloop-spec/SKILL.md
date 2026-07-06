@@ -177,7 +177,7 @@ Present the user with options (suggest the most appropriate one based on task ty
 
 With all information collected:
 
-1. **Read the template**: Read `.owloop/templates/spec-template.md` (or fall back to `templates/spec-template.md` in legacy projects) for the canonical section structure.
+1. **Read the template**: Read `.owloop/templates/spec-template.md` if it exists (or fall back to `templates/spec-template.md` in legacy projects). If neither exists, use the canonical section structure documented in [references/spec-format.md](references/spec-format.md).
 
 2. **Generate a short name**: Extract a 2-4 word English kebab-case slug from the intent. Examples: `add-rate-limiting`, `fix-login-redirect`, `extract-validation-handler`.
 
@@ -236,9 +236,10 @@ Show the complete spec and the calibration summary:
 > （这份 spec 可以吗？需要调整哪里？）
 
 - User confirms → done. Mention the file path and suggest:
-  - "Run `owloop run` to start the loop"
+  - "Run `owloop run` to start the loop (if the owloop CLI is installed)."
+  - "If the CLI is not available, follow the `owloop-runner` skill to execute the loop manually."
   - "Recommended: watch the first 2-3 iterations to make sure the agent understands the task, then leave it running"
-  - "运行 `owloop run` 启动循环。建议先看前 2-3 轮确认方向正确，再放手让它跑"
+  - "运行 `owloop run` 启动循环（如果已安装 owloop CLI）。如果未安装，参考 `owloop-runner` skill 手工执行循环。建议先看前 2-3 轮确认方向正确，再放手让它跑"
 - User requests changes → edit and re-present. Repeat until confirmed.
 
 ## References
