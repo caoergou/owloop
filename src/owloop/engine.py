@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -120,6 +121,10 @@ class EngineConfig:
     confirm_dirty: Callable[[], bool] | None = None
     confirm_worktree: Callable[[], bool] | None = None
     verifier_adapter: AgentAdapter | None = None
+    # Session identity. When None, the engine generates a fresh id. When
+    # ``resume`` is True, the engine reuses the latest recorded session.
+    session_id: str | None = None
+    resume: bool = False
 
 
 @dataclass
@@ -267,6 +272,95 @@ class OwloopEngine:
         """
         self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied")
 
+    def _session_file(self) -> Path:
+        """Path to the persisted session descriptor in the main repo."""
+        return self.main_repo_dir / ".owloop" / "logs" / "session_latest.json"
+
+    def _load_session(self) -> dict[str, str] | None:
+        """Load the most recent session descriptor if it exists."""
+        path = self._session_file()
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "branch" in data and "path" in data:
+                return data
+        except (json.JSONDecodeError, OSError):
+            return None
+        return None
+
+    def _save_session(self, session_id: str, branch: str, path: Path) -> None:
+        """Persist the current session so ``--resume`` can find it later."""
+        session_path = self._session_file()
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        session_path.write_text(
+            json.dumps(
+                {
+                    "session_id": session_id,
+                    "branch": branch,
+                    "path": str(path),
+                    "started_at": datetime.now().isoformat(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    def _branch_exists(self, branch: str) -> bool:
+        """Return True if a local branch with the given name exists."""
+        result = self._run_git("show-ref", "--verify", f"refs/heads/{branch}")
+        return result.returncode == 0
+
+    def _latest_owloop_branch(self) -> str | None:
+        """Return the most recently committed owloop/* branch, if any."""
+        result = self._run_git(
+            "branch",
+            "--list",
+            "owloop/*",
+            "--format=%(refname:short)",
+            "--sort=-committerdate",
+        )
+        branches = [b for b in result.stdout.splitlines() if b.strip()]
+        return branches[0] if branches else None
+
+    def _resolve_worktree_session(self) -> tuple[str, str, Path]:
+        """Pick or resume a session id and derive branch/worktree path.
+
+        Returns a tuple of (session_id, branch_name, worktree_path).
+        """
+        wt_date = datetime.now().strftime("%Y%m%d")
+        wt_base = self.config.project_dir.parent / f"{self.config.project_dir.name}-owloop-wt"
+
+        if self.config.resume:
+            session = self._load_session()
+            if session is None:
+                branch = self._latest_owloop_branch()
+                if branch is None:
+                    raise RuntimeError(
+                        "--resume requested but no previous owloop session found."
+                    )
+                # Branch format: owloop/<date>-<session_id>
+                session_id = branch.split("/", 1)[1].split("-", 1)[1]
+                wt_path = wt_base / f"owloop-{branch.split('/', 1)[1]}"
+            else:
+                session_id = session["session_id"]
+                branch = session["branch"]
+                wt_path = Path(session["path"])
+            return session_id, branch, wt_path
+
+        session_id = self.config.session_id or uuid.uuid4().hex[:8]
+        branch = f"owloop/{wt_date}-{session_id}"
+        wt_path = wt_base / f"owloop-{wt_date}-{session_id}"
+
+        # Guard against an extremely unlikely collision.
+        while self._branch_exists(branch):
+            session_id = uuid.uuid4().hex[:8]
+            branch = f"owloop/{wt_date}-{session_id}"
+            wt_path = wt_base / f"owloop-{wt_date}-{session_id}"
+
+        self._save_session(session_id, branch, wt_path)
+        return session_id, branch, wt_path
+
     def setup_worktree(self) -> bool:
         """Create/enter an isolated git worktree unless disabled or already inside one.
 
@@ -324,38 +418,40 @@ class OwloopEngine:
             # falling through to the (possibly dirty) main repo.
             self._emit("worktree_auto_created", reason="non_interactive")
 
-        wt_date = datetime.now().strftime("%Y%m%d")
-        wt_branch = f"owloop/{wt_date}"
-        wt_base = self.config.project_dir.parent / f"{self.config.project_dir.name}-owloop-wt"
-        wt_path = wt_base / f"owloop-{wt_date}"
+        session_id, wt_branch, wt_path = self._resolve_worktree_session()
 
         self._emit("worktree_creating", path=str(wt_path), branch=wt_branch)
 
         if wt_path.is_dir():
             self.cwd = wt_path
-            self._emit("worktree_reused", path=str(wt_path))
+            self._emit("worktree_reused", path=str(wt_path), branch=wt_branch)
             self._copy_claude_config(wt_path)
             self._copy_owloop_dir(wt_path)
             return True
 
+        wt_base = wt_path.parent
         wt_base.mkdir(parents=True, exist_ok=True)
-        created = self._run_git("worktree", "add", str(wt_path), "-b", wt_branch)
-        if created.returncode == 0:
-            self.cwd = wt_path
-            self._emit("worktree_created", path=str(wt_path), branch=wt_branch)
-            self._copy_claude_config(wt_path)
-            self._copy_owloop_dir(wt_path)
-            return True
 
-        reused = self._run_git("worktree", "add", str(wt_path), wt_branch)
-        if reused.returncode == 0:
-            self.cwd = wt_path
-            self._emit("worktree_branch_reused", path=str(wt_path), branch=wt_branch)
-            self._copy_claude_config(wt_path)
-            self._copy_owloop_dir(wt_path)
-            return True
+        # If the session branch already exists (e.g., from a previous resume),
+        # attach a new worktree to it; otherwise create a fresh branch.
+        if self._branch_exists(wt_branch):
+            attached = self._run_git("worktree", "add", str(wt_path), wt_branch)
+            if attached.returncode == 0:
+                self.cwd = wt_path
+                self._emit("worktree_branch_reused", path=str(wt_path), branch=wt_branch)
+                self._copy_claude_config(wt_path)
+                self._copy_owloop_dir(wt_path)
+                return True
+        else:
+            created = self._run_git("worktree", "add", str(wt_path), "-b", wt_branch)
+            if created.returncode == 0:
+                self.cwd = wt_path
+                self._emit("worktree_created", path=str(wt_path), branch=wt_branch)
+                self._copy_claude_config(wt_path)
+                self._copy_owloop_dir(wt_path)
+                return True
 
-        self._emit("worktree_failed", stderr=created.stderr)
+        self._emit("worktree_failed", stderr=f"could not create or attach worktree for {wt_branch}")
         return True
 
     def _write_prompt_file(self) -> None:
