@@ -119,3 +119,26 @@ def test_fix_loop_stops_loop(tmp_path: Path) -> None:
     summary = engine.run()
 
     assert summary.stopped_reason == "fix_loop_blocked"
+
+
+def test_trim_learnings_keeps_only_newest_entries() -> None:
+    from owloop.learnings import trim_learnings
+
+    learnings = "\n".join(f"## 2026-01-{i:02d}\nfact {i}\n" for i in range(1, 31))
+    trimmed = trim_learnings(learnings, max_entries=5)
+
+    assert "older learnings omitted" in trimmed
+    assert "fact 30" in trimmed and "fact 26" in trimmed
+    assert "fact 25" not in trimmed and "fact 1\n" not in trimmed
+    assert trim_learnings(learnings, max_entries=50) == learnings
+    assert trim_learnings("no headers here", max_entries=1) == "no headers here"
+
+
+def test_format_learnings_for_prompt_trims_to_cap(tmp_path) -> None:
+    from owloop.learnings import MAX_LEARNING_ENTRIES, format_learnings_for_prompt
+
+    learnings = "\n".join(f"## ts-{i}\nfact {i}\n" for i in range(MAX_LEARNING_ENTRIES + 10))
+    formatted = format_learnings_for_prompt(learnings)
+
+    assert "older learnings omitted" in formatted
+    assert f"fact {MAX_LEARNING_ENTRIES + 9}" in formatted

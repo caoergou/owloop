@@ -14,6 +14,29 @@ from pathlib import Path
 LEARNINGS_FILE_NAME = "learnings.md"
 LEARNING_RE = re.compile(r"<learning>(.*?)</learning>", re.DOTALL)
 
+# Newest learnings carried into each iteration prompt. The file on disk grows
+# without bound across runs; the prompt should not.
+MAX_LEARNING_ENTRIES = 20
+
+_LEARNING_ENTRY_RE = re.compile(r"(?m)^(?=## )")
+
+
+def trim_learnings(learnings: str, max_entries: int = MAX_LEARNING_ENTRIES) -> str:
+    """Keep only the newest ``max_entries`` learning entries for the prompt.
+
+    Content without ``## `` entry headers is returned unchanged.
+    """
+    entries = [e for e in _LEARNING_ENTRY_RE.split(learnings) if e.strip()]
+    dated = [e for e in entries if e.startswith("## ")]
+    if len(dated) <= max_entries:
+        return learnings
+    omitted = len(dated) - max_entries
+    kept = "".join(dated[-max_entries:]).strip()
+    return (
+        f"({omitted} older learnings omitted — full history in .owloop/learnings.md)\n\n"
+        f"{kept}"
+    )
+
 
 def learnings_path(project_dir: Path) -> Path:
     """Return the path to the operational learnings file."""
@@ -45,12 +68,12 @@ def extract_learnings(stdout: str) -> list[str]:
 
 
 def format_learnings_for_prompt(learnings: str) -> str:
-    """Format learnings for injection into a build prompt."""
+    """Format learnings for injection into a build prompt (newest entries only)."""
     if not learnings.strip():
         return ""
     return (
         "Operational learnings from previous iterations:\n\n"
-        f"{learnings.strip()}\n\n"
+        f"{trim_learnings(learnings).strip()}\n\n"
         "Apply these learnings to avoid repeating discovered blockers. "
         "If you discover a new operational fact, wrap it in `<learning>...</learning>` "
         "so it is recorded for future iterations."

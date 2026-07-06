@@ -251,6 +251,32 @@ the gap spec(s). Then output `<promise>DONE</promise>`.
 
 EventCallback = Callable[[str, dict], None]
 
+# Newest run-note entries carried into each iteration prompt. run-notes.md
+# gains an entry per iteration; shipping the whole file makes long runs
+# progressively slower (more input tokens per round) and buries the current
+# task under stale history. The full file stays on disk.
+MAX_RUN_NOTE_ENTRIES = 5
+
+_RUN_NOTE_ENTRY_RE = re.compile(r"(?m)^(?=## Iteration )")
+
+
+def trim_run_notes(notes: str, max_entries: int = MAX_RUN_NOTE_ENTRIES) -> str:
+    """Keep only the newest ``max_entries`` run-note entries for the prompt.
+
+    Content without ``## Iteration`` headers (legacy or hand-written notes)
+    is returned unchanged.
+    """
+    entries = [e for e in _RUN_NOTE_ENTRY_RE.split(notes) if e.strip()]
+    dated = [e for e in entries if e.startswith("## Iteration ")]
+    if len(dated) <= max_entries:
+        return notes
+    omitted = len(dated) - max_entries
+    kept = "".join(dated[-max_entries:]).strip()
+    return (
+        f"({omitted} older iteration notes omitted — full history in run-notes.md)\n\n"
+        f"{kept}"
+    )
+
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -938,7 +964,7 @@ class OwloopEngine:
             sections.append(
                 "The following notes were recorded during previous iterations of this run. "
                 "Read them to avoid repeating mistakes.\n\n"
-                f"{notes}"
+                f"{trim_run_notes(notes)}"
             )
 
         learnings_text = format_learnings_for_prompt(load_learnings(self.cwd))

@@ -1011,3 +1011,19 @@ def test_failure_feedback_injected_into_next_prompt_and_cleared_on_success(
     assert f"test -f {flag}" in retry_prompt
     # The verified success removed the feedback file.
     assert not (repo / ".owloop" / "last-failure.md").exists()
+
+
+def test_trim_run_notes_keeps_only_newest_entries() -> None:
+    from owloop.engine import trim_run_notes
+
+    notes = "\n".join(
+        f"## Iteration {i} — ts\n- Status: success\n- Summary: s{i}\n" for i in range(1, 10)
+    )
+    trimmed = trim_run_notes(notes, max_entries=3)
+
+    assert "older iteration notes omitted" in trimmed
+    assert "s9" in trimmed and "s8" in trimmed and "s7" in trimmed
+    assert "s1" not in trimmed and "s6" not in trimmed
+    # Under the cap (or unstructured content), nothing is touched.
+    assert trim_run_notes("free-form note", max_entries=3) == "free-form note"
+    assert trim_run_notes(notes, max_entries=20) == notes
