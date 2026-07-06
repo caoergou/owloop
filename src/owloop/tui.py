@@ -40,8 +40,6 @@ from owloop._brand import (
     MOON_PHASES_FULL,
     MOON_WHITE,
     NIGHT,
-    OWL_BLINK,
-    OWL_MEDIUM,
     OWL_SLEEP,
     RED,
     SPINNER_FRAMES,
@@ -147,16 +145,25 @@ class OwloopTUI:
             self._render()
 
     def _play_wake_animation(self) -> None:
-        """Show Ollie waking up when the TUI starts."""
-        frames = [
-            (OWL_SLEEP, "Ollie is asleep...", DIM_BLUE),
-            (OWL_BLINK, "Ollie is waking up...", DIM_BLUE),
-            (OWL_MEDIUM, "Ollie is awake and ready", AMBER),
+        """Show a brief wake-up message when the TUI starts."""
+        brand = BRAND_BAR_ASCII if self.ascii else BRAND_BAR
+        captions = [
+            ("Ollie is waking up...", DIM_BLUE),
+            ("Ready to work", AMBER),
         ]
-        for art, caption, border in frames:
-            self._update_owl_panel(art, caption, border)
+        target = "activity" if self._compact else "right"
+        for caption, border in captions:
+            body = Group(
+                Text(""),
+                Text(brand, style=f"bold {AMBER}", justify="center"),
+                Text(""),
+                Text(caption, style=f"italic {MOON_WHITE}", justify="center"),
+            )
+            self.layout[target].update(
+                Panel(body, border_style=border, style=f"on {NIGHT}", padding=(1, 2))
+            )
             self.live.refresh()
-            time.sleep(0.55)
+            time.sleep(0.5)
 
     def __enter__(self) -> OwloopTUI:
         self.live.__enter__()
@@ -466,28 +473,6 @@ class OwloopTUI:
                     rows.append(Text(f"○ {name}", style=f"dim {GRAY}"))
             body = Group(*rows)
         return Panel(body, title="Specs", title_align="left", border_style=DIM_BLUE, style=f"on {NIGHT}")
-
-    def _owl_art_for_phase(self) -> list[str]:
-        s = self.state
-        if s.phase in ("complete", "error"):
-            return OWL_SLEEP
-        if s.phase == "stuck":
-            return OWL_BLINK
-        return OWL_BLINK if s.blink else OWL_MEDIUM
-
-    def _update_owl_panel(self, art: list[str], caption: str, border: str) -> None:
-        panel = self._build_owl_panel(art, caption, border)
-        if self._compact:
-            self.layout["activity"].update(panel)
-        else:
-            self.layout["owl"].update(panel)
-
-    def _build_owl_panel(self, art: list[str], caption: str, border: str) -> Panel:
-        brand = BRAND_BAR_ASCII if self.ascii else BRAND_BAR
-        brand_text = Text(brand, style=f"bold {AMBER}", justify="center")
-        caption_text = Text(caption, style=f"italic {MOON_WHITE}", justify="center")
-        body = Group(Text(""), brand_text, Text(""), caption_text)
-        return Panel(body, border_style=border, style=f"on {NIGHT}", padding=(1, 2))
 
     def _render_owl_scene(self) -> Panel:
         s = self.state
