@@ -127,7 +127,7 @@ This is a starting template for generating a self-contained HTML report without 
 1. Read the latest owloop log from `.owloop/logs/`.
 2. Extract the data: specs, statuses, blockers, verification commands.
 3. Replace the `{{placeholder}}` values in the template.
-4. Write the result to `.lavish/owloop_report.html` or a user-specified path.
+4. Write the result to `.owloop/reports/owloop_report.html` or a user-specified path.
 5. If the environment supports it, offer to open the file in a browser.
 
 ## Design Notes

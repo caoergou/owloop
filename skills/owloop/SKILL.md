@@ -118,13 +118,19 @@ Loop iteration N:
 | `owloop status` | Show specs and completion progress |
 | `owloop report` | Generate HTML summary report |
 
+## Running the Loop Without the CLI
+
+If the owloop Python CLI is not installed, use the **`owloop-runner`** skill to execute the same loop manually through your agent. See `owloop-runner` for the full manual loop lifecycle.
+
 ## Related Skills
 
 Use these companion skills for specific parts of the workflow:
 
 - **`owloop-spec`** — Interactive wizard to create high-quality specs
 - **`owloop-loop-control`** — Promise protocol (DONE/BLOCKED/DECIDE) and stuck behavior
-- **`owloop-verify`** — Baseline calibration and verification pipeline design
+- **`owloop-verify`** — Baseline calibration, change-trap checks, and verification pipeline design
+- **`owloop-runner`** — Manual loop execution when the owloop CLI is unavailable
+- **`owloop-report`** — Generate reviewable reports from loop state
 
 ## References
 

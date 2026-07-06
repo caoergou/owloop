@@ -116,14 +116,14 @@ Prevention:
 
 ## Guardrails
 
-Use these controls to bound an unattended run:
+Use these controls to bound an unattended run. When using the owloop CLI, use the flags shown. When running manually via `owloop-runner`, enforce the same bounds in your loop header or loop log.
 
-| Control | CLI flag | Purpose |
-|---|---|---|
-| Max iterations | `owloop run -n 20` | Stop after N specs/iterations |
-| Max duration | `owloop run --max-duration 120` | Stop after N minutes |
-| Max tokens | `owloop run --max-tokens 200000` | Stop before costs spiral |
-| Idle timeout | `owloop run --idle-timeout 3600` | Kill a stuck agent after N seconds |
+| Control | Generic bound | owloop CLI flag | Purpose |
+|---|---|---|---|
+| Max iterations | `max_iterations: 20` | `owloop run -n 20` | Stop after N specs/iterations |
+| Max duration | `max_duration_minutes: 120` | `owloop run --max-duration 120` | Stop after N minutes |
+| Max tokens | `max_tokens: 200000` | `owloop run --max-tokens 200000` | Stop before costs spiral |
+| Idle timeout | `idle_timeout_seconds: 3600` | `owloop run --idle-timeout 3600` | Kill a stuck agent after N seconds |
 
 Recommendation: always set at least one bound before running overnight.
 
@@ -154,3 +154,9 @@ Before claiming `<promise>DONE</promise>`, verify:
 4. **Infinite retry**
    - Bad: Running the same failing command 10 times hoping for a different result.
    - Good: After 2 failures, document the blocker and output `<promise>BLOCKED:...</promise>`.
+
+## Related Skills
+
+- **`owloop`** — Core loop engineering methodology.
+- **`owloop-runner`** — How to enforce these controls when the owloop CLI is unavailable.
+- **`owloop-verify`** — How to design the verification commands that must pass before outputting `<promise>DONE</promise>`.

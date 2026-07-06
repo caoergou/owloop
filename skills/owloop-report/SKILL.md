@@ -5,7 +5,7 @@ description: >-
   Use when user asks for owloop report, run summary, loop analysis,
   overnight run review, or wants a beautified artifact of what the loop did.
 license: MIT
-compatibility: Requires owloop CLI; works with any agentskills.io-compatible agent
+compatibility: Requires owloop methodology; works with or without the owloop CLI
 metadata:
   author: caoergou
   version: "0.3.0"
@@ -50,7 +50,7 @@ owloop report --no-ai
 owloop report --open
 ```
 
-The built-in command writes to `.lavish/owloop_report.html` by default.
+The built-in command writes to `.owloop/reports/owloop_report.html` by default. The `.owloop/reports/` directory is part of owloop runtime state and should not be committed.
 
 ## What a Good Report Contains
 
@@ -111,7 +111,7 @@ Concrete recommendations:
 
 ## How to Generate a Report
 
-### Option 1: Use `owloop report` (recommended)
+### Option 1: Use `owloop report` (recommended when CLI is available)
 
 ```bash
 # Default AI-powered report
@@ -127,7 +127,19 @@ owloop report --no-ai
 owloop report --open
 ```
 
-### Option 2: Build a custom report from logs
+### Option 2: When the CLI is unavailable
+
+If the owloop CLI is not installed, build the report directly from loop state:
+
+1. Read `.owloop/specs/*.md` to collect spec statuses (`**Status**: COMPLETE`, `## Blockers`, etc.).
+2. Read `.owloop/logs/` or `run-notes.md` for iteration summaries.
+3. Run `git log --oneline` on the loop branch to list commits.
+4. Assemble the report sections described in [What a Good Report Contains](#what-a-good-report-contains).
+5. Write a self-contained HTML or Markdown file to a path the user specifies.
+
+> **Important:** Write reports under `.owloop/reports/` or another gitignored directory so generated artifacts are not committed to the repo.
+
+### Option 3: Build a custom report from logs
 
 If the built-in command is not enough, read the run logs and build a custom artifact:
 
@@ -141,7 +153,7 @@ cat .owloop/logs/owloop_run_*.md
 
 Then create an HTML or Markdown artifact with the sections above.
 
-### Option 3: Build an independent HTML artifact
+### Option 4: Build an independent HTML artifact
 
 If you need a custom report beyond what `owloop report` produces, generate HTML directly. Do not rely on the `lavish` skill.
 
@@ -173,10 +185,14 @@ html = """<!DOCTYPE html>
 </html>
 """
 
-Path(".lavish/owloop_report.html").write_text(html, encoding="utf-8")
+report_path = Path("reports/owloop_report.html")
+report_path.parent.mkdir(parents=True, exist_ok=True)
+report_path.write_text(html, encoding="utf-8")
 ```
 
 For a complete starting template, see [references/report-template.md](references/report-template.md).
+
+> **Note:** Choose a report output path under `.owloop/reports/` or another gitignored directory. Do not commit generated HTML artifacts to the repository.
 
 ## Report Design Guidelines
 
