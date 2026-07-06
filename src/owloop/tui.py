@@ -437,12 +437,11 @@ class OwloopTUI:
         else:
             rows.append(Text("Ready to start", style=f"dim {GRAY}"))
 
-        # Show the most recent meaningful log line as context.
-        recent = [self._clean_log_line(line) for line in s.logs[-6:]]
+        recent = [self._clean_log_line(line) for line in s.logs[-20:]]
         recent = [line for line in recent if line]
         if recent:
             rows.append(Text(""))
-            for line in recent[-3:]:
+            for line in recent[-10:]:
                 rows.append(Text(f"  · {line}", style=f"dim {GRAY}", no_wrap=True, overflow="ellipsis"))
 
         return Panel(
@@ -579,7 +578,7 @@ class OwloopTUI:
         )
         layout["body"].split_row(Layout(name="left", ratio=2), Layout(name="right", ratio=3))
         layout["left"].split(Layout(name="status", size=10), Layout(name="specs", ratio=1))
-        layout["right"].split(Layout(name="owl", size=SCENE_H + 2), Layout(name="activity", ratio=1))
+        layout["right"].update(Layout(name="activity", ratio=1))
         return layout
 
     def _build_compact_layout(self) -> Layout:
@@ -622,8 +621,7 @@ class OwloopTUI:
         else:
             self.layout["status"].update(self._render_status())
             self.layout["specs"].update(self._render_specs())
-            self.layout["owl"].update(self._render_owl_scene())
-            self.layout["activity"].update(self._render_activity())
+            self.layout["right"].update(self._render_activity())
         self.live.refresh()
 
     # ── exit summary ──

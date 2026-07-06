@@ -55,17 +55,16 @@ def test_status_text_uses_ollie_branding():
     assert "Ollie" in text
 
 
-def test_full_layout_includes_owl_and_specs():
+def test_full_layout_includes_right_and_specs():
     tui = OwloopTUI()
     layout = tui._build_layout()
-    assert layout["owl"] is not None
+    assert layout["right"] is not None
     assert layout["specs"] is not None
 
 
-def test_compact_layout_omits_owl_and_specs():
+def test_compact_layout_omits_specs():
     tui = OwloopTUI()
     layout = tui._build_compact_layout()
-    assert "owl" not in layout.children
     assert "specs" not in layout.children
     assert layout["status"] is not None
     assert layout["activity"] is not None
