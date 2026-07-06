@@ -53,7 +53,9 @@ SPEC_TEMPLATE = """\
 - Follow existing project conventions
 
 ## Verification
-After each change: run your lint/test commands, commit only if clean.
+The loop re-runs the Acceptance Criteria commands itself and commits only when
+they pass — you never commit, push, or mark this spec COMPLETE. Do not edit this
+section or the Acceptance Criteria mid-iteration.
 
 Output when complete: `<promise>DONE</promise>`
 """
@@ -698,7 +700,19 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     console.print()
 
 
-STOPPED_REASON_EXIT_1 = {"preflight_failed", "dirty_workspace_declined"}
+# Terminal states that mean "the loop did not finish its work" — surfaced as a
+# non-zero exit so unattended callers (CI, cron, wrappers) can detect it. An
+# exhausted budget is explicitly NOT a success.
+STOPPED_REASON_EXIT_1 = {
+    "preflight_failed",
+    "dirty_workspace_declined",
+    "max_iterations",
+    "max_duration",
+    "max_tokens",
+    "stalled",
+    "fix_loop_blocked",
+    "tampered",
+}
 
 
 def _run_engine(
@@ -709,6 +723,10 @@ def _run_engine(
     session_id: str | None = None, resume: bool = False,
     no_tui: bool = False, dry_run: bool = False,
     max_tokens_per_iteration: int = 0,
+    max_turns_per_iteration: int = 0,
+    max_budget_usd: float = 0.0,
+    keep_retrying: bool = False,
+    rollback: bool = True,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -722,6 +740,8 @@ def _run_engine(
         session_id=session_id,
         resume=resume,
         dry_run=dry_run,
+        keep_retrying=keep_retrying,
+        rollback=rollback,
     )
     adapter = get_adapter(
         agent,
@@ -729,6 +749,8 @@ def _run_engine(
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
         kimi_cmd=os.environ.get("KIMI_CMD", "kimi"),
         idle_timeout=idle_timeout,
+        max_turns=max_turns_per_iteration or None,
+        max_budget_usd=max_budget_usd or None,
     )
 
     if verifier_model:
@@ -870,8 +892,30 @@ def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
     help="Kill a single iteration early if it exceeds N tokens (0 = unlimited; "
     "supports k/w/m shorthand).", show_default=True,
 )
+@click.option(
+    "--max-turns-per-iteration", type=int, default=0,
+    help="Forward --max-turns N to `claude -p` so a single iteration is bounded "
+    "at the source (0 = unlimited; ignored on CLIs without the flag).",
+    show_default=True,
+)
+@click.option(
+    "--max-budget-usd", type=float, default=0.0,
+    help="Forward a per-iteration USD budget cap to the CLI when supported "
+    "(0 = unlimited).", show_default=True,
+)
+@click.option(
+    "--keep-retrying", is_flag=True, default=False,
+    help="Legacy behavior: warn and back off on repeated failures instead of "
+    "hard-stopping with a `stalled` terminal state.",
+)
+@click.option(
+    "--rollback/--no-rollback", default=True, show_default=True,
+    help="Reset the worktree to the last good commit after a failed iteration "
+    "(a discarded-diff patch is saved under .owloop/logs/).",
+)
 @_common_run_options
 def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
+        max_turns_per_iteration: int, max_budget_usd: float, keep_retrying: bool, rollback: bool,
         worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
@@ -893,6 +937,10 @@ def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_toke
         no_tui=no_tui,
         dry_run=dry_run,
         max_tokens_per_iteration=max_tokens_per_iteration,
+        max_turns_per_iteration=max_turns_per_iteration,
+        max_budget_usd=max_budget_usd,
+        keep_retrying=keep_retrying,
+        rollback=rollback,
     )
 
 

@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.text import Text
 
 from owloop import _brand
-from owloop.engine import RunSummary
+from owloop.engine import RunSummary, TerminalState
 from owloop.git_stats import get_recent_commits, total_diff_stats
 
 
@@ -114,6 +114,27 @@ class ConsoleReporter:
                 f"[{_brand.RED}]{self._mark('warn')} "
                 f"{data['consecutive_failures']} consecutive incomplete iterations, {self._status('stuck')}[/]"
             )
+        elif kind == "stalled":
+            c.print(
+                f"[{_brand.RED}]{self._mark('fail')} stalled: {data.get('failures')} × "
+                f"{data.get('reason')} ({data.get('failure_reason', '')}) — stopping[/]"
+            )
+        elif kind == "spec_tampered":
+            c.print(
+                f"[{_brand.RED}]{self._mark('fail')} spec tampering detected "
+                f"(acceptance criteria / backpressure changed mid-iteration) — iteration failed[/]"
+            )
+        elif kind == "verification_gate_passed":
+            c.print(f"[{_brand.GREEN}]{self._mark('ok')} verification gate passed ({data.get('passed', 0)} checks)[/]")
+        elif kind == "verification_gate_failed":
+            c.print(
+                f"[{_brand.RED}]{self._mark('fail')} verification gate failed "
+                f"({data.get('failed', 0)} of {data.get('passed', 0) + data.get('failed', 0)} checks)[/]"
+            )
+        elif kind == "iteration_rolled_back":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} rolled back to {data.get('to_commit')} (failed iteration discarded)[/]")
+        elif kind == "iteration_exhausted":
+            c.print(f"[{_brand.AMBER}]{self._mark('clock')} iteration hit its native turn/token limit[/]")
         elif kind == "fix_loop_warning":
             files = ", ".join(data["files"][:5])
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} detected fix loop: {files} modified for {data['consecutive']} consecutive iterations[/]")
@@ -208,11 +229,24 @@ class ConsoleReporter:
         if hints:
             sections.append(Align.center(Text("\n".join(hints), style=f"dim {_brand.GRAY}")))
 
-        if summary.stopped_reason == "max_tokens":
+        # A run that ran out of budget did not finish its work: never let
+        # `exhausted` (or `stalled`) read as a clean success.
+        if summary.state == TerminalState.EXHAUSTED:
             sections.append(
                 Align.center(
                     Text(
-                        f"{self._mark('warn')} Token budget exhausted — review costs before the next run",
+                        f"{self._mark('warn')} Budget exhausted ({summary.stopped_reason}) — "
+                        f"work is NOT complete; review costs before the next run",
+                        style=f"bold {_brand.RED}",
+                    )
+                )
+            )
+        elif summary.state == TerminalState.STALLED:
+            sections.append(
+                Align.center(
+                    Text(
+                        f"{self._mark('warn')} Stalled ({summary.stopped_reason}) — "
+                        f"no progress; inspect the discarded patches in .owloop/logs/",
                         style=f"bold {_brand.RED}",
                     )
                 )
@@ -228,10 +262,15 @@ class ConsoleReporter:
             c.print(Panel(body, border_style=_brand.RED, padding=(1, 4), width=64))
             return
 
+        # Headline honors the terminal state so "complete" is reserved for a
+        # genuine success — an exhausted or stalled run gets its own wording.
+        incomplete_states = {TerminalState.EXHAUSTED, TerminalState.STALLED}
+        if summary.state in incomplete_states:
+            headline = Text(f"{self._mark('warn')} owloop stopped without finishing", style=f"bold {_brand.RED}")
+            border = _brand.RED
+        else:
+            headline = Text(self._status("complete"), style=f"bold {_brand.AMBER}")
+            border = _brand.AMBER
         owl.stylize(f"dim {_brand.AMBER}")
-        body = Group(
-            owl,
-            Align.center(Text(self._status("complete"), style=f"bold {_brand.AMBER}")),
-            *sections,
-        )
-        c.print(Panel(body, border_style=_brand.AMBER, padding=(1, 4), width=64))
+        body = Group(owl, Align.center(headline), *sections)
+        c.print(Panel(body, border_style=border, padding=(1, 4), width=64))

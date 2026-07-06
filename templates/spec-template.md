@@ -26,12 +26,15 @@
 ## Stuck Behavior
 [What to do if the agent cannot make progress]
 
-If you cannot make progress after 2 attempts at the same error, add a `## Blockers`
-section to this spec describing what's blocking you, commit your partial work, and
-output `<promise>DONE</promise>`.
+If you cannot make progress after 2 attempts at the same error, do not commit or
+claim completion. Output `<promise>BLOCKED:reason</promise>` (external blocker) or
+`<promise>DECIDE:question</promise>` (needs a human decision) so the loop stops for
+guidance. The loop owns git and marks specs complete — you never commit or add a
+`Status: COMPLETE` line yourself.
 
 ## Verification
-[Exact commands to run after each change, before claiming completion]
+[Exact commands the loop re-runs to decide pass/fail — must be runnable outside
+your edits. Do not modify this section or the Acceptance Criteria mid-iteration.]
 
 ```bash
 [test command]
