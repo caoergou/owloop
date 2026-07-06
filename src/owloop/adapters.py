@@ -196,7 +196,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 import json as _json
                 event = _json.loads(raw)
             except (ValueError, TypeError):
-                return strip_ansi(raw)
+                return None
 
             etype = event.get("type", "")
 
@@ -205,7 +205,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 parts = []
                 for block in msg.get("content", []):
                     if block.get("type") == "text":
-                        text = block.get("text", "")
+                        text = block.get("text", "").strip()
                         if text:
                             parts.append(text)
                             result_text_parts.append(text)
@@ -219,10 +219,12 @@ class ClaudeCodeAdapter(AgentAdapter):
                         elif name == "Edit":
                             parts.append(f"[editing {inp.get('file_path', '?')}]")
                         elif name in ("Bash", "bash"):
-                            cmd = inp.get("command", "")
-                            parts.append(f"[running: {cmd[:80]}]")
-                        elif name:
-                            parts.append(f"[{name}]")
+                            cmd = inp.get("command", "").replace("\n", " ").strip()
+                            if len(cmd) > 80:
+                                cmd = cmd[:77] + "..."
+                            parts.append(f"[running: {cmd}]")
+                        elif name in ("Grep", "Glob", "LSP"):
+                            parts.append(f"[{name.lower()}: {str(inp.get('pattern', inp.get('query', '')))[:60]}]")
                 return "\n".join(parts) if parts else None
 
             if etype == "tool_result":
@@ -238,9 +240,6 @@ class ClaudeCodeAdapter(AgentAdapter):
                 text = event.get("result", "")
                 if text:
                     result_text_parts.append(text)
-                return None
-
-            if etype == "system":
                 return None
 
             return None

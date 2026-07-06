@@ -192,15 +192,15 @@ def _cli_options() -> tuple[bool, bool, bool, bool]:
 class AgentStreamDisplay:
     """Live display for streaming agent output.
 
-    Features:
-    - Dim gray output for each meaningful line
-    - Burst folding: rapid-fire lines (file contents) collapsed to "... (N lines)"
-    - Status bar: updates in-place with spinner, elapsed time, ~tokens, last output
-    - Shows status bar when agent is idle (thinking) for >2 seconds
+    Layout: gray output lines scroll above, status bar stays at the bottom.
+
+      [reading backend/app/api/orders.py]         ← scrolling gray
+      Found 23 repeated try/except blocks          ← scrolling gray
+      [running: grep -c "except" *.py]             ← scrolling gray
+      ⠋ 0:32 · ~1.2k tokens                       ← always at bottom
     """
 
     BURST_THRESHOLD = 8
-    THINKING_DELAY = 2.0
     SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(self, console: Console, *, verbose: bool = False) -> None:
@@ -211,14 +211,16 @@ class AgentStreamDisplay:
         self._burst_count = 0
         self._burst_suppressed = 0
         self._char_count = 0
-        self._recent: list[str] = []
+        self._line_count = 0
         self._has_status = False
+        self._frame = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ticker: threading.Thread | None = None
         self._out = console.file or sys.stdout
 
     def start(self) -> None:
+        self._draw_status()
         self._ticker = threading.Thread(target=self._tick, daemon=True)
         self._ticker.start()
 
@@ -240,29 +242,28 @@ class AgentStreamDisplay:
             gap = now - self._last_output
             self._last_output = now
             self._char_count += len(stripped)
-
-            self._recent.append(stripped[:80])
-            if len(self._recent) > 3:
-                self._recent.pop(0)
+            self._line_count += 1
 
             self._clear_status()
 
             if self.verbose:
                 elapsed = now - self.start_time
-                if not stripped.startswith("[") or len(stripped) > 3:
-                    self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                self._draw_status()
                 return
 
             if gap < 0.05:
                 self._burst_count += 1
                 if self._burst_count > self.BURST_THRESHOLD:
                     self._burst_suppressed += 1
+                    self._draw_status()
                     return
             else:
                 self._flush_burst()
                 self._burst_count = 0
 
             self.console.print(f"  [dim]{stripped}[/]")
+            self._draw_status()
 
     def _flush_burst(self) -> None:
         if self._burst_suppressed > 0:
@@ -281,43 +282,26 @@ class AgentStreamDisplay:
             return f"~{tokens / 1000:.1f}k"
         return f"~{tokens}"
 
+    def _build_status(self) -> str:
+        elapsed = int(time.monotonic() - self.start_time)
+        mins, secs = divmod(elapsed, 60)
+        tok = self._format_tokens(self._char_count)
+        self._frame = (self._frame + 1) % len(self.SPINNERS)
+        spinner = self.SPINNERS[self._frame]
+        return f"  {spinner} {mins}:{secs:02d} · {tok} tokens · {self._line_count} lines"
+
+    def _draw_status(self) -> None:
+        status = self._build_status()
+        self._out.write(f"\r\033[K{status}")
+        self._out.flush()
+        self._has_status = True
+
     def _tick(self) -> None:
-        frame = 0
-        first_output_logged = False
         while not self._stop.wait(0.5):
             with self._lock:
-                now = time.monotonic()
-                idle = now - self._last_output
-                elapsed = int(now - self.start_time)
-                mins, secs = divmod(elapsed, 60)
-
-                if idle < self.THINKING_DELAY:
-                    continue
-
-                if self.verbose and not first_output_logged and self._char_count == 0:
-                    first_output_logged = True
-                    self.console.print(f"  [dim][{mins}:{secs:02d}] waiting for claude -p to produce output...[/]")
-                    continue
-
-                frame = (frame + 1) % len(self.SPINNERS)
-                tok = self._format_tokens(self._char_count)
-
-                last = ""
-                if self._recent:
-                    last = self._recent[-1]
-                    if len(last) > 50:
-                        last = last[:47] + "..."
-
-                hint = "waiting for output..." if self._char_count == 0 else ""
-                status = f"  {self.SPINNERS[frame]} {mins}:{secs:02d} · {tok} tokens"
-                if hint:
-                    status += f"  {hint}"
-                elif last:
-                    status += f"  │ {last}"
-
-                self._out.write(f"\r\033[K{status}")
-                self._out.flush()
-                self._has_status = True
+                if self._has_status:
+                    self._out.write(f"\r\033[K{self._build_status()}")
+                    self._out.flush()
 
 
 def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
