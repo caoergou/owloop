@@ -32,7 +32,7 @@ def test_get_adapter_returns_kimi_adapter() -> None:
 
 
 def test_get_adapter_unknown_agent_raises() -> None:
-    with pytest.raises(ValueError, match="unknown agent type"):
+    with pytest.raises(ValueError, match="unknown agent"):
         get_adapter("unknown", model="test")
 
 

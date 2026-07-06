@@ -555,9 +555,17 @@ class OwloopEngine:
             self._emit(event_name, path=str(target))
 
     def _copy_claude_config(self, worktree_path: Path) -> None:
-        """Copy the main repo's .claude/ into a new worktree so project-level
-        permissions/settings still apply there."""
+        """Copy agent config directories into a new worktree.
+
+        ``.claude/`` is always copied (project-level permissions/settings);
+        adapters may declare additional per-tool directories via a
+        ``config_dirs`` attribute (e.g. ``.qoder/`` for the Qoder preset).
+        """
         self._copy_dot_dir(worktree_path, ".claude", "claude_config_copied")
+        extra = getattr(self.adapter, "config_dirs", ()) or ()
+        for name in extra:
+            if name != ".claude":
+                self._copy_dot_dir(worktree_path, name, "agent_config_copied")
 
     def _copy_owloop_dir(self, worktree_path: Path) -> None:
         """Copy the main repo's .owloop/ into a new worktree.

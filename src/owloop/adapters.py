@@ -95,6 +95,27 @@ def record_preflight_pass(cmd: str) -> None:
         pass  # a cold cache next run is the only consequence
 
 
+def terminate_process(proc: subprocess.Popen) -> None:
+    """Terminate an agent process (and its group when possible)."""
+    if sys.platform == "win32":
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return
+
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+
+
 @dataclass
 class AgentResult:
     stdout: str
@@ -143,6 +164,10 @@ class StreamingAgentAdapter(AgentAdapter):
     idle_timeout: float
     token_tracker: TokenTracker
 
+    # Project config directories a worktree needs copies of (see
+    # OwloopEngine._copy_claude_config).
+    config_dirs: tuple[str, ...] = (".claude",)
+
     # Claude receives its prompt via stdin; Kimi receives it as a `--prompt`
     # CLI arg. Adapters that pass the prompt through argv should set this to
     # False so `run()` never opens/writes a stdin pipe — writing to a pipe
@@ -170,23 +195,7 @@ class StreamingAgentAdapter(AgentAdapter):
     @staticmethod
     def _killpg(proc: subprocess.Popen) -> None:
         """Terminate the agent process (and its group when possible)."""
-        if sys.platform == "win32":
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            return
-
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
+        terminate_process(proc)
 
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
         self._result_text_parts: list[str] = []
@@ -674,7 +683,7 @@ class MockAdapter(AgentAdapter):
 def get_adapter(
     agent: str,
     *,
-    model: str,
+    model: str | None = None,
     permission_mode: str = "auto",
     claude_cmd: str = "claude",
     kimi_cmd: str = "kimi",
@@ -682,10 +691,18 @@ def get_adapter(
     token_tracker: TokenTracker | None = None,
     max_turns: int | None = None,
     max_budget_usd: float | None = None,
+    project_dir: Path | None = None,
 ) -> AgentAdapter:
+    """Resolve an agent key to an adapter.
+
+    ``claude`` and ``kimi`` keep their native stream-json adapters; every
+    other key resolves through the preset registry (see presets.py) to the
+    single ACP adapter. ``project_dir`` enables user presets from that
+    project's ``.owloop/agents.toml``.
+    """
     if agent == "claude":
         return ClaudeCodeAdapter(
-            model=model,
+            model=model or os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"),
             permission_mode=permission_mode,
             claude_cmd=claude_cmd,
             idle_timeout=idle_timeout,
@@ -695,10 +712,21 @@ def get_adapter(
         )
     if agent == "kimi":
         return KimiCodeAdapter(
-            model=model,
+            model=model or "kimi-code/kimi-for-coding",
             permission_mode=permission_mode,
             kimi_cmd=kimi_cmd,
             idle_timeout=idle_timeout,
             token_tracker=token_tracker,
         )
-    raise ValueError(f"unknown agent type: {agent!r} (currently only supports 'claude', 'kimi')")
+
+    # Deferred import: acp.py imports from this module.
+    from owloop.acp import AcpAdapter
+    from owloop.presets import get_preset
+
+    preset = get_preset(agent, project_dir)
+    return AcpAdapter(
+        preset,
+        model=model,
+        idle_timeout=idle_timeout,
+        token_tracker=token_tracker,
+    )
