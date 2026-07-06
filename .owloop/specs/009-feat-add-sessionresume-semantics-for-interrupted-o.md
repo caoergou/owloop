@@ -1,5 +1,7 @@
 # Feature: feat: add session/resume semantics for interrupted overnight runs
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
