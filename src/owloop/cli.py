@@ -647,6 +647,7 @@ def _run_engine(
     max_iterations: int, worktree: bool, model: str, agent: str,
     idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
+    verifier_model: str | None = None,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -662,6 +663,14 @@ def _run_engine(
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
         idle_timeout=idle_timeout,
     )
+
+    if verifier_model:
+        config.verifier_adapter = get_adapter(
+            agent,
+            model=verifier_model,
+            claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+            idle_timeout=idle_timeout,
+        )
 
     if sys.stdout.isatty():
         tui = OwloopTUI(ascii=ascii, no_color=no_color, compact=compact)
@@ -722,6 +731,11 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
         help="Claude model to use (or set CLAUDE_MODEL).", show_default=True,
     )(f)
     f = click.option(
+        "--verifier-model",
+        help="Claude model for the independent verifier agent (defaults to --model).",
+        default=None,
+    )(f)
+    f = click.option(
         "--idle-timeout", type=float, default=3600,
         help="Kill agent after N seconds without output.", show_default=True,
     )(f)
@@ -747,7 +761,8 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
 )
 @_common_run_options
 def run(max_iterations: int, worktree: bool, model: str, agent: str,
-        idle_timeout: float, max_duration: int, max_tokens: int) -> None:
+        verifier_model: str | None, idle_timeout: float, max_duration: int,
+        max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact, verbose = _cli_options()
     specs_dir = resolve_specs_dir(Path.cwd())
@@ -761,6 +776,7 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
         max_iterations, worktree, model, agent,
         idle_timeout, max_duration, max_tokens,
         ascii=ascii, no_color=no_color, compact=compact,
+        verifier_model=verifier_model,
     )
 
 

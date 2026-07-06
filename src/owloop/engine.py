@@ -60,6 +60,22 @@ Do NOT touch files listed in the spec's Exclusions section.
 Do NOT modify, delete, or comment out existing tests.
 """
 
+VERIFIER_PROMPT = """\
+# Owloop — Verification Mode
+
+You are an independent verifier. You did NOT write the code. Your job is to
+check whether the highest-priority incomplete spec in specs/ has actually been
+completed.
+
+1. Read the spec file (including Requirements and Acceptance Criteria).
+2. Run each acceptance criterion command exactly as written.
+3. Check the output matches the expected result described in the spec.
+4. If ALL criteria pass, output `<promise>PASS</promise>`.
+5. If ANY criterion fails, output `<promise>FAIL: describe what failed and why</promise>`.
+
+Do NOT modify files. Only run read-only verification commands. Be concise.
+"""
+
 EventCallback = Callable[[str, dict], None]
 
 
@@ -89,6 +105,7 @@ class EngineConfig:
     # None, setup_worktree() keeps the original input()-based behavior.
     confirm_dirty: Callable[[], bool] | None = None
     confirm_worktree: Callable[[], bool] | None = None
+    verifier_adapter: AgentAdapter | None = None
 
 
 @dataclass
@@ -135,6 +152,7 @@ class OwloopEngine:
     def __init__(self, config: EngineConfig, adapter: AgentAdapter, on_event: EventCallback | None = None):
         self.config = config
         self.adapter = adapter
+        self.verifier_adapter = config.verifier_adapter
         self.on_event = on_event or (lambda *_args: None)
         self.cwd = config.project_dir
         self.main_repo_dir = config.project_dir
@@ -468,6 +486,24 @@ class OwloopEngine:
 
         success = result.success and promise_state == "DONE"
 
+        if success and self.verifier_adapter is not None:
+            verifier_result = self._run_verifier(iteration, log_file)
+            if verifier_result.promise_state != "PASS":
+                success = False
+                verifier_tail = "\n".join(
+                    verifier_result.stdout.splitlines()[-self.config.tail_lines :]
+                )
+                tail = f"{tail}\nVerifier: {verifier_tail}".strip()
+                promise_state = "VERIFY_FAIL"
+                promise_payload = verifier_result.promise_payload or verifier_tail
+                self._emit(
+                    "verification_failed",
+                    iteration=iteration,
+                    tail=verifier_tail,
+                )
+            else:
+                self._emit("verification_passed", iteration=iteration)
+
         return IterationResult(
             iteration=iteration,
             success=success,
@@ -480,6 +516,22 @@ class OwloopEngine:
             promise_state=promise_state,
             promise_payload=promise_payload,
         )
+
+    def _run_verifier(self, iteration: int, log_file: Path) -> Any:
+        """Spawn an independent verifier agent to check the work."""
+        self._emit("verification_start", iteration=iteration)
+
+        def _on_line(line: str) -> None:
+            with log_file.open("a", encoding="utf-8") as log_f:
+                log_f.write(line + "\n")
+            self._log_line(line)
+            self._emit("output_line", line=line)
+
+        result = self.verifier_adapter.run(  # type: ignore[union-attr]
+            VERIFIER_PROMPT, cwd=self.cwd, on_line=_on_line
+        )
+        self.tokens_used += result.tokens_used
+        return result
 
     def run(self) -> RunSummary:
         self.log_dir.mkdir(parents=True, exist_ok=True)
