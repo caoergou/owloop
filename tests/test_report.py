@@ -138,3 +138,37 @@ def test_report_renders_ai_insights(tmp_path):
     assert "Review Focus" in html
     assert "Next Actions" in html
     assert "Run pytest" in html
+
+
+def test_report_includes_event_timeline(tmp_path):
+    repo = _make_repo_with_commits(tmp_path)
+    logs_dir = repo / "logs"
+    logs_dir.mkdir()
+    summary = {
+        "branch": "main",
+        "iterations": 2,
+        "cwd": str(repo),
+        "main_repo_dir": str(repo),
+        "stopped_reason": "blocked",
+        "issues": None,
+        "tokens_used": 1234,
+    }
+    (logs_dir / "owloop_summary_latest.json").write_text(__import__("json").dumps(summary), encoding="utf-8")
+
+    events = [
+        {"ts": "2026-07-06T10:00:00", "session_id": "sess1", "kind": "iteration_start", "data": {"iteration": 1}},
+        {"ts": "2026-07-06T10:01:00", "session_id": "sess1", "kind": "iteration_end", "data": {"iteration": 1, "success": True}},
+        {"ts": "2026-07-06T10:02:00", "session_id": "sess1", "kind": "blocked", "data": {"payload": "missing API key"}},
+    ]
+    events_text = "\n".join(__import__("json").dumps(e) for e in events)
+    (logs_dir / "events.jsonl").write_text(events_text, encoding="utf-8")
+
+    generator = ReportGenerator(repo)
+    report_path = generator.generate()
+    html = report_path.read_text(encoding="utf-8")
+
+    assert "Event Timeline" in html
+    assert "iteration_start" in html
+    assert "iteration_end" in html
+    assert "Failure Reasons" in html
+    assert "missing API key" in html

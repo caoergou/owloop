@@ -515,6 +515,87 @@ def test_resolve_worktree_session_resume_falls_back_to_latest_branch(tmp_path: P
     assert branch == "owloop/20260706-xyz789"
 
 
+def _read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_events_jsonl_created(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    events_path = engine._events_log_path()
+    assert not events_path.exists()
+
+    engine._emit("iteration_start", iteration=1)
+
+    assert events_path.is_file()
+    assert events_path.parent == engine.log_dir
+
+
+def test_events_jsonl_schema(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+    engine.session_id = "sess123"
+
+    engine._emit("iteration_start", iteration=1, timestamp="now")
+
+    lines = _read_jsonl(engine._events_log_path())
+    assert len(lines) == 1
+    record = lines[0]
+    assert {"ts", "session_id", "kind", "data"}.issubset(record.keys())
+    assert record["session_id"] == "sess123"
+    assert record["kind"] == "iteration_start"
+    assert record["data"] == {"iteration": 1, "timestamp": "now"}
+
+
+def test_events_jsonl_event_kinds(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+                tokens_used=10,
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, max_iterations=1)
+
+    engine.run()
+
+    kinds = {record["kind"] for record in _read_jsonl(engine._events_log_path())}
+    assert "iteration_start" in kinds
+    assert "iteration_end" in kinds
+    assert "done_signal" in kinds
+
+
+def test_on_event_callback_still_fires(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    engine._emit("iteration_start", iteration=1)
+
+    assert events == [("iteration_start", {"iteration": 1})]
+    # Callback behavior is unchanged even though the event is now also logged.
+    assert _read_jsonl(engine._events_log_path())[0]["kind"] == "iteration_start"
+
+
 class _InterruptingAdapter(MockAdapter):
     """Adapter that completes one iteration, then simulates Ctrl+C on the next."""
 
