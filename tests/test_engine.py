@@ -496,7 +496,7 @@ def test_resolve_worktree_session_resumes_from_saved_session(tmp_path: Path) -> 
 
     assert session_id == "abc123"
     assert branch == "owloop/20260706-abc123"
-    assert str(path) == "/tmp/wt"
+    assert path.as_posix() == "/tmp/wt"
 
 
 def test_resolve_worktree_session_resume_falls_back_to_latest_branch(tmp_path: Path, monkeypatch) -> None:
