@@ -190,10 +190,18 @@ def _cli_options() -> tuple[bool, bool, bool]:
 
 
 class AgentStreamDisplay:
-    """Live display for streaming agent output with thinking indicator and noise folding."""
+    """Live display for streaming agent output.
+
+    Features:
+    - Dim gray output for each meaningful line
+    - Burst folding: rapid-fire lines (file contents) collapsed to "... (N lines)"
+    - Status bar: updates in-place with spinner, elapsed time, ~tokens, last output
+    - Shows status bar when agent is idle (thinking) for >2 seconds
+    """
 
     BURST_THRESHOLD = 8
-    THINKING_DELAY = 3.0
+    THINKING_DELAY = 2.0
+    SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(self, console: Console) -> None:
         self.console = console
@@ -201,10 +209,13 @@ class AgentStreamDisplay:
         self._last_output = time.monotonic()
         self._burst_count = 0
         self._burst_suppressed = 0
-        self._thinking_shown = False
+        self._char_count = 0
+        self._recent: list[str] = []
+        self._has_status = False
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ticker: threading.Thread | None = None
+        self._out = console.file or sys.stdout
 
     def start(self) -> None:
         self._ticker = threading.Thread(target=self._tick, daemon=True)
@@ -215,6 +226,7 @@ class AgentStreamDisplay:
         if self._ticker:
             self._ticker.join(timeout=2)
         with self._lock:
+            self._clear_status()
             self._flush_burst()
 
     def on_line(self, line: str) -> None:
@@ -226,7 +238,13 @@ class AgentStreamDisplay:
             now = time.monotonic()
             gap = now - self._last_output
             self._last_output = now
-            self._thinking_shown = False
+            self._char_count += len(stripped)
+
+            self._recent.append(stripped[:80])
+            if len(self._recent) > 3:
+                self._recent.pop(0)
+
+            self._clear_status()
 
             if gap < 0.05:
                 self._burst_count += 1
@@ -244,19 +262,45 @@ class AgentStreamDisplay:
             self.console.print(f"  [dim]  ... ({self._burst_suppressed} lines)[/]")
             self._burst_suppressed = 0
 
+    def _clear_status(self) -> None:
+        if self._has_status:
+            self._out.write("\r\033[K")
+            self._out.flush()
+            self._has_status = False
+
+    def _format_tokens(self, chars: int) -> str:
+        tokens = chars // 4
+        if tokens >= 1000:
+            return f"~{tokens / 1000:.1f}k"
+        return f"~{tokens}"
+
     def _tick(self) -> None:
-        while not self._stop.wait(1.0):
+        frame = 0
+        while not self._stop.wait(0.5):
             with self._lock:
                 now = time.monotonic()
                 idle = now - self._last_output
+                if idle < self.THINKING_DELAY:
+                    continue
+
+                frame = (frame + 1) % len(self.SPINNERS)
                 elapsed = int(now - self.start_time)
                 mins, secs = divmod(elapsed, 60)
+                tok = self._format_tokens(self._char_count)
 
-                if idle >= self.THINKING_DELAY and not self._thinking_shown:
-                    self._thinking_shown = True
-                    self.console.print(f"  [dim italic]⠋ thinking... ({mins}:{secs:02d})[/]")
-                elif self._thinking_shown and int(idle) % 5 == 0 and idle > 5:
-                    self.console.print(f"  [dim italic]⠋ still thinking... ({mins}:{secs:02d})[/]")
+                last = ""
+                if self._recent:
+                    last = self._recent[-1]
+                    if len(last) > 50:
+                        last = last[:47] + "..."
+
+                status = f"  {self.SPINNERS[frame]} {mins}:{secs:02d} · {tok} tokens"
+                if last:
+                    status += f"  │ {last}"
+
+                self._out.write(f"\r\033[K{status}")
+                self._out.flush()
+                self._has_status = True
 
 
 def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
