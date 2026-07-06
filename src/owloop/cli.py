@@ -248,7 +248,8 @@ class AgentStreamDisplay:
 
             if self.verbose:
                 elapsed = now - self.start_time
-                self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                if len(stripped) > 2:
+                    self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
                 self._draw_status()
                 return
 

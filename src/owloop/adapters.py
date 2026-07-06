@@ -206,7 +206,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 for block in msg.get("content", []):
                     if block.get("type") == "text":
                         text = block.get("text", "").strip()
-                        if text:
+                        if text and len(text) > 1:
                             parts.append(text)
                             result_text_parts.append(text)
                     elif block.get("type") == "tool_use":
@@ -219,9 +219,11 @@ class ClaudeCodeAdapter(AgentAdapter):
                         elif name == "Edit":
                             parts.append(f"[editing {inp.get('file_path', '?')}]")
                         elif name in ("Bash", "bash"):
-                            cmd = inp.get("command", "").replace("\n", " ").strip()
-                            if len(cmd) > 80:
-                                cmd = cmd[:77] + "..."
+                            cmd = inp.get("command", "")
+                            cmd = cmd.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+                            cmd = " ".join(cmd.split()).strip()
+                            if len(cmd) > 100:
+                                cmd = cmd[:97] + "..."
                             parts.append(f"[running: {cmd}]")
                         elif name in ("Grep", "Glob", "LSP"):
                             parts.append(f"[{name.lower()}: {str(inp.get('pattern', inp.get('query', '')))[:60]}]")
