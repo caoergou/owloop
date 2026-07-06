@@ -3,7 +3,10 @@
 ## Priority: [1-5]
 
 ## Requirements
-[What to build — the functional description of the feature]
+[What to build — the functional description of the feature. EARS-style phrasing
+maps cleanly onto shell-verifiable criteria: "WHEN <trigger>, THE SYSTEM SHALL
+<response>", "WHILE <state>, THE SYSTEM SHALL <response>", "IF <condition> THEN
+THE SYSTEM SHALL <response>".]
 
 ## Acceptance Criteria
 [Specific, testable criteria. Prefer exact shell commands with the expected output over vague statements.]
