@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -311,11 +312,14 @@ class AIReportInsightsGenerator:
             return level
         return "medium"
 
-    def generate(self) -> ReportInsights:
+    def generate(
+        self,
+        on_line: Callable[[str], None] | None = None,
+    ) -> ReportInsights:
         """Run the agent and return structured insights."""
         summary = self._load_summary()
         prompt = self._build_prompt(summary)
-        result = self.adapter.run(prompt, cwd=self.project_dir)
+        result = self.adapter.run(prompt, cwd=self.project_dir, on_line=on_line)
         if not result.success:
             raise RuntimeError(f"AI report generation failed (exit {result.returncode})")
 

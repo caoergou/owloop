@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -339,15 +340,40 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     )
     generator = SpecGenerator(project_dir, adapter)
 
+    from rich.status import Status
+    spec_status = Status("Scanning codebase...", console=console, spinner="dots", spinner_style=_brand.AMBER)
+    spec_last_activity = time.monotonic()
+
+    spec_phase_hints = [
+        ("Acceptance Criteria", "Defining acceptance criteria..."),
+        ("Exclusions", "Setting exclusions and constraints..."),
+        ("Baseline", "Calibrating baselines..."),
+        ("# Spec:", "Writing final spec..."),
+        ("DECIDE", "Needs clarification..."),
+        ("DONE", "Spec complete!"),
+    ]
+
     def _on_spec_line(line: str) -> None:
-        if line.strip():
-            console.print(f"  [dim]{line}[/]")
+        nonlocal spec_last_activity
+        stripped = line.strip()
+        if not stripped:
+            return
+        spec_last_activity = time.monotonic()
+        for keyword, phase_msg in spec_phase_hints:
+            if keyword in line:
+                spec_status.update(f"{phase_msg}")
+                break
+        console.print(f"  [dim]{stripped}[/]")
 
     try:
+        spec_status.start()
         spec_path = generator.generate(goal, max_rounds=max_rounds, on_line=_on_spec_line)
     except SpecGenerationError as exc:
+        spec_status.stop()
         console.print(f"\n[red]Error:[/] {exc}")
         raise SystemExit(1) from None
+    finally:
+        spec_status.stop()
 
     spec_content = spec_path.read_text(encoding="utf-8")
     console.print()
@@ -649,14 +675,26 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
             idle_timeout=3600,
         )
         ai_generator = AIReportInsightsGenerator(project_dir, adapter)
+
+        from rich.status import Status
+        report_status = Status("Analyzing run with Claude...", console=console, spinner="dots", spinner_style=_brand.AMBER)
+
+        def _on_report_line(line: str) -> None:
+            if line.strip():
+                console.print(f"  [dim]{line.strip()}[/]")
+
         try:
-            insights = ai_generator.generate()
+            report_status.start()
+            insights = ai_generator.generate(on_line=_on_report_line)
         except FileNotFoundError:
+            report_status.stop()
             console.print("[red]Error:[/] No run summary found. Run [bold]owloop run[/] first.")
             raise SystemExit(1) from None
         except RuntimeError as exc:
             console.print(f"[{_brand.AMBER}]⚠ AI insights failed:[/] {exc}")
             console.print("[dim]Falling back to static report. Use --no-ai to skip AI.[/]")
+        finally:
+            report_status.stop()
 
     if output is None and ai:
         output = project_dir / ".lavish" / "owloop_report.html"
