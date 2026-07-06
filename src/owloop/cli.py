@@ -256,7 +256,7 @@ class AgentStreamDisplay:
 
             if self.verbose:
                 elapsed = now - self.start_time
-                self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                self._print_line(f"  [{elapsed:.1f}s] {stripped}")
                 self._draw_status()
                 return
 
@@ -270,13 +270,17 @@ class AgentStreamDisplay:
                 self._flush_burst()
                 self._burst_count = 0
 
-            self.console.print(f"  [dim]{stripped}[/]")
+            self._print_line(f"  {stripped}")
             self._draw_status()
 
     def _flush_burst(self) -> None:
         if self._burst_suppressed > 0:
-            self.console.print(f"  [dim]  ... ({self._burst_suppressed} lines)[/]")
+            self._print_line(f"  ... ({self._burst_suppressed} lines)")
             self._burst_suppressed = 0
+
+    def _print_line(self, text: str) -> None:
+        self._out.write(f"\033[90m{text}\033[0m\n")
+        self._out.flush()
 
     def _clear_status(self) -> None:
         if self._has_status:
