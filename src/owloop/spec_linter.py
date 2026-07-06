@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
+from owloop import spec_queue
 from owloop.backpressure import load_backpressure
 
 
@@ -96,7 +97,21 @@ class SpecLinter:
 
         for spec_file in sorted(self.specs_dir.glob("*.md")):
             report.results[spec_file.name] = self.lint_spec(spec_file, run_baseline=run_baseline)
+
+        self._check_dependency_cycle(report)
         return report
+
+    def _check_dependency_cycle(self, report: LintReport) -> None:
+        """Flag every spec in a Depends On cycle with a clear error."""
+        graph = spec_queue.build_dependency_graph(self.specs_dir)
+        cycle = spec_queue.find_cycle(graph)
+        if cycle is None:
+            return
+
+        chain = " -> ".join(spec.name for spec in cycle)
+        message = f"circular spec dependency detected: {chain}"
+        for spec in cycle[:-1]:
+            report.results.setdefault(spec.name, []).append(Finding("error", message))
 
     def lint_spec(self, spec_file: Path, run_baseline: bool = False) -> list[Finding]:
         """Lint a single spec file and return all findings."""

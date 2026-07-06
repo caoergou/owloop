@@ -389,6 +389,34 @@ def test_run_no_signal_counts_as_failure(tmp_path: Path, monkeypatch) -> None:
     assert not any(kind in {"blocked", "decide"} for kind, _ in events)
 
 
+def test_engine_picks_dependency_ready_spec(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    engine = _make_engine(repo, MockAdapter())
+    specs_dir = repo / ".owloop" / "specs"
+    specs_dir.mkdir(parents=True)
+
+    # 001-a has the lowest filename/priority but depends on 002-b, which is
+    # still incomplete, so raw filename order would pick the wrong spec.
+    (specs_dir / "001-a.md").write_text(
+        "# Spec: a\n\n## Priority: 1\n\n## Depends On\n- 002-b\n\n"
+        "## Requirements\nDo a thing.\n",
+        encoding="utf-8",
+    )
+    (specs_dir / "002-b.md").write_text(
+        "# Spec: b\n\n## Priority: 5\n\n## Requirements\nDo a thing.\n",
+        encoding="utf-8",
+    )
+    (specs_dir / "003-c.md").write_text(
+        "# Spec: c\n\n## Priority: 2\n\n## Requirements\nDo a thing.\n",
+        encoding="utf-8",
+    )
+
+    status = engine._spec_status()
+
+    assert status["first_incomplete"] == "003-c.md"
+
+
 def test_copy_dot_dir_creates_target_when_missing(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

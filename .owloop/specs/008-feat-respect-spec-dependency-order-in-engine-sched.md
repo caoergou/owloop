@@ -55,6 +55,32 @@ uv run mypy src/owloop tests
 - No `tests/test_spec_queue.py` exists.
 - `uv run pytest tests/ -q` currently passes.
 
+## Blockers
+
+Implemented in full: `## Depends On` parsing, priority parsing, dependency-graph
+building, `find_cycle`, and `get_next_ready_spec` in `src/owloop/spec_queue.py`;
+cycle detection wired into `SpecLinter.lint_all` (`spec_linter.py`); `engine.py`'s
+`_spec_status()` now calls `spec_queue.get_next_ready_spec` instead of picking
+`incomplete[0]` by raw filename order.
+
+3 of 4 Acceptance Criteria pass:
+- `uv run pytest tests/test_spec_queue.py -q` → 19 passed.
+- `uv run pytest tests/test_spec_linter.py::test_circular_spec_dependency_fails -q` → 1 passed.
+- `uv run pytest tests/test_engine.py::test_engine_picks_dependency_ready_spec -q` → 1 passed.
+- `uv run owloop check --strict` → still exits `1` with `3 errors, 7 warnings`. Verified this
+  is unchanged from before this feature (same counts, same messages) — none are caused by
+  dependency/cycle checks added here. They come from `01-restore-banner-command-list.md`
+  (missing top-level title, an Exclusions/Requirements contradiction) and
+  `02-auto-discover-backpressure-commands.md` (an Exclusions/Requirements contradiction),
+  plus a missing `<promise>DONE</promise>` warning on 6 older, already-shipped specs
+  (`02`, `03`, `04`, `05`, `06`, `014`). Fixing those means editing 8 spec files with no
+  relation to spec dependency ordering, outside this spec's Requirements scope
+  ("ONLY modify files within the scope described in the spec's Requirements section").
+
+This needs a human call: either amend this criterion to scope `owloop check --strict`
+to files touched by this feature, or explicitly authorize a follow-up spec to clean up
+the pre-existing lint debt in those 8 spec files.
+
 Output when complete:
 
 <promise>DONE</promise>
