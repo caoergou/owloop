@@ -222,55 +222,54 @@ def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
 @click.option("--ascii", is_flag=True, default=False, help="Use ASCII art instead of Unicode glyphs.")
 @click.option("--no-color", is_flag=True, default=False, help="Disable colored terminal output.")
 @click.option("--compact", is_flag=True, default=False, help="Force the compact single-column TUI layout.")
-@click.argument("goal", required=False, default=None)
 @click.pass_context
-def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, goal: str | None) -> None:
-    """🦉 owloop — Your code evolves while you sleep.
-
-    \b
-    Quick start:
-        owloop "refactor error handling"   # one command does it all
-    \b
-    Or step by step:
-        owloop spec "goal"    # generate specs
-        owloop run            # start the loop
-    """
+def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool) -> None:
+    """🦉 owloop — Your code evolves while you sleep."""
     ctx.ensure_object(dict)
     ctx.obj["ascii"] = ascii
     ctx.obj["no_color"] = no_color
     ctx.obj["compact"] = compact
-
-    if ctx.invoked_subcommand is not None:
-        return
-
     console = Console(no_color=no_color)
 
-    if goal is None:
+    if ctx.invoked_subcommand is None:
         console.print(_banner_text(ascii=ascii, no_color=no_color))
         console.print(f"[dim]{_brand.TAGLINE}[/]\n")
         console.print("Quick start:")
-        console.print('  [bold]owloop "your goal"[/]  One command: init → spec → run')
+        console.print('  [bold]owloop go "your goal"[/]  One command: init → spec → run')
         console.print()
         console.print("Commands:")
+        console.print("  [bold]owloop go[/]      One-command flow (init + spec + run)")
         console.print("  [bold]owloop spec[/]    Generate specs from a goal")
         console.print("  [bold]owloop run[/]     Start the autonomous loop")
         console.print("  [bold]owloop status[/]  Show current specs and progress")
         console.print("  [bold]owloop report[/]  Generate HTML summary report")
         console.print()
         console.print("[dim]Run[/] [bold]owloop <command> --help[/] [dim]for details.[/]")
-        return
 
-    # ── One-command flow: owloop "goal" ──
+
+@main.command()
+@click.argument("goal")
+@click.option("--model", default=DEFAULT_MODEL, help="Claude model.", show_default=True)
+def go(goal: str, model: str) -> None:
+    """One command: init → generate spec(s) → review → start the loop.
+
+    \b
+    Example:
+        owloop go "refactor error handling in the API layer"
+    """
+    ascii, no_color, compact = _cli_options()
+    console = Console(no_color=no_color)
+    project_dir = Path.cwd()
+
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[dim]Goal:[/] {goal}\n")
 
-    project_dir = Path.cwd()
     _ensure_init(project_dir, console, ascii=ascii)
 
     adapter = get_adapter(
         "claude",
-        model=os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL),
+        model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
         idle_timeout=3600,
     )
@@ -309,7 +308,7 @@ def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, goal: s
     if start:
         console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
         _run_engine(
-            0, True, os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL), "claude",
+            0, True, model, "claude",
             3600, 0, 0,
             ascii=ascii, no_color=no_color, compact=compact,
         )

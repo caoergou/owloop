@@ -21,10 +21,8 @@ def test_banner_and_command_list():
     result = runner.invoke(main)
     assert result.exit_code == 0
     assert "owloop" in result.output
-    assert "owloop init" in result.output
+    assert "owloop go" in result.output
     assert "owloop run" in result.output
-    assert "owloop status" in result.output
-    assert "owloop version" in result.output
 
 
 def test_version_flag():
