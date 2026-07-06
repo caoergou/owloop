@@ -60,6 +60,12 @@ Output when complete: `<promise>DONE</promise>`
 
 
 CHECKED_BOX_RE = re.compile(r"- \[[xX]\]")
+# Mirrors the `**Status**: COMPLETE` convention spec_queue._COMPLETE_RE looks for,
+# so `owloop status` classifies specs the same way the engine's queue does.
+_STATUS_DONE_RE = re.compile(r"^(#{1,3} )?(\*\*)?status(\*\*)?:\s+complete", re.MULTILINE | re.IGNORECASE)
+_STATUS_IN_PROGRESS_RE = re.compile(
+    r"^(#{1,3} )?(\*\*)?status(\*\*)?:\s+in progress", re.MULTILINE | re.IGNORECASE
+)
 
 MAX_TOKENS_UNITS = {
     "k": 1_000,
@@ -117,10 +123,9 @@ class MaxTokensParamType(click.ParamType):
 
 
 def classify_spec(content: str) -> str:
-    lowered = content.lower()
-    if "status: complete" in lowered:
+    if _STATUS_DONE_RE.search(content):
         return "done"
-    if "status: in progress" in lowered:
+    if _STATUS_IN_PROGRESS_RE.search(content):
         return "in_progress"
     if CHECKED_BOX_RE.search(content):
         return "in_progress"
