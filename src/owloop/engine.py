@@ -30,6 +30,7 @@ from owloop.adapters import AgentAdapter
 from owloop.paths import resolve_logs_dir, resolve_owloop_dir, resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.sleep_inhibitor import SleepInhibitor
+from owloop.subagents import SubagentOrchestrator
 
 BUILD_PROMPT = """\
 # Owloop — Build Mode
@@ -100,6 +101,8 @@ class EngineConfig:
     max_retry_delay: float = 60.0
     fix_loop_threshold: int = 3
     tail_lines: int = 5
+    use_subagents: bool = False
+    subagent_file_threshold: int = 3
     # Optional confirm callbacks so a caller (e.g. the TUI) can render its own
     # styled prompt instead of the engine falling back to raw input(). When
     # None, setup_worktree() keeps the original input()-based behavior.
@@ -120,6 +123,7 @@ class IterationResult:
     summary: str = ""
     promise_state: str = ""
     promise_payload: str = ""
+    stdout: str = ""
 
 
 @dataclass
@@ -465,7 +469,13 @@ class OwloopEngine:
                 self._log_line(line)
                 self._emit("output_line", line=line)
 
-            result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
+            if self.config.use_subagents:
+                orchestrator = SubagentOrchestrator(
+                    self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
+                )
+                result = orchestrator.run()
+            else:
+                result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
 
         tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
         parsed = parse_promise_signal(result.stdout)
@@ -486,7 +496,7 @@ class OwloopEngine:
 
         success = result.success and promise_state == "DONE"
 
-        if success and self.verifier_adapter is not None:
+        if success and self.verifier_adapter is not None and not self.config.use_subagents:
             verifier_result = self._run_verifier(iteration, log_file)
             if verifier_result.promise_state != "PASS":
                 success = False
@@ -515,6 +525,7 @@ class OwloopEngine:
             summary=tail,
             promise_state=promise_state,
             promise_payload=promise_payload,
+            stdout=result.stdout,
         )
 
     def _run_verifier(self, iteration: int, log_file: Path) -> Any:

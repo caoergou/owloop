@@ -648,7 +648,7 @@ def _run_engine(
     max_iterations: int, worktree: bool, model: str, agent: str,
     idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
-    verifier_model: str | None = None,
+    verifier_model: str | None = None, subagents: bool = False,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -657,11 +657,13 @@ def _run_engine(
         max_tokens=max_tokens,
         idle_timeout=idle_timeout,
         worktree=worktree,
+        use_subagents=subagents,
     )
     adapter = get_adapter(
         agent,
         model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+        kimi_cmd=os.environ.get("KIMI_CMD", "kimi"),
         idle_timeout=idle_timeout,
     )
 
@@ -670,6 +672,7 @@ def _run_engine(
             agent,
             model=verifier_model,
             claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+            kimi_cmd=os.environ.get("KIMI_CMD", "kimi"),
             idle_timeout=idle_timeout,
         )
 
@@ -724,17 +727,23 @@ def _run_engine(
 def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
     """Shared options for the run command."""
     f = click.option(
-        "--agent", type=click.Choice(["claude"]), default="claude",
+        "--agent", type=click.Choice(["claude", "kimi"]), default="claude",
         help="Coding agent adapter.", show_default=True,
     )(f)
     f = click.option(
         "--model", default=DEFAULT_MODEL,
-        help="Claude model to use (or set CLAUDE_MODEL).", show_default=True,
+        help="Model to use (or set CLAUDE_MODEL).", show_default=True,
     )(f)
     f = click.option(
         "--verifier-model",
         help="Claude model for the independent verifier agent (defaults to --model).",
         default=None,
+    )(f)
+    f = click.option(
+        "--subagents",
+        is_flag=True,
+        default=False,
+        help="Split large iterations into Orient/Implement/Verify subagent phases.",
     )(f)
     f = click.option(
         "--idle-timeout", type=float, default=3600,
@@ -762,8 +771,8 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
 )
 @_common_run_options
 def run(max_iterations: int, worktree: bool, model: str, agent: str,
-        verifier_model: str | None, idle_timeout: float, max_duration: int,
-        max_tokens: int) -> None:
+        verifier_model: str | None, subagents: bool, idle_timeout: float,
+        max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact, verbose = _cli_options()
     specs_dir = resolve_specs_dir(Path.cwd())
@@ -778,6 +787,7 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
         idle_timeout, max_duration, max_tokens,
         ascii=ascii, no_color=no_color, compact=compact,
         verifier_model=verifier_model,
+        subagents=subagents,
     )
 
 

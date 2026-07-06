@@ -1,9 +1,9 @@
 """Agent adapter abstraction — decouples the engine from any one coding-agent CLI.
 
-`OwloopEngine` only ever talks to an `AgentAdapter`. Today the only real
-implementation is `ClaudeCodeAdapter` (shells out to `claude -p`), but the
-interface leaves room for future adapters (Codex, OpenCode, ...) and for a
-`MockAdapter` in tests without touching engine code.
+`OwloopEngine` only ever talks to an `AgentAdapter`. Today the real
+implementations are `ClaudeCodeAdapter` (shells out to `claude -p`) and
+`KimiCodeAdapter` (shells out to `kimi --prompt`), with `MockAdapter` for
+tests.
 """
 
 from __future__ import annotations
@@ -320,6 +320,251 @@ class ClaudeCodeAdapter(AgentAdapter):
         )
 
 
+class KimiCodeAdapter(AgentAdapter):
+    """Adapter for Kimi Code CLI (`kimi --prompt`).
+
+    Kimi's non-interactive prompt mode uses `--prompt` and `--output-format
+    stream-json`. Notably, `--prompt` cannot be combined with `--auto` or
+    `--yolo`; the permission mode is taken from the user's Kimi config
+    (`default_permission_mode`). For owloop this should be set to `"auto"`.
+    """
+
+    def __init__(
+        self,
+        model: str = "kimi-code/kimi-for-coding",
+        permission_mode: str = "auto",
+        kimi_cmd: str = "kimi",
+        idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+        token_tracker: TokenTracker | None = None,
+    ) -> None:
+        self.model = model
+        self.permission_mode = permission_mode
+        self.kimi_cmd = kimi_cmd
+        self.idle_timeout = idle_timeout
+        self.token_tracker = token_tracker or TokenTracker()
+
+    @property
+    def name(self) -> str:
+        return f"Kimi Code CLI ({self.model})"
+
+    def preflight(self) -> list[str]:
+        issues: list[str] = []
+
+        if not shutil.which(self.kimi_cmd):
+            issues.append(f"{self.kimi_cmd} command not found, please install Kimi Code CLI")
+            return issues
+
+        try:
+            probe = subprocess.run(
+                self._build_cmd(),
+                input="respond with just ok",
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if probe.returncode != 0:
+                detail = (probe.stderr or probe.stdout).strip().splitlines()
+                tail = detail[-1] if detail else "(no output)"
+                issues.append(f"kimi smoke test failed (returncode={probe.returncode}): {tail}")
+        except subprocess.TimeoutExpired:
+            issues.append("kimi smoke test timed out (30s), please check network connection or login status")
+        except OSError as exc:
+            issues.append(f"kimi smoke test error: {exc}")
+
+        return issues
+
+    def _build_cmd(self) -> list[str]:
+        # `--auto` and `--yolo` are interactive-mode flags and cannot be
+        # combined with `--prompt`. The effective permission mode is controlled
+        # by `default_permission_mode` in the user's Kimi config.
+        return [
+            self.kimi_cmd,
+            "--prompt",
+            "-",  # read prompt from stdin
+            "--output-format",
+            "stream-json",
+        ]
+
+    @staticmethod
+    def _killpg(proc: subprocess.Popen) -> None:
+        """Terminate the agent process (and its group when possible)."""
+        if sys.platform == "win32":
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return
+
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+
+    def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
+        popen_kwargs: dict = {
+            "cwd": cwd,
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+        }
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        try:
+            proc = subprocess.Popen(self._build_cmd(), **popen_kwargs)
+        except FileNotFoundError:
+            return AgentResult(
+                stdout="",
+                returncode=127,
+                success=False,
+                has_completion_signal=False,
+                promise_state="",
+                promise_payload="",
+            )
+
+        assert proc.stdin is not None and proc.stdout is not None
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass
+
+        line_queue: queue.Queue[str | None] = queue.Queue()
+        result_text_parts: list[str] = []
+
+        def _parse_stream_event(raw: str) -> str | None:
+            """Parse a Kimi stream-json line and return displayable text, or None."""
+            raw = raw.strip()
+            if not raw:
+                return None
+
+            try:
+                import json as _json
+
+                event = _json.loads(raw)
+            except (ValueError, TypeError):
+                # Kimi sometimes emits raw tool output before the JSON framing.
+                # Surface it as-is so the user can see what happened.
+                stripped = raw.strip()
+                if stripped:
+                    return stripped
+                return None
+
+            role = event.get("role", "")
+
+            if role == "assistant":
+                content = event.get("content", "")
+                if content and isinstance(content, str):
+                    text = content.strip()
+                    if text:
+                        result_text_parts.append(text)
+                        return text
+
+                tool_calls = event.get("tool_calls", [])
+                if tool_calls:
+                    summaries = []
+                    for call in tool_calls:
+                        func = call.get("function", {}) if isinstance(call, dict) else {}
+                        name = func.get("name", "") if isinstance(func, dict) else ""
+                        args = func.get("arguments", "") if isinstance(func, dict) else ""
+                        if name == "Bash":
+                            try:
+                                import json as _json
+
+                                parsed_args = _json.loads(args)
+                                cmd = parsed_args.get("command", "")
+                            except (ValueError, TypeError):
+                                cmd = str(args)
+                            cmd = cmd.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+                            cmd = " ".join(cmd.split()).strip()
+                            if len(cmd) > 100:
+                                cmd = cmd[:97] + "..."
+                            summaries.append(f"[running: {cmd}]")
+                        elif name:
+                            summaries.append(f"[{name.lower()}]")
+                    return "\n".join(summaries) if summaries else None
+
+            if role == "tool":
+                content = event.get("content", "")
+                if content and isinstance(content, str):
+                    text = content.strip()
+                    if text and "<promise>" in text:
+                        result_text_parts.append(text)
+                    return None  # tool results are verbose; keep them out of the live stream
+
+            if role == "meta":
+                # session.resume_hint and similar metadata; not user-facing
+                return None
+
+            return None
+
+        def _reader() -> None:
+            try:
+                for raw_line in proc.stdout:  # type: ignore[union-attr]
+                    text = _parse_stream_event(raw_line)
+                    if text:
+                        for sub_line in text.splitlines():
+                            if sub_line.strip():
+                                line_queue.put(sub_line)
+            finally:
+                line_queue.put(None)
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+
+        output_lines: list[str] = []
+        timed_out = False
+
+        try:
+            while True:
+                try:
+                    line = line_queue.get(timeout=self.idle_timeout)
+                except queue.Empty:
+                    timed_out = True
+                    self._killpg(proc)
+                    break
+                if line is None:
+                    break
+                if line:
+                    output_lines.append(line)
+                    if on_line:
+                        on_line(line)
+
+            if not timed_out:
+                proc.wait()
+        except KeyboardInterrupt:
+            self._killpg(proc)
+            raise
+
+        clean_output = "\n".join(result_text_parts) if result_text_parts else "\n".join(output_lines)
+        match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
+        parsed = parse_promise_signal(clean_output) if match else None
+        returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
+        tokens_used = self.token_tracker.count_from_text(clean_output)
+
+        return AgentResult(
+            stdout=clean_output,
+            returncode=returncode,
+            success=(returncode == 0 and not timed_out),
+            has_completion_signal=bool(match),
+            done_signal=match.group(0) if match else None,
+            timed_out=timed_out,
+            tokens_used=tokens_used,
+            promise_state=parsed[0] if parsed else "",
+            promise_payload=parsed[1] if parsed else "",
+        )
+
+
 class MockAdapter(AgentAdapter):
     """Scripted adapter for tests — no subprocess, no network."""
 
@@ -348,6 +593,11 @@ class MockAdapter(AgentAdapter):
                 promise_state="",
                 promise_payload="",
             )
+        if not result.promise_state:
+            parsed = parse_promise_signal(result.stdout)
+            if parsed:
+                result.promise_state = parsed[0]
+                result.promise_payload = parsed[1]
         if on_line:
             for line in result.stdout.splitlines():
                 on_line(line)
@@ -360,6 +610,7 @@ def get_adapter(
     model: str,
     permission_mode: str = "auto",
     claude_cmd: str = "claude",
+    kimi_cmd: str = "kimi",
     idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
     token_tracker: TokenTracker | None = None,
 ) -> AgentAdapter:
@@ -371,4 +622,12 @@ def get_adapter(
             idle_timeout=idle_timeout,
             token_tracker=token_tracker,
         )
-    raise ValueError(f"unknown agent type: {agent!r} (currently only supports 'claude')")
+    if agent == "kimi":
+        return KimiCodeAdapter(
+            model=model,
+            permission_mode=permission_mode,
+            kimi_cmd=kimi_cmd,
+            idle_timeout=idle_timeout,
+            token_tracker=token_tracker,
+        )
+    raise ValueError(f"unknown agent type: {agent!r} (currently only supports 'claude', 'kimi')")
