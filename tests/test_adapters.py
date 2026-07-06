@@ -77,6 +77,47 @@ def test_claude_code_adapter_build_cmd() -> None:
     assert "stream-json" in cmd
 
 
+def test_claude_build_cmd_forwards_max_turns_when_supported() -> None:
+    adapter = ClaudeCodeAdapter(model="claude-sonnet-5", max_turns=25)
+    # Pretend the installed CLI advertises the flag.
+    adapter._supported_flags_cache = {"--max-turns"}
+    cmd = adapter._build_cmd()
+    assert "--max-turns" in cmd
+    assert cmd[cmd.index("--max-turns") + 1] == "25"
+
+
+def test_claude_build_cmd_omits_max_turns_when_unsupported() -> None:
+    adapter = ClaudeCodeAdapter(model="claude-sonnet-5", max_turns=25)
+    # Older CLI: flag not present in --help. Degrade gracefully.
+    adapter._supported_flags_cache = set()
+    cmd = adapter._build_cmd()
+    assert "--max-turns" not in cmd
+
+
+def test_claude_build_cmd_no_limit_flags_by_default() -> None:
+    adapter = ClaudeCodeAdapter(model="claude-sonnet-5")
+    cmd = adapter._build_cmd()
+    assert "--max-turns" not in cmd
+    assert "--max-budget-usd" not in cmd
+
+
+def test_claude_build_cmd_forwards_budget_when_supported() -> None:
+    adapter = ClaudeCodeAdapter(model="claude-sonnet-5", max_budget_usd=1.5)
+    adapter._supported_flags_cache = {"--max-budget-usd"}
+    cmd = adapter._build_cmd()
+    assert "--max-budget-usd" in cmd
+    assert cmd[cmd.index("--max-budget-usd") + 1] == "1.5"
+
+
+def test_claude_result_event_flags_native_limit() -> None:
+    adapter = ClaudeCodeAdapter(model="claude-sonnet-5")
+    adapter._limit_reached = False
+    adapter._result_text_parts = []
+    adapter.token_tracker.reset()
+    adapter._parse_stream_event('{"type": "result", "subtype": "error_max_turns", "result": "hit limit"}')
+    assert adapter._limit_reached is True
+
+
 def test_kimi_code_adapter_build_cmd() -> None:
     adapter = KimiCodeAdapter(model="kimi-code/kimi-for-coding")
     cmd = adapter._build_cmd()

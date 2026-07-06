@@ -1,9 +1,13 @@
 """Python port of scripts/owloop.sh — the autonomous build loop engine.
 
-The engine spawns one fresh agent iteration (via an `AgentAdapter`) per round,
-watches its output for the ``<promise>DONE</promise>`` completion signal,
-commits/pushes on success, and retries (up to a consecutive-failure limit)
-otherwise.
+The engine spawns one fresh agent iteration (via an `AgentAdapter`) per round
+and watches its output for the ``<promise>DONE</promise>`` completion signal.
+Completion is not taken on trust: when the agent claims DONE, the engine itself
+runs the spec's acceptance-criteria and backpressure commands via ``subprocess``
+(the deterministic verification gate) and only then — never the agent — commits,
+pushes, and marks the spec ``COMPLETE``. A failed iteration is rolled back to the
+last good commit, and a failure spiral stops the run with a named terminal state
+(``stalled``/``exhausted``) rather than retrying forever.
 
 All UI concerns (TUI, plain console) live outside this module: the engine
 only reports progress through the ``on_event(kind, data)`` callback so it can
@@ -14,7 +18,9 @@ so the engine itself never shells out to `claude` directly.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -23,11 +29,13 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from owloop import spec_queue
 from owloop.adapters import AgentAdapter, AgentResult
+from owloop.backpressure import load_backpressure
 from owloop.learnings import (
     append_learning,
     extract_learnings,
@@ -49,12 +57,19 @@ Read these files if they exist (in order):
 1. `AGENTS.md` — agent instructions for this project
 2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
-Find the highest-priority incomplete work item in specs/, implement it completely,
-verify all acceptance criteria by running the shell commands specified in the spec,
-add a `**Status**: COMPLETE` line near the top of that spec's markdown file
-(this is how the next iteration knows to skip it — omitting this step means the
-loop will pick the same spec again), commit and push, then output
-`<promise>DONE</promise>`.
+Find the highest-priority incomplete work item in specs/ and implement it
+completely. Run the shell commands in that spec's `## Acceptance Criteria`
+section yourself to check your work as you go. When everything is implemented
+and those criteria pass, output `<promise>DONE</promise>`.
+
+The loop — not you — owns git and completion:
+- Do NOT commit or push. The loop commits and pushes only after it has
+  re-run the acceptance criteria itself and they pass.
+- Do NOT add a `Status: COMPLETE` line to the spec. The loop marks the spec
+  complete once it has verified the work.
+- Do NOT edit the spec's `## Acceptance Criteria` or `## Verification`
+  sections, or `.owloop/backpressure.json`. Rewriting your own success
+  conditions fails the iteration.
 
 If you hit an external blocker (missing API key, unavailable dependency), output
 `<promise>BLOCKED:reason</promise>` and the loop will stop. If you need a human
@@ -73,6 +88,120 @@ ONLY modify files within the scope described in the spec's Requirements section.
 Do NOT touch files listed in the spec's Exclusions section.
 Do NOT modify, delete, or comment out existing tests.
 """
+
+
+class TerminalState(str, Enum):
+    """Named terminal states for a run (loop-engineering taxonomy).
+
+    The engine keeps a granular ``stopped_reason`` for diagnostics;
+    ``terminal_state`` is the coarse, decision-relevant category reporters and
+    exit codes key off. ``EXHAUSTED`` (hit an iteration/duration/token budget)
+    must never be presented as ``SUCCESS`` — a run that ran out of budget did
+    not finish its work.
+
+    Subclassing ``str`` keeps members JSON-serializable and ``==``-comparable
+    to their plain-string values, so callers and persisted summaries can treat
+    them as strings without conversion.
+    """
+
+    SUCCESS = "success"
+    CLEAN_NO_OP = "clean_no_op"
+    BLOCKED = "blocked"
+    DECIDE = "decide"
+    STALLED = "stalled"
+    EXHAUSTED = "exhausted"
+    TAMPERED = "tampered"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+
+    def __str__(self) -> str:  # so f-strings / json render the value, not "TerminalState.SUCCESS"
+        return self.value
+
+
+class StopReason(str, Enum):
+    """Granular reasons the loop stopped, each mapping to a ``TerminalState``.
+
+    These are the exact strings written to ``RunSummary.stopped_reason`` and
+    surfaced to the user; the enum keeps them from drifting apart across the
+    engine, reporter, TUI, and report generator.
+    """
+
+    ALL_SPECS_COMPLETE = "all_specs_complete"
+    SUCCESS = "success"
+    DRY_RUN_COMPLETE = "dry_run_complete"
+    BLOCKED = "blocked"
+    DECIDE = "decide"
+    STALLED = "stalled"
+    FIX_LOOP_BLOCKED = "fix_loop_blocked"
+    TAMPERED = "tampered"
+    MAX_ITERATIONS = "max_iterations"
+    MAX_DURATION = "max_duration"
+    MAX_TOKENS = "max_tokens"
+    INTERRUPTED = "interrupted"
+    PREFLIGHT_FAILED = "preflight_failed"
+    DIRTY_WORKSPACE_DECLINED = "dirty_workspace_declined"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class FailureReason(str, Enum):
+    """Why a single iteration failed — drives rollback and stall bucketing.
+
+    The exit-code distinction (``CRASH``/``TIMEOUT`` vs ``VERIFICATION_FAILED``)
+    lets same-error detection bucket a persistent crash separately from a
+    persistent test failure.
+    """
+
+    TAMPERED = "tampered"
+    TIMEOUT = "timeout"
+    EXHAUSTED_ITERATION = "exhausted_iteration"
+    CRASH = "crash"
+    VERIFICATION_FAILED = "verification_failed"
+    NO_DONE_SIGNAL = "no_done_signal"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+_STOPPED_REASON_TO_STATE = {
+    StopReason.ALL_SPECS_COMPLETE: TerminalState.SUCCESS,
+    StopReason.SUCCESS: TerminalState.SUCCESS,
+    StopReason.DRY_RUN_COMPLETE: TerminalState.CLEAN_NO_OP,
+    StopReason.BLOCKED: TerminalState.BLOCKED,
+    StopReason.DECIDE: TerminalState.DECIDE,
+    StopReason.STALLED: TerminalState.STALLED,
+    StopReason.FIX_LOOP_BLOCKED: TerminalState.STALLED,
+    StopReason.TAMPERED: TerminalState.TAMPERED,
+    StopReason.MAX_ITERATIONS: TerminalState.EXHAUSTED,
+    StopReason.MAX_DURATION: TerminalState.EXHAUSTED,
+    StopReason.MAX_TOKENS: TerminalState.EXHAUSTED,
+    StopReason.INTERRUPTED: TerminalState.INTERRUPTED,
+    StopReason.PREFLIGHT_FAILED: TerminalState.FAILED,
+    StopReason.DIRTY_WORKSPACE_DECLINED: TerminalState.FAILED,
+}
+
+
+def classify_terminal_state(stopped_reason: str) -> TerminalState:
+    """Map a granular ``stopped_reason`` onto a named terminal state."""
+    try:
+        reason = StopReason(stopped_reason)
+    except ValueError:
+        return TerminalState.FAILED
+    return _STOPPED_REASON_TO_STATE.get(reason, TerminalState.FAILED)
+
+
+_ERROR_HASH_RE = re.compile(r"\d+")
+
+
+def _normalize_error_tail(text: str) -> str:
+    """Normalize a failure tail so trivially-varying runs hash the same.
+
+    Strips line numbers, addresses, and timestamps (all digits) and
+    whitespace so "the same error" is detected across iterations even when
+    only volatile numbers differ.
+    """
+    return _ERROR_HASH_RE.sub("#", " ".join(text.split())).strip()
 
 VERIFIER_PROMPT = """\
 # Owloop — Verification Mode
@@ -111,6 +240,14 @@ class EngineConfig:
     idle_timeout: float = 3600  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
+    max_same_error_count: int = 5
+    # When True, keep the legacy behavior: warn + back off on repeated
+    # failures and retry forever. When False (default), a failure spiral is a
+    # first-class terminal state (``stalled``) and the loop hard-stops.
+    keep_retrying: bool = False
+    # Reset the worktree to the last good commit after a failed iteration so
+    # the next "fresh context" round starts clean. Opt out with --no-rollback.
+    rollback: bool = True
     base_retry_delay: float = 2.0
     max_retry_delay: float = 60.0
     fix_loop_threshold: int = 3
@@ -145,6 +282,8 @@ class IterationResult:
     promise_state: str = ""
     promise_payload: str = ""
     stdout: str = ""
+    limit_reached: bool = False
+    crashed: bool = False
 
 
 @dataclass
@@ -174,6 +313,7 @@ class RunSummary:
     cwd: Path
     main_repo_dir: Path
     stopped_reason: str
+    terminal_state: str = ""
     issues: list[str] | None = None
     tokens_used: int = 0
     estimated_cost_usd: float = 0.0
@@ -183,6 +323,20 @@ class RunSummary:
     resumed_from_session: str | None = None
     dry_run_report: DryRunReport | None = None
 
+    @property
+    def state(self) -> str:
+        """Named terminal state for this run (see ``TerminalState``)."""
+        return self.terminal_state or classify_terminal_state(self.stopped_reason)
+
+    @property
+    def is_success(self) -> bool:
+        return self.state == TerminalState.SUCCESS
+
+    @property
+    def is_exhausted(self) -> bool:
+        """True when the run stopped because it ran out of budget, not work."""
+        return self.state == TerminalState.EXHAUSTED
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "iterations": self.iterations,
@@ -190,6 +344,7 @@ class RunSummary:
             "cwd": str(self.cwd),
             "main_repo_dir": str(self.main_repo_dir),
             "stopped_reason": self.stopped_reason,
+            "terminal_state": self.terminal_state or classify_terminal_state(self.stopped_reason),
             "issues": self.issues,
             "tokens_used": self.tokens_used,
             "estimated_cost_usd": self.estimated_cost_usd,
@@ -650,10 +805,19 @@ class OwloopEngine:
             self._recent_file_sets = self._recent_file_sets[-threshold * 2:]
         return False
 
+    def _run_notes_path(self) -> Path:
+        """Loop metadata lives under ``.owloop/`` so it can never leak into
+        a commit the engine makes with ``git add -A``."""
+        return resolve_owloop_dir(self.cwd) / "run-notes.md"
+
     def _read_run_notes(self) -> str | None:
-        path = self.cwd / "run-notes.md"
+        path = self._run_notes_path()
         if path.is_file():
             return path.read_text(encoding="utf-8")
+        # Back-compat: earlier versions wrote run-notes.md to the repo root.
+        legacy = self.cwd / "run-notes.md"
+        if legacy.is_file():
+            return legacy.read_text(encoding="utf-8")
         return None
 
     def _read_steering(self) -> str | None:
@@ -677,7 +841,7 @@ class OwloopEngine:
 
         notes = self._read_run_notes()
         if notes is not None:
-            self._emit("run_notes_loaded", path=str(self.cwd / "run-notes.md"))
+            self._emit("run_notes_loaded", path=str(self._run_notes_path()))
             sections.append(
                 "The following notes were recorded during previous iterations of this run. "
                 "Read them to avoid repeating mistakes.\n\n"
@@ -699,7 +863,8 @@ class OwloopEngine:
         self, iteration: int, success: bool, summary: str, learning: str = ""
     ) -> None:
         """Append a concise cross-iteration note to run-notes.md."""
-        run_notes_path = self.cwd / "run-notes.md"
+        run_notes_path = self._run_notes_path()
+        run_notes_path.parent.mkdir(parents=True, exist_ok=True)
         status = "success" if success else "failure"
         entry = (
             f"## Iteration {iteration} — {_timestamp()}\n"
@@ -725,11 +890,8 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
-    def _run_acceptance_criteria(self, spec_name: str | None) -> tuple[int, int]:
-        """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
-        if not spec_name:
-            return 0, 0
-        commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
+    def _run_commands(self, commands: list[str]) -> tuple[int, int]:
+        """Run shell commands from the engine (not the agent); count pass/fail."""
         passed = failed = 0
         for command in commands:
             result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
@@ -740,6 +902,137 @@ class OwloopEngine:
             else:
                 failed += 1
         return passed, failed
+
+    def _run_acceptance_criteria(self, spec_name: str | None) -> tuple[int, int]:
+        """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
+        if not spec_name:
+            return 0, 0
+        commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
+        return self._run_commands(commands)
+
+    def _guarded_hash(self, spec_name: str | None) -> str:
+        """Hash the spec sections + backpressure file the agent must not edit.
+
+        The engine snapshots this before an iteration and re-checks it after,
+        so an agent that rewrites its own success conditions (acceptance
+        criteria, verification section, or the project's backpressure
+        commands) is caught regardless of whether the commands then "pass".
+        """
+        h = hashlib.sha256()
+        if spec_name:
+            section = spec_queue.get_acceptance_criteria_section(self.specs_dir / spec_name)
+            h.update(section.encode("utf-8"))
+        backpressure = resolve_owloop_dir(self.cwd) / "backpressure.json"
+        if backpressure.is_file():
+            h.update(backpressure.read_bytes())
+        return h.hexdigest()
+
+    def _run_verification_gate(
+        self, iteration: int, spec_name: str | None, guard_before: str
+    ) -> tuple[bool, bool, int, int]:
+        """Deterministically verify an iteration outside the agent's control.
+
+        Returns ``(passed, tampered, passed_count, failed_count)``. The engine
+        — never the agent — runs the spec's acceptance-criteria commands and
+        the project's backpressure commands via ``subprocess`` and lets exit
+        codes decide. A tampered guard region fails the gate immediately with
+        a distinct ``spec_tampered`` event, regardless of command results.
+        """
+        self._emit("verification_gate_start", iteration=iteration, spec=spec_name)
+
+        if self._guarded_hash(spec_name) != guard_before:
+            self._emit("spec_tampered", iteration=iteration, spec=spec_name)
+            return False, True, 0, 0
+
+        acc_passed, acc_failed = self._run_acceptance_criteria(spec_name)
+        bp_commands = [cmd.command for cmd in load_backpressure(self.cwd)]
+        bp_passed, bp_failed = self._run_commands(bp_commands)
+
+        passed_count = acc_passed + bp_passed
+        failed_count = acc_failed + bp_failed
+        gate_ok = failed_count == 0
+
+        if gate_ok:
+            self._emit(
+                "verification_gate_passed",
+                iteration=iteration,
+                passed=passed_count,
+            )
+        else:
+            self._emit(
+                "verification_gate_failed",
+                iteration=iteration,
+                passed=passed_count,
+                failed=failed_count,
+            )
+        return gate_ok, False, passed_count, failed_count
+
+    def _head(self) -> str:
+        return str(self._run_git("rev-parse", "HEAD").stdout).strip()
+
+    def _commit_iteration(self, iteration: int, spec_name: str | None) -> bool:
+        """Stage and commit the verified work. Engine-owned, gate-gated.
+
+        Loop metadata (``.owloop/run-notes.md``) is unstaged before commit so
+        it can never enter project history even on repos that predate the
+        ``.gitignore`` entry.
+        """
+        self._run_git("add", "-A")
+        self._run_git(
+            "reset", "--quiet", "--",
+            ".owloop/run-notes.md", ".owloop/logs", ".owloop/PROMPT_build.md",
+        )
+        subject = f"owloop: complete {spec_name}" if spec_name else f"owloop: iteration {iteration}"
+        committed = self._run_git("commit", "-m", subject)
+        if committed.returncode == 0:
+            self._emit("iteration_committed", iteration=iteration, spec=spec_name, subject=subject)
+            return True
+        # Nothing to commit (e.g. work already on disk) is not an error.
+        self._emit("iteration_commit_noop", iteration=iteration, spec=spec_name)
+        return False
+
+    def _mark_spec_complete(self, spec_name: str | None) -> None:
+        """Flip the active spec to COMPLETE — only the engine does this."""
+        if not spec_name:
+            return
+        if spec_queue.mark_spec_complete(self.specs_dir / spec_name):
+            self._emit("spec_marked_complete", spec=spec_name)
+
+    def _rollback_iteration(self, iteration: int, last_good: str) -> None:
+        """Reset the worktree to the last good commit after a failed iteration.
+
+        Failures are data: the discarded diff is saved as a patch under
+        ``.owloop/logs/`` before the tree is reset, so nothing is lost. The
+        reset restores the disk-state invariant owloop's "fresh context per
+        iteration" design depends on — the next round starts from a known
+        commit instead of on top of half-finished edits.
+        """
+        if not self.config.rollback:
+            self._emit("rollback_skipped", iteration=iteration, reason="disabled")
+            return
+        if not self._is_git_repo() or not last_good:
+            return
+
+        # Intent-to-add untracked files (excluding loop metadata) so the saved
+        # patch captures them too. .owloop/ is excluded from the add so the
+        # follow-up `reset --hard` can't delete PROMPT_build.md/specs/logs.
+        self._run_git("add", "-A", "-N", "--", ".", ":!.owloop")
+        diff = self._run_git("diff", last_good, "--", ".", ":!.owloop")
+        patch_path = self.log_dir / f"iter_{iteration}_discarded.patch"
+        if diff.stdout.strip():
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            patch_path.write_text(diff.stdout, encoding="utf-8")
+
+        self._run_git("reset", "--hard", last_good)
+        # Remove untracked files the agent created, but never touch loop
+        # metadata (specs, logs, learnings, run-notes) under .owloop/.
+        self._run_git("clean", "-fd", "-e", ".owloop")
+        self._emit(
+            "iteration_rolled_back",
+            iteration=iteration,
+            to_commit=last_good[:8],
+            patch=str(patch_path) if diff.stdout.strip() else None,
+        )
 
     def run_iteration(self, iteration: int) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
@@ -790,6 +1083,7 @@ class OwloopEngine:
                     success=False,
                     has_completion_signal=False,
                     tokens_used=exc.tokens_used,
+                    limit_reached=True,
                 )
 
         tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
@@ -808,8 +1102,15 @@ class OwloopEngine:
             total_cost_usd=self.estimated_cost_usd,
         )
 
+        limit_reached = getattr(result, "limit_reached", False)
+        crashed = (not result.timed_out) and result.returncode != 0 and not limit_reached
+
         if result.timed_out:
             self._emit("agent_timeout", iteration=iteration)
+        elif limit_reached:
+            self._emit(
+                "iteration_exhausted", iteration=iteration, tokens=result.tokens_used
+            )
         elif not result.success:
             self._emit("agent_failed", returncode=result.returncode, tail=tail)
         elif promise_state == "DONE":
@@ -856,6 +1157,8 @@ class OwloopEngine:
             promise_state=promise_state,
             promise_payload=promise_payload,
             stdout=result.stdout,
+            limit_reached=limit_reached,
+            crashed=crashed,
         )
 
     def _run_verifier(self, iteration: int, log_file: Path) -> Any:
@@ -888,7 +1191,7 @@ class OwloopEngine:
                 branch="",
                 cwd=self.cwd,
                 main_repo_dir=self.main_repo_dir,
-                stopped_reason="preflight_failed",
+                stopped_reason=StopReason.PREFLIGHT_FAILED,
                 issues=issues,
             )
 
@@ -900,7 +1203,7 @@ class OwloopEngine:
                 branch=self._current_branch(),
                 cwd=self.cwd,
                 main_repo_dir=self.main_repo_dir,
-                stopped_reason="dirty_workspace_declined",
+                stopped_reason=StopReason.DIRTY_WORKSPACE_DECLINED,
                 session_id=self.session_id or "",
                 resumed_from_session=self.resumed_from_session,
             )
@@ -932,7 +1235,7 @@ class OwloopEngine:
                 branch=branch,
                 cwd=self.cwd,
                 main_repo_dir=self.main_repo_dir,
-                stopped_reason="all_specs_complete",
+                stopped_reason=StopReason.ALL_SPECS_COMPLETE,
                 session_id=self.session_id or "",
                 resumed_from_session=self.resumed_from_session,
             )
@@ -942,8 +1245,9 @@ class OwloopEngine:
 
         iteration = self._resumed_iterations
         consecutive_failures = 0
+        same_error_counts: dict[str, int] = {}
         backoff_level = 0
-        stopped_reason = "max_iterations"
+        stopped_reason = StopReason.MAX_ITERATIONS
         blocker: str | None = None
         decision_question: str | None = None
         dry_run_report: DryRunReport | None = None
@@ -964,19 +1268,28 @@ class OwloopEngine:
                 if self.config.max_duration_minutes > 0:
                     elapsed_min = (time.monotonic() - start_time) / 60
                     if elapsed_min >= self.config.max_duration_minutes:
-                        stopped_reason = "max_duration"
+                        stopped_reason = StopReason.MAX_DURATION
                         self._emit("max_duration_reached", minutes=int(elapsed_min))
                         break
 
                 if self.config.max_tokens > 0 and self.tokens_used >= self.config.max_tokens:
-                    stopped_reason = "max_tokens"
+                    stopped_reason = StopReason.MAX_TOKENS
                     self._emit("max_tokens_reached", tokens=self.tokens_used, limit=self.config.max_tokens)
                     break
+
+                active_status = self._spec_status()
+                active_spec = active_status["first_incomplete"]
+                # Snapshot the guarded regions (acceptance criteria, verification
+                # section, backpressure) and the last good commit *before* the
+                # agent runs, so tamper detection and rollback have a baseline.
+                guard_before = self._guarded_hash(active_spec)
+                last_good = self._head()
 
                 iteration += 1
                 result = self.run_iteration(iteration)
 
-                # Cross-iteration notes: summarize what just happened.
+                # Cross-iteration notes: summarize what just happened. Read the
+                # commit subject before the engine makes its own commit below.
                 note_summary = result.summary
                 if result.success:
                     commit_result = self._run_git("log", "-1", "--pretty=%s")
@@ -986,9 +1299,9 @@ class OwloopEngine:
 
                 if self.config.dry_run:
                     acceptance_passed, acceptance_failed = self._run_acceptance_criteria(
-                        status["first_incomplete"]
+                        active_spec
                     )
-                    current_head = self._run_git("rev-parse", "HEAD").stdout.strip()
+                    current_head = self._head()
                     if current_head and current_head != dry_run_original_head:
                         self._run_git("reset", "--soft", dry_run_original_head)
                         self._emit(
@@ -1001,44 +1314,90 @@ class OwloopEngine:
                         acceptance_passed=acceptance_passed,
                         acceptance_failed=acceptance_failed,
                         tokens_used=result.tokens_used,
-                        spec_name=status["first_incomplete"],
+                        spec_name=active_spec,
                     )
                     self._emit("dry_run_report", **dry_run_report.as_dict())
+                    stopped_reason = StopReason.DRY_RUN_COMPLETE
+                    break
 
-                if result.promise_state == "DONE":
-                    consecutive_failures = 0
-                    backoff_level = 0
-                    if not self.config.dry_run and self._check_fix_loop():
-                        stopped_reason = "fix_loop_blocked"
-                        blocker = "same files modified repeatedly; spec needs to be split"
-                        break
-                elif result.promise_state == "BLOCKED":
-                    stopped_reason = "blocked"
+                # ── Terminal agent signals stop the loop before verification ──
+                if result.promise_state == "BLOCKED":
+                    stopped_reason = StopReason.BLOCKED
                     blocker = result.promise_payload
                     self._emit("blocked", payload=result.promise_payload)
                     break
-                elif result.promise_state == "DECIDE":
-                    stopped_reason = "decide"
+                if result.promise_state == "DECIDE":
+                    stopped_reason = StopReason.DECIDE
                     decision_question = result.promise_payload
                     self._emit("decide", payload=result.promise_payload)
                     break
+
+                # ── Deterministic verification gate (engine-owned) ──
+                gate_passed = False
+                tampered = False
+                if result.promise_state == "DONE":
+                    gate_passed, tampered, _gp, _gf = self._run_verification_gate(
+                        iteration, active_spec, guard_before
+                    )
+
+                if gate_passed:
+                    # Verified success: only now does the engine commit, mark the
+                    # spec complete, and push — never the agent.
+                    consecutive_failures = 0
+                    backoff_level = 0
+                    same_error_counts.clear()
+                    self._mark_spec_complete(active_spec)
+                    self._commit_iteration(iteration, active_spec)
+                    self._push(branch)
+                    spec_status = self._spec_status()
+                    self._emit(
+                        "iteration_end",
+                        iteration=iteration,
+                        success=True,
+                        specs=spec_status["specs"],
+                    )
+                    self._persist_session_progress(
+                        status="running",
+                        iterations=iteration,
+                        current_spec=spec_status["first_incomplete"],
+                    )
+                    if self._check_fix_loop():
+                        stopped_reason = StopReason.FIX_LOOP_BLOCKED
+                        blocker = "same files modified repeatedly; spec needs to be split"
+                        break
+                    if spec_status["has_specs"] and spec_status["incomplete_count"] == 0:
+                        stopped_reason = StopReason.SUCCESS
+                        self._emit("all_specs_complete", spec_count=spec_status["spec_count"])
+                        break
+                    time.sleep(min(self.config.base_retry_delay, self.config.max_retry_delay))
+                    continue
+
+                # ── Failure: classify, roll back, and stop on a stall ──
+                if tampered:
+                    failure_reason = FailureReason.TAMPERED
+                elif result.timed_out:
+                    failure_reason = FailureReason.TIMEOUT
+                elif result.limit_reached:
+                    failure_reason = FailureReason.EXHAUSTED_ITERATION
+                elif result.crashed:
+                    failure_reason = FailureReason.CRASH
+                elif result.promise_state == "DONE":
+                    failure_reason = FailureReason.VERIFICATION_FAILED
+                    self._emit("verification_failed", iteration=iteration, tail=result.summary)
                 else:
-                    consecutive_failures += 1
-                    if consecutive_failures >= self.config.max_consecutive_failures:
-                        self._emit("stuck_warning", consecutive_failures=consecutive_failures)
-                        backoff_level += 1
-                        consecutive_failures = self.config.max_consecutive_failures
+                    failure_reason = FailureReason.NO_DONE_SIGNAL
 
-                if self.config.dry_run:
-                    stopped_reason = "dry_run_complete"
-                    break
+                self._rollback_iteration(iteration, last_good)
 
-                self._push(branch)
+                consecutive_failures += 1
+                error_key = f"{failure_reason.value}:{_normalize_error_tail(result.summary or '')}"[:500]
+                same_error_counts[error_key] = same_error_counts.get(error_key, 0) + 1
+
                 spec_status = self._spec_status()
                 self._emit(
                     "iteration_end",
                     iteration=iteration,
-                    success=result.success,
+                    success=False,
                     specs=spec_status["specs"],
                 )
                 self._persist_session_progress(
@@ -1046,13 +1405,39 @@ class OwloopEngine:
                     iterations=iteration,
                     current_spec=spec_status["first_incomplete"],
                 )
+
+                if not self.config.keep_retrying:
+                    if same_error_counts[error_key] >= self.config.max_same_error_count:
+                        stopped_reason = StopReason.STALLED
+                        self._emit(
+                            "stalled",
+                            reason="same_error",
+                            failures=same_error_counts[error_key],
+                            failure_reason=failure_reason.value,
+                        )
+                        break
+                    if consecutive_failures >= self.config.max_consecutive_failures:
+                        stopped_reason = StopReason.STALLED
+                        self._emit(
+                            "stalled",
+                            reason="consecutive_failures",
+                            failures=consecutive_failures,
+                            failure_reason=failure_reason.value,
+                        )
+                        break
+                elif consecutive_failures >= self.config.max_consecutive_failures:
+                    # Legacy --keep-retrying mode: warn, back off, never stop.
+                    self._emit("stuck_warning", consecutive_failures=consecutive_failures)
+                    backoff_level += 1
+                    consecutive_failures = self.config.max_consecutive_failures
+
                 delay = min(
                     self.config.base_retry_delay * (2**backoff_level),
                     self.config.max_retry_delay,
                 )
                 time.sleep(delay)
         except KeyboardInterrupt:
-            stopped_reason = "interrupted"
+            stopped_reason = StopReason.INTERRUPTED
             self._emit("interrupted", iteration=iteration)
         finally:
             inhibitor.stop()
@@ -1068,7 +1453,8 @@ class OwloopEngine:
             branch=branch,
             cwd=self.cwd,
             main_repo_dir=self.main_repo_dir,
-            stopped_reason=stopped_reason,
+            stopped_reason=str(stopped_reason),
+            terminal_state=classify_terminal_state(stopped_reason),
             tokens_used=self.tokens_used,
             estimated_cost_usd=self.estimated_cost_usd,
             blocker=blocker,

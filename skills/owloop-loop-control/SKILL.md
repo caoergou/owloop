@@ -35,10 +35,14 @@ The agent communicates completion state by outputting exactly one of these XML-l
 Output this when:
 - All acceptance criteria pass
 - The verification commands run successfully
-- The work is committed (or ready to commit)
 - No human judgment is needed
 
-This is the only signal that causes the loop to mark the spec complete and move on.
+Do NOT commit, push, or add a `Status: COMPLETE` line — the loop owns git and
+completion. After you signal DONE, the engine re-runs the acceptance-criteria and
+backpressure commands itself (the deterministic verification gate) and only then
+commits, pushes, and marks the spec complete. If that gate fails, the iteration is
+rolled back and DONE does not count. This signal is a *request* to verify, not a
+self-certification.
 
 ### `<promise>BLOCKED:reason</promise>`
 
@@ -86,7 +90,7 @@ Every spec should define what happens when the agent cannot make progress. If th
 
 ### Option 1: Document and move on (default)
 
-> If you cannot make progress after 2 attempts at the same error, add a `## Blockers` section to this spec describing what's blocking you, commit your partial work, and output `<promise>DONE</promise>`.
+> If you cannot make progress after 2 attempts at the same error, output `<promise>BLOCKED:reason</promise>` (external blocker) or `<promise>DECIDE:question</promise>` (needs a human decision). Do not commit or output DONE with partial work — a DONE whose acceptance criteria don't pass is rolled back, and repeated failures hard-stop the loop with a `stalled` terminal state.
 
 Best for: most tasks, especially exploratory fixes.
 

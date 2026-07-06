@@ -50,7 +50,7 @@ from owloop._brand import (
     status_message,
     wake_message,
 )
-from owloop.engine import RunSummary
+from owloop.engine import RunSummary, TerminalState
 
 SCENE_W, SCENE_H = 36, 13
 MIN_WIDTH, MIN_HEIGHT = 80, 24
@@ -653,13 +653,25 @@ class OwloopTUI:
             for line in exit_hints(summary.branch, summary.iterations, summary.cwd, summary.main_repo_dir)
         ]
 
+        # `exhausted`/`stalled` are not successes — the headline and border must
+        # not read as a clean "complete".
+        if summary.state == TerminalState.EXHAUSTED:
+            headline = Text("⚠ owloop stopped — budget exhausted, work not finished", style=f"bold {RED}")
+            border = RED
+        elif summary.state == TerminalState.STALLED:
+            headline = Text("⚠ owloop stalled — no progress", style=f"bold {RED}")
+            border = RED
+        else:
+            headline = Text("🌅 owloop complete", style=f"bold {AMBER}")
+            border = AMBER
+
         body = Group(
             owl,
             Text(""),
-            Align.center(Text("🌅 owloop complete", style=f"bold {AMBER}")),
+            Align.center(headline),
             Text(""),
             Align.center(facts),
             Text(""),
             Align.center(Group(*hints_lines)),
         )
-        self.console.print(Panel(body, border_style=AMBER, style=f"on {NIGHT}", padding=(1, 4), width=56))
+        self.console.print(Panel(body, border_style=border, style=f"on {NIGHT}", padding=(1, 4), width=56))

@@ -67,6 +67,25 @@ def test_iteration_records_learning(tmp_path: Path) -> None:
     assert "tests need redis" in load_learnings(repo)
 
 
+class _FileTouchingAdapter(MockAdapter):
+    """Agent that rewrites the same file every iteration, then reports DONE.
+
+    The engine commits each verified success itself, so three consecutive
+    completed specs that all touch ``file.py`` present as a fix loop across
+    real engine commits.
+    """
+
+    def __init__(self, repo: Path, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._repo = repo
+        self._n = 0
+
+    def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+        self._n += 1
+        (self._repo / "file.py").write_text(f"v{self._n}", encoding="utf-8")
+        return super().run(prompt, cwd, on_line=on_line)
+
+
 def test_fix_loop_stops_loop(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -74,10 +93,15 @@ def test_fix_loop_stops_loop(tmp_path: Path) -> None:
     (repo / "file.py").write_text("a", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "add file"], cwd=repo, check=True, capture_output=True)
-    (repo / ".owloop" / "specs").mkdir(parents=True)
-    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    specs_dir = repo / ".owloop" / "specs"
+    specs_dir.mkdir(parents=True)
+    # Several specs so each success commits (touching file.py) without draining
+    # the queue before the fix-loop threshold (3) is reached.
+    for i in range(1, 5):
+        (specs_dir / f"0{i}-test.md").write_text("# spec", encoding="utf-8")
 
-    adapter = MockAdapter(
+    adapter = _FileTouchingAdapter(
+        repo,
         responses=[
             AgentResult(
                 stdout="change\n<promise>DONE</promise>",
@@ -87,16 +111,10 @@ def test_fix_loop_stops_loop(tmp_path: Path) -> None:
                 done_signal="<promise>DONE</promise>",
             )
             for _ in range(5)
-        ]
+        ],
     )
     config = EngineConfig(project_dir=repo, worktree=False, max_iterations=10)
     engine = OwloopEngine(config=config, adapter=adapter)
-
-    # Simulate repeated changes to the same file across commits.
-    for i in range(3):
-        (repo / "file.py").write_text(f"v{i}", encoding="utf-8")
-        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", f"change {i}"], cwd=repo, check=True, capture_output=True)
 
     summary = engine.run()
 

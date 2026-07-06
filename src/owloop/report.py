@@ -29,6 +29,10 @@ class ReportGenerator:
         "agent_failed",
         "agent_timeout",
         "verification_failed",
+        "verification_gate_failed",
+        "spec_tampered",
+        "stalled",
+        "iteration_exhausted",
         "blocked",
         "decide",
         "max_tokens_reached",
@@ -255,16 +259,19 @@ h3 {{
 
     @staticmethod
     def _status_badge(stopped_reason: str) -> str:
-        reason = stopped_reason.lower()
-        if reason in {"completed", "done", "success"}:
-            css = "badge badge-success"
-            label = "Completed"
-        elif reason in {"blocked", "failure", "error"}:
-            css = "badge badge-danger"
-            label = "Blocked"
+        from owloop.engine import TerminalState, classify_terminal_state
+
+        state = classify_terminal_state(stopped_reason)
+        # `exhausted` and `stalled` are outcomes, not successes — badge them as
+        # danger so a budget-exhausted run never reads as "Completed".
+        if state == TerminalState.SUCCESS:
+            css, label = "badge badge-success", "Completed"
+        elif state == TerminalState.EXHAUSTED:
+            css, label = "badge badge-danger", f"Exhausted ({stopped_reason})"
+        elif state in {TerminalState.STALLED, TerminalState.BLOCKED, TerminalState.TAMPERED, TerminalState.FAILED}:
+            css, label = "badge badge-danger", stopped_reason
         else:
-            css = "badge badge-info"
-            label = stopped_reason
+            css, label = "badge badge-info", stopped_reason
         return f'<span class="{css}">{html.escape(label)}</span>'
 
     @staticmethod
