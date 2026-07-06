@@ -513,3 +513,98 @@ def test_resolve_worktree_session_resume_falls_back_to_latest_branch(tmp_path: P
 
     assert session_id == "xyz789"
     assert branch == "owloop/20260706-xyz789"
+
+
+class _InterruptingAdapter(MockAdapter):
+    """Adapter that completes one iteration, then simulates Ctrl+C on the next."""
+
+    def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+        if self.calls:
+            raise KeyboardInterrupt
+        return super().run(prompt, cwd, on_line=on_line)
+
+
+def test_session_state_persisted_on_interrupt(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    adapter = _InterruptingAdapter(
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+                tokens_used=42,
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, max_iterations=5)
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "interrupted"
+    assert summary.session_id
+
+    session = json.loads(engine._session_file().read_text(encoding="utf-8"))
+    assert session["session_id"] == summary.session_id
+    assert session["status"] == "interrupted"
+    # The engine's iteration counter increments before each attempt, so the
+    # interrupted (second) attempt is counted even though it never completed.
+    assert session["iterations"] == 2
+    assert session["tokens_used"] == 42
+
+
+def test_resume_continues_token_and_duration_budget(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter, resume=True, max_tokens=1000)
+
+    engine._session_file().parent.mkdir(parents=True, exist_ok=True)
+    engine._session_file().write_text(
+        json.dumps(
+            {
+                "session_id": "abc123",
+                "branch": "main",
+                "path": str(repo),
+                "status": "interrupted",
+                "iterations": 3,
+                "tokens_used": 800,
+                "elapsed_seconds": 100.0,
+                "current_spec": "01-test.md",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    adapter._responses.append(
+        AgentResult(
+            stdout="ok\n<promise>DONE</promise>",
+            returncode=0,
+            success=True,
+            has_completion_signal=True,
+            done_signal="<promise>DONE</promise>",
+            tokens_used=300,
+        )
+    )
+
+    summary = engine.run()
+
+    assert summary.session_id == "abc123"
+    assert summary.resumed_from_session == "abc123"
+    assert summary.iterations == 4
+    assert summary.tokens_used == 1100
+    assert summary.stopped_reason == "max_tokens"
+
+    session = json.loads(engine._session_file().read_text(encoding="utf-8"))
+    assert session["tokens_used"] == 1100
+    assert session["iterations"] == 4

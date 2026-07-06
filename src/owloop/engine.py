@@ -165,6 +165,8 @@ class RunSummary:
     tokens_used: int = 0
     blocker: str | None = None
     decision_question: str | None = None
+    session_id: str = ""
+    resumed_from_session: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -177,10 +179,16 @@ class RunSummary:
             "tokens_used": self.tokens_used,
             "blocker": self.blocker,
             "decision_question": self.decision_question,
+            "session_id": self.session_id,
+            "resumed_from_session": self.resumed_from_session,
         }
 
 
 class OwloopEngine:
+    # Class-level default so ``session_id`` is discoverable on the class itself
+    # (e.g. via ``dir(OwloopEngine)``) even before an instance resolves one.
+    session_id: str | None = None
+
     def __init__(self, config: EngineConfig, adapter: AgentAdapter, on_event: EventCallback | None = None):
         self.config = config
         self.adapter = adapter
@@ -191,6 +199,11 @@ class OwloopEngine:
         self.session_log: Path | None = None
         self._recent_file_sets: list[set[str]] = []
         self.tokens_used = 0
+        self.session_id = None
+        self.resumed_from_session: str | None = None
+        self._resumed_iterations = 0
+        self._resumed_elapsed_seconds = 0.0
+        self._run_start_time: float | None = None
 
     @property
     def owloop_dir(self) -> Path:
@@ -285,8 +298,16 @@ class OwloopEngine:
         self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied")
 
     def _session_file(self) -> Path:
-        """Path to the persisted session descriptor in the main repo."""
-        return self.main_repo_dir / ".owloop" / "logs" / "session_latest.json"
+        """Path to the persisted session descriptor in the main repo.
+
+        Uses ``resolve_owloop_dir`` (like the rest of the engine) instead of
+        hardcoding ``.owloop/`` so that persisting session progress never
+        creates that directory as a side effect on legacy projects that
+        haven't materialized it yet — doing so would flip ``resolve_owloop_dir``
+        from its legacy fallback to the modern path mid-run and break other
+        `.owloop`-relative reads/writes (e.g. the build prompt file).
+        """
+        return resolve_owloop_dir(self.main_repo_dir) / "logs" / "session_latest.json"
 
     def _load_session(self) -> dict[str, str] | None:
         """Load the most recent session descriptor if it exists."""
@@ -302,7 +323,7 @@ class OwloopEngine:
         return None
 
     def _save_session(self, session_id: str, branch: str, path: Path) -> None:
-        """Persist the current session so ``--resume`` can find it later."""
+        """Persist a freshly created session so ``--resume`` can find it later."""
         session_path = self._session_file()
         session_path.parent.mkdir(parents=True, exist_ok=True)
         session_path.write_text(
@@ -312,11 +333,77 @@ class OwloopEngine:
                     "branch": branch,
                     "path": str(path),
                     "started_at": datetime.now().isoformat(),
+                    "status": "running",
+                    "iterations": 0,
+                    "tokens_used": 0,
+                    "elapsed_seconds": 0.0,
+                    "current_spec": None,
                 },
                 indent=2,
             ),
             encoding="utf-8",
         )
+
+    def _init_session(self) -> None:
+        """Resolve this run's session id and, when resuming, restore counters.
+
+        Runs before ``setup_worktree`` so session identity and budget
+        carry-over apply whether or not worktree isolation is enabled.
+        Never raises — ``_resolve_worktree_session`` remains the place that
+        surfaces a "nothing to resume" error when worktree isolation is on.
+        """
+        if not self.config.resume:
+            self.session_id = self.config.session_id or uuid.uuid4().hex[:8]
+            return
+
+        session = self._load_session()
+        if session is not None:
+            self.session_id = session.get("session_id")
+            self.resumed_from_session = self.session_id
+            self.tokens_used = int(session.get("tokens_used", 0))
+            self._resumed_iterations = int(session.get("iterations", 0))
+            self._resumed_elapsed_seconds = float(session.get("elapsed_seconds", 0.0))
+            return
+
+        branch = self._latest_owloop_branch()
+        if branch is not None:
+            self.session_id = branch.split("/", 1)[1].split("-", 1)[1]
+            self.resumed_from_session = self.session_id
+            return
+
+        # Nothing to resume: fall back to a fresh session id so the run still
+        # has one. If worktree isolation is enabled, setup_worktree() will
+        # raise its own "no previous session found" error shortly after this.
+        self.session_id = self.config.session_id or uuid.uuid4().hex[:8]
+
+    def _persist_session_progress(
+        self, *, status: str, iterations: int, current_spec: str | None
+    ) -> None:
+        """Update the persisted session record with live progress and status."""
+        if not self.session_id:
+            return
+        path = self._session_file()
+        data: dict[str, Any] = {}
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+        data.setdefault("session_id", self.session_id)
+        data.setdefault("branch", self._current_branch())
+        data.setdefault("path", str(self.cwd))
+        data.setdefault("started_at", datetime.now().isoformat())
+        data["status"] = status
+        data["iterations"] = iterations
+        data["tokens_used"] = self.tokens_used
+        data["elapsed_seconds"] = (
+            time.monotonic() - self._run_start_time
+            if self._run_start_time is not None
+            else data.get("elapsed_seconds", 0.0)
+        )
+        data["current_spec"] = current_spec
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def _branch_exists(self, branch: str) -> bool:
         """Return True if a local branch with the given name exists."""
@@ -358,9 +445,12 @@ class OwloopEngine:
                 session_id = session["session_id"]
                 branch = session["branch"]
                 wt_path = Path(session["path"])
+            self.session_id = session_id
             return session_id, branch, wt_path
 
-        session_id = self.config.session_id or uuid.uuid4().hex[:8]
+        # Reuse the id ``_init_session`` already resolved (if any) so this run
+        # has a single consistent session id, instead of minting a second one.
+        session_id = self.session_id or self.config.session_id or uuid.uuid4().hex[:8]
         branch = f"owloop/{wt_date}-{session_id}"
         wt_path = wt_base / f"owloop-{wt_date}-{session_id}"
 
@@ -371,6 +461,7 @@ class OwloopEngine:
             wt_path = wt_base / f"owloop-{wt_date}-{session_id}"
 
         self._save_session(session_id, branch, wt_path)
+        self.session_id = session_id
         return session_id, branch, wt_path
 
     def setup_worktree(self) -> bool:
@@ -716,6 +807,8 @@ class OwloopEngine:
                 issues=issues,
             )
 
+        self._init_session()
+
         if not self.setup_worktree():
             return RunSummary(
                 iterations=0,
@@ -723,6 +816,8 @@ class OwloopEngine:
                 cwd=self.cwd,
                 main_repo_dir=self.main_repo_dir,
                 stopped_reason="dirty_workspace_declined",
+                session_id=self.session_id or "",
+                resumed_from_session=self.resumed_from_session,
             )
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -753,18 +848,21 @@ class OwloopEngine:
                 cwd=self.cwd,
                 main_repo_dir=self.main_repo_dir,
                 stopped_reason="all_specs_complete",
+                session_id=self.session_id or "",
+                resumed_from_session=self.resumed_from_session,
             )
 
         inhibitor = SleepInhibitor(emit=lambda kind, data: self._emit(kind, **data))
         inhibitor.start()
 
-        iteration = 0
+        iteration = self._resumed_iterations
         consecutive_failures = 0
         backoff_level = 0
         stopped_reason = "max_iterations"
         blocker: str | None = None
         decision_question: str | None = None
-        start_time = time.monotonic()
+        start_time = time.monotonic() - self._resumed_elapsed_seconds
+        self._run_start_time = start_time
 
         try:
             while True:
@@ -819,11 +917,17 @@ class OwloopEngine:
                         consecutive_failures = self.config.max_consecutive_failures
 
                 self._push(branch)
+                spec_status = self._spec_status()
                 self._emit(
                     "iteration_end",
                     iteration=iteration,
                     success=result.success,
-                    specs=self._spec_status()["specs"],
+                    specs=spec_status["specs"],
+                )
+                self._persist_session_progress(
+                    status="running",
+                    iterations=iteration,
+                    current_spec=spec_status["first_incomplete"],
                 )
                 delay = min(
                     self.config.base_retry_delay * (2**backoff_level),
@@ -836,6 +940,12 @@ class OwloopEngine:
         finally:
             inhibitor.stop()
 
+        self._persist_session_progress(
+            status="interrupted" if stopped_reason == "interrupted" else "completed",
+            iterations=iteration,
+            current_spec=self._spec_status()["first_incomplete"],
+        )
+
         summary = RunSummary(
             iterations=iteration,
             branch=branch,
@@ -845,6 +955,8 @@ class OwloopEngine:
             tokens_used=self.tokens_used,
             blocker=blocker,
             decision_question=decision_question,
+            session_id=self.session_id or "",
+            resumed_from_session=self.resumed_from_session,
         )
         self._write_summary(summary)
         return summary
