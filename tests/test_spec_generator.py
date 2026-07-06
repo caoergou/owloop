@@ -92,13 +92,55 @@ def test_generate_asks_clarification_then_writes_spec(tmp_path: Path) -> None:
         asked.append(questions)
         return ["owloop/helpers.py"]
 
-    paths = generator.generate("refactor stuff", ask_fn=fake_ask)
+    paths = generator.generate("refactor stuff", ask_fn=fake_ask, interactive=True)
 
     assert len(asked) == 1
     assert asked[0] == ["Which module should I refactor?"]
     path = paths[0]
     assert path.parent.parent.name == ".owloop"
     assert path.name == "01-refactor-helpers.md"
+
+
+def test_generate_non_interactive_records_assumptions(tmp_path: Path) -> None:
+    (tmp_path / ".owloop").mkdir()
+    adapter = MockAdapter(responses=[
+        AgentResult(
+            stdout="<promise>DECIDE:Which module should I refactor? | What metric defines success?</promise>",
+            returncode=0,
+            success=True,
+            has_completion_signal=True,
+            done_signal="<promise>DECIDE:...</promise>",
+            promise_state="DECIDE",
+            promise_payload="Which module should I refactor? | What metric defines success?",
+        ),
+        _done_spec_result("refactor helpers"),
+    ])
+    generator = SpecGenerator(tmp_path, adapter)
+
+    # Non-interactive: no human answers — questions become documented assumptions.
+    paths = generator.generate("refactor stuff", interactive=False)
+
+    assert len(paths) == 1
+    text = paths[0].read_text(encoding="utf-8")
+    assert "## Assumptions" in text
+    assert "Which module should I refactor?" in text
+    assert "What metric defines success?" in text
+    # The Assumptions section sits ahead of Verification when present.
+    assert generator.assumptions == [
+        "Which module should I refactor?",
+        "What metric defines success?",
+    ]
+
+
+def test_generate_interactive_records_no_assumptions(tmp_path: Path) -> None:
+    (tmp_path / ".owloop").mkdir()
+    adapter = MockAdapter(responses=[_done_spec_result("straightforward task")])
+    generator = SpecGenerator(tmp_path, adapter)
+
+    paths = generator.generate("do the thing", interactive=True)
+
+    assert "## Assumptions" not in paths[0].read_text(encoding="utf-8")
+    assert generator.assumptions == []
 
 
 def test_generate_splits_multiple_specs(tmp_path: Path) -> None:

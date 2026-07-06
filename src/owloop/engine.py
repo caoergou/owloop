@@ -33,7 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from owloop import spec_queue
+from owloop import notifications, spec_queue
 from owloop.adapters import AgentAdapter, AgentResult
 from owloop.backpressure import load_backpressure
 from owloop.learnings import (
@@ -219,6 +219,31 @@ completed.
 Do NOT modify files. Only run read-only verification commands. Be concise.
 """
 
+CONVERGE_PROMPT = """\
+# Owloop — Convergence Sweep
+
+Every spec in `.owloop/specs/` is now marked COMPLETE. Your job is to audit
+whether the codebase actually satisfies the *collective intent* of those specs,
+or whether real work was missed. "Task list empty" does not prove "goal met".
+
+1. Read `AGENTS.md` / `CLAUDE.md` if present, then read every spec in
+   `.owloop/specs/` to reconstruct the overall goal.
+2. Scan the codebase (Glob/Grep/Read) and run the specs' verification commands
+   to check the goal actually holds end-to-end — look for gaps: requirements no
+   spec covered, follow-on work implied but never specced, integration seams
+   left unwired, missing tests for shipped behavior.
+
+If the goal is fully met with no gaps, output `<promise>DONE</promise>` and
+write nothing.
+
+If you find real gaps, create ONE new gap spec per gap as a NEW file in
+`.owloop/specs/` using the next available NN- numeric prefix, following the
+exact spec template (Priority, Requirements, shell-verifiable Acceptance
+Criteria in backticks, Exclusions, Style, Verification). Do NOT edit or
+re-open existing COMPLETE specs. Do NOT implement the fixes now — only write
+the gap spec(s). Then output `<promise>DONE</promise>`.
+"""
+
 EventCallback = Callable[[str, dict], None]
 
 
@@ -267,6 +292,13 @@ class EngineConfig:
     # When True, run exactly one iteration, skip push, revert any commit the
     # iteration made, and produce a DryRunReport instead of looping.
     dry_run: bool = False
+    # Completion notifications: fire a webhook and/or desktop notification when
+    # the run stops on an attention-worthy terminal state. None/False = off.
+    notify_webhook: str | None = None
+    notify_desktop: bool = False
+    # Post-queue convergence sweep (#36): after all specs complete, run up to
+    # this many audit passes that append gap specs; 0 = disabled.
+    converge_sweeps: int = 0
 
 
 @dataclass
@@ -1178,6 +1210,52 @@ class OwloopEngine:
         self.estimated_cost_usd += result.cost_usd
         return result
 
+    def _run_converge_sweep(self, sweep: int) -> bool:
+        """Audit the completed queue for missed work; append linted gap specs.
+
+        Runs one audit agent pass (#36). Any new spec files it writes are run
+        through ``SpecLinter`` before they may enter the queue — invalid gap
+        specs are rejected (removed) so a malformed audit can't poison the loop.
+        Returns True when at least one valid gap spec was appended (the loop
+        should keep going), False when the codebase has converged.
+        """
+        from owloop.spec_linter import SpecLinter
+
+        self._emit("converge_sweep_start", sweep=sweep)
+        before = {p.name for p in spec_queue.get_root_specs(self.specs_dir)}
+
+        result = self.adapter.run(
+            CONVERGE_PROMPT,
+            cwd=self.cwd,
+            on_line=lambda line: self._emit("output_line", line=line),
+        )
+        self.tokens_used += result.tokens_used
+        self.estimated_cost_usd += result.cost_usd
+
+        after = spec_queue.get_root_specs(self.specs_dir)
+        new_specs = [p for p in after if p.name not in before]
+
+        linter = SpecLinter(self.specs_dir, project_dir=self.cwd)
+        accepted: list[str] = []
+        for spec in new_specs:
+            errors = [f for f in linter.lint_spec(spec) if f.severity == "error"]
+            if errors:
+                spec.unlink(missing_ok=True)
+                self._emit(
+                    "converge_spec_rejected",
+                    sweep=sweep,
+                    spec=spec.name,
+                    errors=[f.message for f in errors],
+                )
+            else:
+                accepted.append(spec.name)
+
+        if accepted:
+            self._emit("converge_gap_specs", sweep=sweep, specs=accepted)
+            return True
+        self._emit("converged", sweep=sweep)
+        return False
+
     def run(self) -> RunSummary:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.main_repo_dir = self._resolve_main_repo_dir()
@@ -1246,6 +1324,7 @@ class OwloopEngine:
         iteration = self._resumed_iterations
         consecutive_failures = 0
         same_error_counts: dict[str, int] = {}
+        converge_sweeps_done = 0
         backoff_level = 0
         stopped_reason = StopReason.MAX_ITERATIONS
         blocker: str | None = None
@@ -1366,6 +1445,20 @@ class OwloopEngine:
                         blocker = "same files modified repeatedly; spec needs to be split"
                         break
                     if spec_status["has_specs"] and spec_status["incomplete_count"] == 0:
+                        # Queue empty: optionally audit for missed work before
+                        # declaring success (#36). A sweep that appends gap specs
+                        # keeps the loop running; convergence (or the sweep cap)
+                        # ends it as success.
+                        if (
+                            not self.config.dry_run
+                            and converge_sweeps_done < self.config.converge_sweeps
+                        ):
+                            converge_sweeps_done += 1
+                            if self._run_converge_sweep(converge_sweeps_done):
+                                time.sleep(
+                                    min(self.config.base_retry_delay, self.config.max_retry_delay)
+                                )
+                                continue
                         stopped_reason = StopReason.SUCCESS
                         self._emit("all_specs_complete", spec_count=spec_status["spec_count"])
                         break
@@ -1464,7 +1557,19 @@ class OwloopEngine:
             dry_run_report=dry_run_report,
         )
         self._write_summary(summary)
+        self._notify(summary)
         return summary
+
+    def _notify(self, summary: RunSummary) -> None:
+        """Fire completion notifications for the finished run (best-effort)."""
+        if not self.config.notify_webhook and not self.config.notify_desktop:
+            return
+        notifications.notify_run_complete(
+            summary,
+            webhook_url=self.config.notify_webhook,
+            desktop=self.config.notify_desktop,
+            emit=lambda kind, **data: self._emit(kind, **data),
+        )
 
     def _write_summary(self, summary: RunSummary) -> None:
         """Persist the latest run summary so `owloop report` can read it."""

@@ -727,6 +727,9 @@ def _run_engine(
     max_budget_usd: float = 0.0,
     keep_retrying: bool = False,
     rollback: bool = True,
+    notify_webhook: str | None = None,
+    notify_desktop: bool = False,
+    converge_sweeps: int = 0,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -742,6 +745,9 @@ def _run_engine(
         dry_run=dry_run,
         keep_retrying=keep_retrying,
         rollback=rollback,
+        notify_webhook=notify_webhook or os.environ.get("OWLOOP_NOTIFY_WEBHOOK") or None,
+        notify_desktop=notify_desktop,
+        converge_sweeps=converge_sweeps,
     )
     adapter = get_adapter(
         agent,
@@ -913,9 +919,25 @@ def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
     help="Reset the worktree to the last good commit after a failed iteration "
     "(a discarded-diff patch is saved under .owloop/logs/).",
 )
+@click.option(
+    "--notify-webhook", default=None, metavar="URL",
+    help="POST a JSON completion notification to this webhook when the run stops "
+    "on an attention-worthy state (or set OWLOOP_NOTIFY_WEBHOOK).",
+)
+@click.option(
+    "--notify-desktop", is_flag=True, default=False,
+    help="Fire a native desktop notification when the run stops.",
+)
+@click.option(
+    "--converge", "converge_sweeps", type=int, default=0, metavar="N",
+    help="After the spec queue empties, run up to N audit sweeps that append gap "
+    "specs until the codebase converges on the goal (0 = disabled).",
+    show_default=True,
+)
 @_common_run_options
 def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
         max_turns_per_iteration: int, max_budget_usd: float, keep_retrying: bool, rollback: bool,
+        notify_webhook: str | None, notify_desktop: bool, converge_sweeps: int,
         worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
@@ -941,6 +963,9 @@ def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_toke
         max_budget_usd=max_budget_usd,
         keep_retrying=keep_retrying,
         rollback=rollback,
+        notify_webhook=notify_webhook,
+        notify_desktop=notify_desktop,
+        converge_sweeps=converge_sweeps,
     )
 
 

@@ -8,6 +8,7 @@ multiple ordered specs with dependency annotations.
 from __future__ import annotations
 
 import re
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -112,7 +113,10 @@ Each spec uses this exact structure:
 - [list spec names this depends on, or "none"]
 
 ## Requirements
-- [ ] Concrete, scoped task description
+- [ ] Concrete, scoped task description. Prefer EARS-style phrasing where it
+      fits — "WHEN <trigger>, THE SYSTEM SHALL <response>", "WHILE <state>, THE
+      SYSTEM SHALL <response>", or "IF <condition> THEN THE SYSTEM SHALL
+      <response>" — it maps cleanly onto shell-verifiable acceptance criteria.
 - [ ] Search the codebase for existing implementations before creating new ones
 
 ## Acceptance Criteria
@@ -190,6 +194,11 @@ class SpecGenerator:
         self.adapter = adapter
         self.lint_retries = lint_retries
         self.clarifications: list[str] = []
+        # Clarify gate (#36): questions the agent raised that no human answered
+        # (non-interactive run). Recorded as a `## Assumptions` section in every
+        # generated spec so the operator can audit them in the morning.
+        self.assumptions: list[str] = []
+        self._interactive = True
         self._linter = SpecLinter(resolve_specs_dir(project_dir), project_dir=project_dir)
 
     def _build_prompt(self, goal: str) -> str:
@@ -200,6 +209,14 @@ class SpecGenerator:
             )
         else:
             clarifications_text = "(none yet)"
+
+        if not self._interactive:
+            clarifications_text += (
+                "\n\nNON-INTERACTIVE MODE: no human is available to answer "
+                "questions. Do NOT stall on clarification — for any ambiguity, "
+                "choose the most reasonable default and proceed. The loop records "
+                "unresolved questions as a `## Assumptions` section for later audit."
+            )
 
         commands = load_backpressure(self.project_dir)
         if not commands:
@@ -275,15 +292,24 @@ class SpecGenerator:
         max_rounds: int = 3,
         ask_fn: Callable[[list[str]], list[str]] | None = None,
         on_line: Callable[[str], None] | None = None,
+        interactive: bool | None = None,
     ) -> list[Path]:
         """Run the clarification loop and write spec file(s).
 
         A large goal is automatically decomposed into multiple ordered specs.
 
+        The clarify gate (#36) behaves two ways: interactively it asks the user
+        the agent's clarifying questions; non-interactively it records each
+        question as an assumption (the agent picks a default) and appends a
+        ``## Assumptions`` section to every generated spec so the human can
+        audit those choices later. ``interactive`` defaults to whether stdin is
+        a TTY.
+
         Returns:
             List of paths to written spec files (one or more).
         """
         ask_fn = ask_fn or self._ask_user
+        self._interactive = sys.stdin.isatty() if interactive is None else interactive
 
         for _round in range(max_rounds):
             prompt = self._build_prompt(goal)
@@ -295,7 +321,7 @@ class SpecGenerator:
                 specs = self._split_specs(clean_output)
                 if specs:
                     specs = self._lint_and_retry(specs, on_line)
-                    return self._write_specs(specs)
+                    return self._write_specs(self._apply_assumptions(specs))
                 raise SpecGenerationError(
                     "agent did not return a recognizable spec or clarification request"
                 )
@@ -305,7 +331,7 @@ class SpecGenerator:
                 specs = self._split_specs(clean_output)
                 if specs:
                     specs = self._lint_and_retry(specs, on_line)
-                    return self._write_specs(specs)
+                    return self._write_specs(self._apply_assumptions(specs))
                 raise SpecGenerationError(
                     "agent returned DONE but no valid spec was found in the output"
                 )
@@ -316,6 +342,16 @@ class SpecGenerator:
                     raise SpecGenerationError(
                         "agent asked for clarification but provided no questions"
                     )
+                if not self._interactive:
+                    # No human to answer: record the questions as assumptions the
+                    # agent must resolve with defaults, and loop again with the
+                    # non-interactive directive so it proceeds to write specs.
+                    for q in questions:
+                        self.assumptions.append(q)
+                        self.clarifications.append(
+                            f"Q: {q}\n   A: (no human available — choose a reasonable default)"
+                        )
+                    continue
                 answers = ask_fn(questions)
                 for q, a in zip(questions, answers, strict=True):
                     self.clarifications.append(f"Q: {q}\n   A: {a}")
@@ -327,6 +363,31 @@ class SpecGenerator:
             f"could not clarify the goal after {max_rounds} rounds; "
             "try describing the task more concretely"
         )
+
+    def _apply_assumptions(self, specs: list[str]) -> list[str]:
+        """Append a ``## Assumptions`` section to each spec (non-interactive gate).
+
+        Deduplicated, in first-seen order. No-op when nothing was assumed (e.g.
+        an interactive run or a goal the agent never needed to clarify).
+        """
+        if not self.assumptions:
+            return specs
+        unique = list(dict.fromkeys(self.assumptions))  # de-dup, preserve order
+        block = "## Assumptions\n" + "\n".join(
+            f"- {q} — resolved with a default; audit before relying on it." for q in unique
+        )
+        return [self._insert_assumptions_section(spec, block) for spec in specs]
+
+    @staticmethod
+    def _insert_assumptions_section(markdown: str, block: str) -> str:
+        """Insert an Assumptions section ahead of Verification (or append it)."""
+        if "## Assumptions" in markdown:
+            return markdown
+        match = re.search(r"^##\s+Verification\s*$", markdown, re.MULTILINE)
+        if match:
+            idx = match.start()
+            return markdown[:idx] + block + "\n\n" + markdown[idx:]
+        return markdown.rstrip() + "\n\n" + block + "\n"
 
     def _lint_candidate(self, markdown: str) -> list[Finding]:
         """Lint a candidate spec's markdown before it is written to disk.
