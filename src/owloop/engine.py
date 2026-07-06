@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from owloop import spec_queue
-from owloop.adapters import AgentAdapter
+from owloop.adapters import AgentAdapter, AgentResult
 from owloop.learnings import (
     append_learning,
     extract_learnings,
@@ -38,6 +38,7 @@ from owloop.paths import resolve_logs_dir, resolve_owloop_dir, resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.sleep_inhibitor import SleepInhibitor
 from owloop.subagents import SubagentOrchestrator
+from owloop.tokens import IterationTokenLimitExceededError, TokenTracker
 
 BUILD_PROMPT = """\
 # Owloop — Build Mode
@@ -71,18 +72,6 @@ assume something doesn't exist without checking.
 ONLY modify files within the scope described in the spec's Requirements section.
 Do NOT touch files listed in the spec's Exclusions section.
 Do NOT modify, delete, or comment out existing tests.
-
-## Final output requirement
-
-After you have committed and pushed, the very last line of your response must be
-exactly one of the following promise signals and nothing else on that line:
-
-- `<promise>DONE</promise>` when the spec is fully implemented and verified.
-- `<promise>BLOCKED:reason</promise>` when an external blocker stops you.
-- `<promise>DECIDE:question</promise>` when you need a human decision.
-
-Do not wrap the promise in a code block, do not add explanatory text after it,
-and do not omit it. The loop relies on this exact line to detect completion.
 """
 
 VERIFIER_PROMPT = """\
@@ -118,6 +107,7 @@ class EngineConfig:
     max_iterations: int = 0  # 0 = unlimited
     max_duration_minutes: int = 0  # 0 = unlimited
     max_tokens: int = 0  # 0 = unlimited
+    max_tokens_per_iteration: int = 0  # 0 = unlimited
     idle_timeout: float = 3600  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
@@ -137,6 +127,9 @@ class EngineConfig:
     # ``resume`` is True, the engine reuses the latest recorded session.
     session_id: str | None = None
     resume: bool = False
+    # When True, run exactly one iteration, skip push, revert any commit the
+    # iteration made, and produce a DryRunReport instead of looping.
+    dry_run: bool = False
 
 
 @dataclass
@@ -155,6 +148,26 @@ class IterationResult:
 
 
 @dataclass
+class DryRunReport:
+    """Concise pass/fail report produced by a ``--dry-run`` / ``--one-shot`` run."""
+
+    promise_done: bool
+    acceptance_passed: int
+    acceptance_failed: int
+    tokens_used: int
+    spec_name: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "promise_done": self.promise_done,
+            "acceptance_passed": self.acceptance_passed,
+            "acceptance_failed": self.acceptance_failed,
+            "tokens_used": self.tokens_used,
+            "spec_name": self.spec_name,
+        }
+
+
+@dataclass
 class RunSummary:
     iterations: int
     branch: str
@@ -163,10 +176,12 @@ class RunSummary:
     stopped_reason: str
     issues: list[str] | None = None
     tokens_used: int = 0
+    estimated_cost_usd: float = 0.0
     blocker: str | None = None
     decision_question: str | None = None
     session_id: str = ""
     resumed_from_session: str | None = None
+    dry_run_report: DryRunReport | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -177,10 +192,12 @@ class RunSummary:
             "stopped_reason": self.stopped_reason,
             "issues": self.issues,
             "tokens_used": self.tokens_used,
+            "estimated_cost_usd": self.estimated_cost_usd,
             "blocker": self.blocker,
             "decision_question": self.decision_question,
             "session_id": self.session_id,
             "resumed_from_session": self.resumed_from_session,
+            "dry_run_report": self.dry_run_report.as_dict() if self.dry_run_report else None,
         }
 
 
@@ -199,7 +216,8 @@ class OwloopEngine:
         self.session_log: Path | None = None
         self._recent_file_sets: list[set[str]] = []
         self.tokens_used = 0
-        self.session_id = None
+        self.estimated_cost_usd = 0.0
+        self.session_id = config.session_id
         self.resumed_from_session: str | None = None
         self._resumed_iterations = 0
         self._resumed_elapsed_seconds = 0.0
@@ -222,6 +240,24 @@ class OwloopEngine:
 
     def _emit(self, kind: str, **data: Any) -> None:
         self.on_event(kind, data)
+        self._log_event(kind, data)
+
+    def _events_log_path(self) -> Path:
+        """Path to the structured, append-only JSON Lines event log."""
+        return self.log_dir / "events.jsonl"
+
+    def _log_event(self, kind: str, data: dict[str, Any]) -> None:
+        """Append one JSON line for this event; creates the log lazily."""
+        path = self._events_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "kind": kind,
+            "data": data,
+        }
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str) + "\n")
 
     def _run_git(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -522,6 +558,7 @@ class OwloopEngine:
             self._emit("worktree_auto_created", reason="non_interactive")
 
         session_id, wt_branch, wt_path = self._resolve_worktree_session()
+        self.session_id = session_id
 
         self._emit("worktree_creating", path=str(wt_path), branch=wt_branch)
 
@@ -688,6 +725,22 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
+    def _run_acceptance_criteria(self, spec_name: str | None) -> tuple[int, int]:
+        """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
+        if not spec_name:
+            return 0, 0
+        commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
+        passed = failed = 0
+        for command in commands:
+            result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
+                command, shell=True, cwd=self.cwd, capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                passed += 1
+            else:
+                failed += 1
+        return passed, failed
+
     def run_iteration(self, iteration: int) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
         prompt_file = owloop_dir / "PROMPT_build.md"
@@ -701,20 +754,43 @@ class OwloopEngine:
             prompt_file.read_text(encoding="utf-8")
         )
 
+        cap_tracker = TokenTracker()
+        iteration_tokens = 0
+
         with log_file.open("w", encoding="utf-8") as log_f:
 
             def _on_line(line: str) -> None:
+                nonlocal iteration_tokens
                 log_f.write(line + "\n")
                 self._log_line(line)
                 self._emit("output_line", line=line)
+                if self.config.max_tokens_per_iteration > 0:
+                    iteration_tokens += cap_tracker.count_from_line(line)
+                    if iteration_tokens > self.config.max_tokens_per_iteration:
+                        raise IterationTokenLimitExceededError(iteration_tokens)
 
-            if self.config.use_subagents:
-                orchestrator = SubagentOrchestrator(
-                    self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
+            try:
+                if self.config.use_subagents:
+                    orchestrator = SubagentOrchestrator(
+                        self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
+                    )
+                    result = orchestrator.run()
+                else:
+                    result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
+            except IterationTokenLimitExceededError as exc:
+                self._emit(
+                    "iteration_token_limit_exceeded",
+                    iteration=iteration,
+                    tokens=exc.tokens_used,
+                    limit=self.config.max_tokens_per_iteration,
                 )
-                result = orchestrator.run()
-            else:
-                result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
+                result = AgentResult(
+                    stdout="",
+                    returncode=-1,
+                    success=False,
+                    has_completion_signal=False,
+                    tokens_used=exc.tokens_used,
+                )
 
         tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
         parsed = parse_promise_signal(result.stdout)
@@ -722,7 +798,15 @@ class OwloopEngine:
         promise_payload = parsed[1] if parsed else ""
 
         self.tokens_used += result.tokens_used
-        self._emit("tokens_update", iteration=iteration, tokens_used=result.tokens_used, total_tokens=self.tokens_used)
+        self.estimated_cost_usd += result.cost_usd
+        self._emit(
+            "tokens_update",
+            iteration=iteration,
+            tokens_used=result.tokens_used,
+            total_tokens=self.tokens_used,
+            cost_usd=result.cost_usd,
+            total_cost_usd=self.estimated_cost_usd,
+        )
 
         if result.timed_out:
             self._emit("agent_timeout", iteration=iteration)
@@ -788,6 +872,7 @@ class OwloopEngine:
             VERIFIER_PROMPT, cwd=self.cwd, on_line=_on_line
         )
         self.tokens_used += result.tokens_used
+        self.estimated_cost_usd += result.cost_usd
         return result
 
     def run(self) -> RunSummary:
@@ -861,12 +946,19 @@ class OwloopEngine:
         stopped_reason = "max_iterations"
         blocker: str | None = None
         decision_question: str | None = None
+        dry_run_report: DryRunReport | None = None
+        dry_run_original_head = ""
+        if self.config.dry_run:
+            dry_run_original_head = self._run_git("rev-parse", "HEAD").stdout.strip()
+        # A dry run always stops after exactly one iteration, no matter what
+        # --max-iterations was passed.
+        max_iterations = 1 if self.config.dry_run else self.config.max_iterations
         start_time = time.monotonic() - self._resumed_elapsed_seconds
         self._run_start_time = start_time
 
         try:
             while True:
-                if self.config.max_iterations > 0 and iteration >= self.config.max_iterations:
+                if max_iterations > 0 and iteration >= max_iterations:
                     break
 
                 if self.config.max_duration_minutes > 0:
@@ -892,10 +984,31 @@ class OwloopEngine:
                         note_summary = commit_result.stdout.strip()
                 self._append_run_note(iteration, result.success, note_summary)
 
+                if self.config.dry_run:
+                    acceptance_passed, acceptance_failed = self._run_acceptance_criteria(
+                        status["first_incomplete"]
+                    )
+                    current_head = self._run_git("rev-parse", "HEAD").stdout.strip()
+                    if current_head and current_head != dry_run_original_head:
+                        self._run_git("reset", "--soft", dry_run_original_head)
+                        self._emit(
+                            "dry_run_commit_reverted",
+                            from_head=current_head,
+                            to_head=dry_run_original_head,
+                        )
+                    dry_run_report = DryRunReport(
+                        promise_done=result.promise_state == "DONE",
+                        acceptance_passed=acceptance_passed,
+                        acceptance_failed=acceptance_failed,
+                        tokens_used=result.tokens_used,
+                        spec_name=status["first_incomplete"],
+                    )
+                    self._emit("dry_run_report", **dry_run_report.as_dict())
+
                 if result.promise_state == "DONE":
                     consecutive_failures = 0
                     backoff_level = 0
-                    if self._check_fix_loop():
+                    if not self.config.dry_run and self._check_fix_loop():
                         stopped_reason = "fix_loop_blocked"
                         blocker = "same files modified repeatedly; spec needs to be split"
                         break
@@ -915,6 +1028,10 @@ class OwloopEngine:
                         self._emit("stuck_warning", consecutive_failures=consecutive_failures)
                         backoff_level += 1
                         consecutive_failures = self.config.max_consecutive_failures
+
+                if self.config.dry_run:
+                    stopped_reason = "dry_run_complete"
+                    break
 
                 self._push(branch)
                 spec_status = self._spec_status()
@@ -953,10 +1070,12 @@ class OwloopEngine:
             main_repo_dir=self.main_repo_dir,
             stopped_reason=stopped_reason,
             tokens_used=self.tokens_used,
+            estimated_cost_usd=self.estimated_cost_usd,
             blocker=blocker,
             decision_question=decision_question,
             session_id=self.session_id or "",
             resumed_from_session=self.resumed_from_session,
+            dry_run_report=dry_run_report,
         )
         self._write_summary(summary)
         return summary

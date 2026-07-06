@@ -13,8 +13,18 @@ def test_classify_done_status_lowercase():
     assert classify_spec(content) == "done"
 
 
+def test_classify_done_status_bold():
+    content = "# Spec\n\n**Status**: COMPLETE\n"
+    assert classify_spec(content) == "done"
+
+
 def test_classify_in_progress_status():
     content = "# Spec\n\nStatus: In Progress\n"
+    assert classify_spec(content) == "in_progress"
+
+
+def test_classify_in_progress_status_bold():
+    content = "# Spec\n\n**Status**: In Progress\n"
     assert classify_spec(content) == "in_progress"
 
 

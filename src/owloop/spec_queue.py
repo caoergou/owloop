@@ -35,6 +35,10 @@ _DEPENDS_ON_SECTION_RE = re.compile(
 )
 _LIST_ITEM_RE = re.compile(r"^\s*-\s*(.+?)\s*$", re.MULTILINE)
 _NUMERIC_PREFIX_RE = re.compile(r"^\d+-")
+_ACCEPTANCE_CRITERIA_SECTION_RE = re.compile(
+    r"^##\s+Acceptance Criteria\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
 
 DEFAULT_PRIORITY = 999
 
@@ -143,6 +147,32 @@ def get_spec_dependencies(spec_file: Path, specs: list[Path]) -> list[Path]:
         if target is not None and target != spec_file:
             resolved.append(target)
     return resolved
+
+
+def get_acceptance_criteria_commands(spec_file: Path) -> list[str]:
+    """Extract the first backtick-quoted shell command from each Acceptance Criteria bullet.
+
+    Bullets without a backtick-quoted command (free-form descriptions) are skipped.
+    """
+    if not spec_file.is_file():
+        return []
+    content = spec_file.read_text(encoding="utf-8", errors="replace")
+    match = _ACCEPTANCE_CRITERIA_SECTION_RE.search(content)
+    if match is None:
+        return []
+
+    commands: list[str] = []
+    for line in match.group(1).splitlines():
+        stripped = line.strip()
+        if "`" not in stripped:
+            continue
+        parts = stripped.split("`")
+        if len(parts) < 3:
+            continue
+        command = parts[1].strip()
+        if command:
+            commands.append(command)
+    return commands
 
 
 def build_dependency_graph(specs_dir: Path) -> dict[Path, list[Path]]:

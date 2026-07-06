@@ -25,16 +25,44 @@ from owloop.spec_queue import get_root_specs, is_root_spec_complete
 class ReportGenerator:
     """Build a branded HTML report from the latest run summary and git history."""
 
+    FAILURE_EVENT_KINDS = {
+        "agent_failed",
+        "agent_timeout",
+        "verification_failed",
+        "blocked",
+        "decide",
+        "max_tokens_reached",
+        "max_duration_reached",
+        "fix_loop_blocked",
+        "interrupted",
+        "preflight_failed",
+    }
+
     def __init__(self, project_dir: Path) -> None:
         self.project_dir = project_dir
         logs_dir = resolve_logs_dir(project_dir)
         self.summary_path = logs_dir / "owloop_summary_latest.json"
+        self.events_path = logs_dir / "events.jsonl"
 
     def _load_summary(self) -> dict[str, Any]:
         if self.summary_path.exists():
             with self.summary_path.open(encoding="utf-8") as f:
                 return json.load(f)  # type: ignore[no-any-return]
         return {}
+
+    def _load_events(self) -> list[dict[str, Any]]:
+        if not self.events_path.exists():
+            return []
+        events: list[dict[str, Any]] = []
+        for line in self.events_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return events
 
     def generate(
         self,
@@ -46,6 +74,7 @@ class ReportGenerator:
         branch = summary.get("branch", "unknown")
         iterations = summary.get("iterations", 0)
         tokens_used = summary.get("tokens_used", 0)
+        estimated_cost_usd = summary.get("estimated_cost_usd", 0)
         stopped_reason = summary.get("stopped_reason", "unknown")
         commits = get_recent_commits(self.project_dir, iterations)
         total_files, total_ins, total_del = total_diff_stats(commits)
@@ -57,6 +86,7 @@ class ReportGenerator:
             branch=branch,
             iterations=iterations,
             tokens_used=tokens_used,
+            estimated_cost_usd=estimated_cost_usd,
             stopped_reason=stopped_reason,
             commits=commits,
             total_files=total_files,
@@ -73,6 +103,7 @@ class ReportGenerator:
         branch: str,
         iterations: int,
         tokens_used: int,
+        estimated_cost_usd: float,
         stopped_reason: str,
         commits: list[CommitInfo],
         total_files: int,
@@ -87,7 +118,9 @@ class ReportGenerator:
         diff_summary = self._diff_summary(iterations)
         status_badge = self._status_badge(stopped_reason)
         token_card = self._token_card(tokens_used)
+        cost_card = self._cost_card(estimated_cost_usd)
         insights_section = self._insights_section(insights)
+        events_section = self._events_section(stopped_reason)
         tailwind = tailwind_cdn() if use_tailwind else ""
 
         return f"""<!DOCTYPE html>
@@ -171,6 +204,7 @@ h3 {{
     <div class="card"><h3>Status</h3><p>{status_badge}</p></div>
     <div class="card"><h3>Total diff</h3><p>{total_files} files · <span class="stats">+{total_ins}</span> · <span class="del">-{total_del}</span></p></div>
     {token_card}
+    {cost_card}
   </section>
 
   {insights_section}
@@ -191,6 +225,8 @@ h3 {{
     <h2 class="section-title">Diff Summary</h2>
     {diff_summary}
   </section>
+
+  {events_section}
 
   <section class="section">
     <h2 class="section-title">Commits</h2>
@@ -236,6 +272,12 @@ h3 {{
         if not tokens_used:
             return ""
         return f'<div class="card"><h3>Tokens used</h3><p>{tokens_used:,}</p></div>'
+
+    @staticmethod
+    def _cost_card(estimated_cost_usd: float) -> str:
+        if not estimated_cost_usd:
+            return ""
+        return f'<div class="card"><h3>Estimated cost</h3><p>${estimated_cost_usd:,.4f}</p></div>'
 
     def _insights_section(self, insights: ReportInsights) -> str:
         if not insights.has_content():
@@ -403,6 +445,60 @@ h3 {{
             if line.strip().startswith("## Priority:"):
                 return line.split(":", 1)[-1].strip()
         return "—"
+
+    def _events_section(self, stopped_reason: str) -> str:
+        events = self._load_events()
+        if not events:
+            return ""
+        rows = "\n".join(self._event_row(e) for e in events)
+        failures = [e for e in events if e.get("kind") in self.FAILURE_EVENT_KINDS]
+        failure_summary = ""
+        if failures:
+            failure_items = "".join(
+                f"<li><code>{html.escape(str(e.get('kind')))}</code> — "
+                f"{html.escape(self._event_detail(e.get('data') or {}))}</li>"
+                for e in failures
+            )
+            failure_summary = (
+                '<div class="insight insight-summary">'
+                "<h4>Failure Reasons</h4>"
+                f"<ul>{failure_items}</ul>"
+                "</div>"
+            )
+        return f"""
+  <section class="section">
+    <h2 class="section-title">Event Timeline</h2>
+    <p>Final stop reason: {self._status_badge(stopped_reason)}</p>
+    {failure_summary}
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Event</th><th>Details</th></tr>
+      </thead>
+      <tbody>
+        {rows}
+      </tbody>
+    </table>
+  </section>
+"""
+
+    def _event_row(self, event: dict[str, Any]) -> str:
+        kind = str(event.get("kind", ""))
+        ts = str(event.get("ts", ""))
+        data = event.get("data") or {}
+        badge = "badge-danger" if kind in self.FAILURE_EVENT_KINDS else "badge-info"
+        detail = html.escape(self._event_detail(data))
+        return (
+            "<tr>"
+            f"<td>{html.escape(ts)}</td>"
+            f'<td><span class="badge {badge}">{html.escape(kind)}</span></td>'
+            f"<td>{detail}</td>"
+            "</tr>"
+        )
+
+    @staticmethod
+    def _event_detail(data: dict[str, Any]) -> str:
+        parts = [f"{key}={value}" for key, value in data.items() if key != "line"]
+        return ", ".join(parts)[:200]
 
     def _diff_summary(self, iterations: int) -> str:
         if iterations <= 0:
