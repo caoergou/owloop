@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from owloop.promise import PROMISE_SIGNAL_RE, parse_promise_signal
-from owloop.tokens import TokenTracker
+from owloop.tokens import IterationTokenLimitExceededError, TokenTracker
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
@@ -48,6 +48,7 @@ class AgentResult:
     done_signal: str | None = None
     timed_out: bool = False
     tokens_used: int = 0
+    cost_usd: float = 0.0
     promise_state: str = ""  # "DONE" | "BLOCKED" | "DECIDE" | ""
     promise_payload: str = ""  # text after the colon for BLOCKED/DECIDE
 
@@ -129,6 +130,7 @@ class StreamingAgentAdapter(AgentAdapter):
 
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
         self._result_text_parts: list[str] = []
+        self.token_tracker.reset()
 
         popen_kwargs: dict = {
             "cwd": cwd,
@@ -205,12 +207,15 @@ class StreamingAgentAdapter(AgentAdapter):
         except KeyboardInterrupt:
             self._killpg(proc)
             raise
+        except IterationTokenLimitExceededError:
+            self._killpg(proc)
+            raise
 
         clean_output = "\n".join(self._result_text_parts) if self._result_text_parts else "\n".join(output_lines)
         match = None if timed_out else PROMISE_SIGNAL_RE.search(clean_output)
         parsed = parse_promise_signal(clean_output) if match else None
         returncode = -1 if timed_out else (proc.returncode if proc.returncode is not None else -1)
-        tokens_used = self.token_tracker.count_from_text(clean_output)
+        tokens_used = self.token_tracker.resolve(clean_output)
 
         return AgentResult(
             stdout=clean_output,
@@ -220,6 +225,7 @@ class StreamingAgentAdapter(AgentAdapter):
             done_signal=match.group(0) if match else None,
             timed_out=timed_out,
             tokens_used=tokens_used,
+            cost_usd=self.token_tracker.cost_usd,
             promise_state=parsed[0] if parsed else "",
             promise_payload=parsed[1] if parsed else "",
         )
@@ -347,6 +353,8 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
             cost = event.get("total_cost_usd", 0)
             in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
             out_tok = usage.get("output_tokens", 0)
+            if in_tok or out_tok or cost:
+                self.token_tracker.record_usage(input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost)
             model_usage = event.get("modelUsage", {})
             model_name = next(iter(model_usage), "")
             parts = []
@@ -445,6 +453,18 @@ class KimiCodeAdapter(StreamingAgentAdapter):
             if stripped:
                 return stripped
             return None
+
+        # Kimi does not document a stable usage schema; opportunistically detect
+        # it wherever it appears (top-level or under "meta") and feed the
+        # tracker immediately. When absent, `resolve()` falls back to the
+        # character-count heuristic over the collected result text.
+        usage = event.get("usage")
+        if isinstance(usage, dict):
+            in_tok = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+            out_tok = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+            cost = float(usage.get("total_cost_usd") or 0.0)
+            if in_tok or out_tok or cost:
+                self.token_tracker.record_usage(input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost)
 
         role = event.get("role", "")
 

@@ -46,6 +46,7 @@ class ReportGenerator:
         branch = summary.get("branch", "unknown")
         iterations = summary.get("iterations", 0)
         tokens_used = summary.get("tokens_used", 0)
+        estimated_cost_usd = summary.get("estimated_cost_usd", 0)
         stopped_reason = summary.get("stopped_reason", "unknown")
         commits = get_recent_commits(self.project_dir, iterations)
         total_files, total_ins, total_del = total_diff_stats(commits)
@@ -57,6 +58,7 @@ class ReportGenerator:
             branch=branch,
             iterations=iterations,
             tokens_used=tokens_used,
+            estimated_cost_usd=estimated_cost_usd,
             stopped_reason=stopped_reason,
             commits=commits,
             total_files=total_files,
@@ -73,6 +75,7 @@ class ReportGenerator:
         branch: str,
         iterations: int,
         tokens_used: int,
+        estimated_cost_usd: float,
         stopped_reason: str,
         commits: list[CommitInfo],
         total_files: int,
@@ -87,6 +90,7 @@ class ReportGenerator:
         diff_summary = self._diff_summary(iterations)
         status_badge = self._status_badge(stopped_reason)
         token_card = self._token_card(tokens_used)
+        cost_card = self._cost_card(estimated_cost_usd)
         insights_section = self._insights_section(insights)
         tailwind = tailwind_cdn() if use_tailwind else ""
 
@@ -171,6 +175,7 @@ h3 {{
     <div class="card"><h3>Status</h3><p>{status_badge}</p></div>
     <div class="card"><h3>Total diff</h3><p>{total_files} files · <span class="stats">+{total_ins}</span> · <span class="del">-{total_del}</span></p></div>
     {token_card}
+    {cost_card}
   </section>
 
   {insights_section}
@@ -236,6 +241,12 @@ h3 {{
         if not tokens_used:
             return ""
         return f'<div class="card"><h3>Tokens used</h3><p>{tokens_used:,}</p></div>'
+
+    @staticmethod
+    def _cost_card(estimated_cost_usd: float) -> str:
+        if not estimated_cost_usd:
+            return ""
+        return f'<div class="card"><h3>Estimated cost</h3><p>${estimated_cost_usd:,.4f}</p></div>'
 
     def _insights_section(self, insights: ReportInsights) -> str:
         if not insights.has_content():

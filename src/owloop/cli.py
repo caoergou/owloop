@@ -19,7 +19,7 @@ from rich.text import Text
 from owloop import _brand
 from owloop.adapters import get_adapter
 from owloop.backpressure import discover_and_save
-from owloop.engine import EngineConfig, OwloopEngine
+from owloop.engine import EngineConfig, OwloopEngine, RunSummary
 from owloop.paths import resolve_specs_dir
 from owloop.report import ReportGenerator
 from owloop.report_ai import AIReportInsightsGenerator
@@ -701,18 +701,21 @@ def _run_engine(
     idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
-    session_id: str | None = None, resume: bool = False,
+    session_id: str | None = None, resume: bool = False, dry_run: bool = False,
+    no_tui: bool = False, max_tokens_per_iteration: int = 0,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
         max_iterations=max_iterations,
         max_duration_minutes=max_duration,
         max_tokens=max_tokens,
+        max_tokens_per_iteration=max_tokens_per_iteration,
         idle_timeout=idle_timeout,
         worktree=worktree,
         use_subagents=subagents,
         session_id=session_id,
         resume=resume,
+        dry_run=dry_run,
     )
     adapter = get_adapter(
         agent,
@@ -731,7 +734,7 @@ def _run_engine(
             idle_timeout=idle_timeout,
         )
 
-    if sys.stdout.isatty():
+    if not no_tui and sys.stdout.isatty():
         tui = OwloopTUI(ascii=ascii, no_color=no_color, compact=compact)
 
         def _confirm_dirty() -> bool:
@@ -761,11 +764,30 @@ def _run_engine(
             console.print("\n[dim]owloop stopped.[/]")
             raise SystemExit(0) from None
         tui.print_exit_summary(summary)
+        if config.dry_run:
+            _print_dry_run_report(tui.console, summary)
     else:
         console = Console(no_color=no_color)
         console.print()
         console.print(_banner_text(ascii=ascii, no_color=no_color))
         console.print(f"[{_brand.AMBER}]Starting autonomous loop...[/]")
+
+        def _confirm_dirty_plain() -> bool:
+            console.print(
+                f"[{_brand.AMBER}]⚠[/] Workspace has uncommitted changes that won't appear in the worktree."
+            )
+            return Confirm.ask("Continue anyway?", default=False, console=console)
+
+        def _confirm_worktree_plain() -> bool:
+            return Confirm.ask(
+                "Create an isolated worktree to protect your main repository?",
+                default=True,
+                console=console,
+            )
+
+        config.confirm_dirty = _confirm_dirty_plain
+        config.confirm_worktree = _confirm_worktree_plain
+
         reporter = ConsoleReporter(console, ascii=ascii)
         engine = OwloopEngine(config, adapter, on_event=reporter.on_event)
         try:
@@ -774,9 +796,42 @@ def _run_engine(
             console.print("\n[dim]owloop stopped.[/]")
             raise SystemExit(0) from None
         reporter.print_summary(summary)
+        if config.dry_run:
+            _print_dry_run_report(console, summary)
 
     if summary.stopped_reason in STOPPED_REASON_EXIT_1:
         raise SystemExit(1)
+
+
+def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
+    """Print the concise pass/fail report produced by ``--dry-run`` / ``--one-shot``."""
+    report = summary.dry_run_report
+    if report is None:
+        return
+
+    promise_line = (
+        f"[{_brand.GREEN}]<promise>DONE</promise> emitted[/]"
+        if report.promise_done
+        else f"[{_brand.RED}]<promise>DONE</promise> not emitted[/]"
+    )
+    lines = [promise_line]
+    if report.spec_name:
+        lines.append(f"Spec: {report.spec_name}")
+    lines.append(
+        f"Acceptance criteria: [{_brand.GREEN}]{report.acceptance_passed} passed[/] / "
+        f"[{_brand.RED}]{report.acceptance_failed} failed[/]"
+    )
+    lines.append(f"Tokens used: {report.tokens_used}")
+
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Dry-run report[/]",
+            border_style=_brand.AMBER,
+            padding=(1, 2),
+        )
+    )
 
 
 @main.command()
@@ -790,10 +845,29 @@ def _run_engine(
     default=False,
     help="Resume the most recent owloop session (reuse its worktree and branch).",
 )
+@click.option(
+    "--dry-run", "--one-shot", "dry_run",
+    is_flag=True,
+    default=False,
+    help="Run exactly one iteration, print a pass/fail report, and skip push "
+    "(no committed changes are left behind). Use to validate specs without "
+    "burning a full overnight run.",
+)
+@click.option(
+    "--no-tui", "--plain", "no_tui",
+    is_flag=True,
+    default=False,
+    help="Bypass the full-screen TUI and print plain console output, even in a TTY.",
+)
+@click.option(
+    "--max-tokens-per-iteration", type=MaxTokensParamType(), default=0,
+    help="Kill a single iteration early if it exceeds N tokens (0 = unlimited; "
+    "supports k/w/m shorthand).", show_default=True,
+)
 @_common_run_options
-def run(max_iterations: int, resume: bool, worktree: bool, model: str, agent: str,
-        verifier_model: str | None, subagents: bool, idle_timeout: float,
-        max_duration: int, max_tokens: int) -> None:
+def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
+        worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
+        idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact, verbose = _cli_options()
     specs_dir = resolve_specs_dir(Path.cwd())
@@ -810,6 +884,9 @@ def run(max_iterations: int, resume: bool, worktree: bool, model: str, agent: st
         verifier_model=verifier_model,
         subagents=subagents,
         resume=resume,
+        dry_run=dry_run,
+        no_tui=no_tui,
+        max_tokens_per_iteration=max_tokens_per_iteration,
     )
 
 
