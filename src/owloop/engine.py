@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from owloop import spec_queue
-from owloop.adapters import AgentAdapter
+from owloop.adapters import AgentAdapter, AgentResult
 from owloop.learnings import (
     append_learning,
     extract_learnings,
@@ -38,6 +38,7 @@ from owloop.paths import resolve_logs_dir, resolve_owloop_dir, resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.sleep_inhibitor import SleepInhibitor
 from owloop.subagents import SubagentOrchestrator
+from owloop.tokens import IterationTokenLimitExceededError, TokenTracker
 
 BUILD_PROMPT = """\
 # Owloop — Build Mode
@@ -71,18 +72,6 @@ assume something doesn't exist without checking.
 ONLY modify files within the scope described in the spec's Requirements section.
 Do NOT touch files listed in the spec's Exclusions section.
 Do NOT modify, delete, or comment out existing tests.
-
-## Final output requirement
-
-After you have committed and pushed, the very last line of your response must be
-exactly one of the following promise signals and nothing else on that line:
-
-- `<promise>DONE</promise>` when the spec is fully implemented and verified.
-- `<promise>BLOCKED:reason</promise>` when an external blocker stops you.
-- `<promise>DECIDE:question</promise>` when you need a human decision.
-
-Do not wrap the promise in a code block, do not add explanatory text after it,
-and do not omit it. The loop relies on this exact line to detect completion.
 """
 
 VERIFIER_PROMPT = """\
@@ -118,6 +107,7 @@ class EngineConfig:
     max_iterations: int = 0  # 0 = unlimited
     max_duration_minutes: int = 0  # 0 = unlimited
     max_tokens: int = 0  # 0 = unlimited
+    max_tokens_per_iteration: int = 0  # 0 = unlimited
     idle_timeout: float = 3600  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
@@ -186,6 +176,7 @@ class RunSummary:
     stopped_reason: str
     issues: list[str] | None = None
     tokens_used: int = 0
+    estimated_cost_usd: float = 0.0
     blocker: str | None = None
     decision_question: str | None = None
     session_id: str = ""
@@ -201,6 +192,7 @@ class RunSummary:
             "stopped_reason": self.stopped_reason,
             "issues": self.issues,
             "tokens_used": self.tokens_used,
+            "estimated_cost_usd": self.estimated_cost_usd,
             "blocker": self.blocker,
             "decision_question": self.decision_question,
             "session_id": self.session_id,
@@ -224,6 +216,7 @@ class OwloopEngine:
         self.session_log: Path | None = None
         self._recent_file_sets: list[set[str]] = []
         self.tokens_used = 0
+        self.estimated_cost_usd = 0.0
         self.session_id = config.session_id
         self.resumed_from_session: str | None = None
         self._resumed_iterations = 0
@@ -761,20 +754,43 @@ class OwloopEngine:
             prompt_file.read_text(encoding="utf-8")
         )
 
+        cap_tracker = TokenTracker()
+        iteration_tokens = 0
+
         with log_file.open("w", encoding="utf-8") as log_f:
 
             def _on_line(line: str) -> None:
+                nonlocal iteration_tokens
                 log_f.write(line + "\n")
                 self._log_line(line)
                 self._emit("output_line", line=line)
+                if self.config.max_tokens_per_iteration > 0:
+                    iteration_tokens += cap_tracker.count_from_line(line)
+                    if iteration_tokens > self.config.max_tokens_per_iteration:
+                        raise IterationTokenLimitExceededError(iteration_tokens)
 
-            if self.config.use_subagents:
-                orchestrator = SubagentOrchestrator(
-                    self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
+            try:
+                if self.config.use_subagents:
+                    orchestrator = SubagentOrchestrator(
+                        self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
+                    )
+                    result = orchestrator.run()
+                else:
+                    result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
+            except IterationTokenLimitExceededError as exc:
+                self._emit(
+                    "iteration_token_limit_exceeded",
+                    iteration=iteration,
+                    tokens=exc.tokens_used,
+                    limit=self.config.max_tokens_per_iteration,
                 )
-                result = orchestrator.run()
-            else:
-                result = self.adapter.run(prompt_text, cwd=self.cwd, on_line=_on_line)
+                result = AgentResult(
+                    stdout="",
+                    returncode=-1,
+                    success=False,
+                    has_completion_signal=False,
+                    tokens_used=exc.tokens_used,
+                )
 
         tail = "\n".join(result.stdout.splitlines()[-self.config.tail_lines :])
         parsed = parse_promise_signal(result.stdout)
@@ -782,7 +798,15 @@ class OwloopEngine:
         promise_payload = parsed[1] if parsed else ""
 
         self.tokens_used += result.tokens_used
-        self._emit("tokens_update", iteration=iteration, tokens_used=result.tokens_used, total_tokens=self.tokens_used)
+        self.estimated_cost_usd += result.cost_usd
+        self._emit(
+            "tokens_update",
+            iteration=iteration,
+            tokens_used=result.tokens_used,
+            total_tokens=self.tokens_used,
+            cost_usd=result.cost_usd,
+            total_cost_usd=self.estimated_cost_usd,
+        )
 
         if result.timed_out:
             self._emit("agent_timeout", iteration=iteration)
@@ -848,6 +872,7 @@ class OwloopEngine:
             VERIFIER_PROMPT, cwd=self.cwd, on_line=_on_line
         )
         self.tokens_used += result.tokens_used
+        self.estimated_cost_usd += result.cost_usd
         return result
 
     def run(self) -> RunSummary:
@@ -1045,6 +1070,7 @@ class OwloopEngine:
             main_repo_dir=self.main_repo_dir,
             stopped_reason=stopped_reason,
             tokens_used=self.tokens_used,
+            estimated_cost_usd=self.estimated_cost_usd,
             blocker=blocker,
             decision_question=decision_question,
             session_id=self.session_id or "",

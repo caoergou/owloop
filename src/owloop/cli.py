@@ -703,12 +703,14 @@ def _run_engine(
     verifier_model: str | None = None, subagents: bool = False,
     session_id: str | None = None, resume: bool = False,
     no_tui: bool = False, dry_run: bool = False,
+    max_tokens_per_iteration: int = 0,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
         max_iterations=max_iterations,
         max_duration_minutes=max_duration,
         max_tokens=max_tokens,
+        max_tokens_per_iteration=max_tokens_per_iteration,
         idle_timeout=idle_timeout,
         worktree=worktree,
         use_subagents=subagents,
@@ -845,12 +847,6 @@ def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
     help="Resume the most recent owloop session (reuse its worktree and branch).",
 )
 @click.option(
-    "--no-tui", "--plain", "no_tui",
-    is_flag=True,
-    default=False,
-    help="Bypass the full-screen TUI and print plain console output, even in a TTY.",
-)
-@click.option(
     "--dry-run", "--one-shot", "dry_run",
     is_flag=True,
     default=False,
@@ -858,9 +854,20 @@ def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
     "(no committed changes are left behind). Use to validate specs without "
     "burning a full overnight run.",
 )
+@click.option(
+    "--no-tui", "--plain", "no_tui",
+    is_flag=True,
+    default=False,
+    help="Bypass the full-screen TUI and print plain console output, even in a TTY.",
+)
+@click.option(
+    "--max-tokens-per-iteration", type=MaxTokensParamType(), default=0,
+    help="Kill a single iteration early if it exceeds N tokens (0 = unlimited; "
+    "supports k/w/m shorthand).", show_default=True,
+)
 @_common_run_options
-def run(max_iterations: int, resume: bool, no_tui: bool, dry_run: bool, worktree: bool,
-        model: str, agent: str, verifier_model: str | None, subagents: bool,
+def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
+        worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact, verbose = _cli_options()
@@ -880,6 +887,7 @@ def run(max_iterations: int, resume: bool, no_tui: bool, dry_run: bool, worktree
         resume=resume,
         no_tui=no_tui,
         dry_run=dry_run,
+        max_tokens_per_iteration=max_tokens_per_iteration,
     )
 
 

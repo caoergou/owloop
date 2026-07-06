@@ -126,6 +126,47 @@ def test_run_without_dry_run_flag_defaults_false():
             assert kwargs.get("dry_run") is False
 
 
+def test_run_help_exposes_no_tui_and_plain_flags():
+    runner = CliRunner()
+    result = runner.invoke(main, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--no-tui" in result.output
+    assert "--plain" in result.output
+
+
+def test_run_help_exposes_max_tokens_per_iteration_flag():
+    runner = CliRunner()
+    result = runner.invoke(main, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--max-tokens-per-iteration" in result.output
+
+
+def test_run_parses_max_tokens_per_iteration():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run", "--max-tokens-per-iteration", "10k"])
+            assert result.exit_code == 0, result.output
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("max_tokens_per_iteration") == 10_000
+
+
+def test_run_without_max_tokens_per_iteration_defaults_zero():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run"])
+            assert result.exit_code == 0, result.output
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("max_tokens_per_iteration") == 0
+
+
 def test_run_no_tui_flag_forwards_to_engine_runner():
     from unittest.mock import patch
 
@@ -163,6 +204,39 @@ def test_run_without_no_tui_flag_defaults_false():
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
             assert kwargs.get("no_tui") is False
+
+
+def test_run_help_exposes_max_tokens_per_iteration_flag():
+    runner = CliRunner()
+    result = runner.invoke(main, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--max-tokens-per-iteration" in result.output
+
+
+def test_run_parses_max_tokens_per_iteration():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run", "--max-tokens-per-iteration", "10k"])
+            assert result.exit_code == 0, result.output
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("max_tokens_per_iteration") == 10_000
+
+
+def test_run_without_max_tokens_per_iteration_defaults_zero():
+    from unittest.mock import patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _init_repo_with_spec()
+        with patch("owloop.cli._run_engine") as mock_engine:
+            result = runner.invoke(main, ["run"])
+            assert result.exit_code == 0, result.output
+            _args, kwargs = mock_engine.call_args
+            assert kwargs.get("max_tokens_per_iteration") == 0
 
 
 def test_run_engine_no_tui_bypasses_tui_and_uses_console_reporter():

@@ -2,6 +2,8 @@
 
 import subprocess
 
+import pytest
+
 from owloop.adapters import AgentResult, MockAdapter
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.tokens import TokenTracker
@@ -70,6 +72,57 @@ def test_mock_adapter_passes_through_tokens(tmp_path):
     assert result.tokens_used == 1234
     assert engine.tokens_used == 1234
     assert any(kind == "tokens_update" for kind, _ in events)
+
+
+def test_engine_kills_iteration_exceeding_per_iteration_cap(tmp_path):
+    repo = _make_repo(tmp_path)
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="Total tokens: 5000",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+                tokens_used=5000,
+            )
+        ]
+    )
+    config = EngineConfig(project_dir=repo, max_tokens_per_iteration=1000, worktree=False)
+    engine = OwloopEngine(config, adapter, on_event=None)
+    engine.log_dir.mkdir(parents=True, exist_ok=True)
+    engine._write_prompt_file()
+    events = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+
+    result = engine.run_iteration(1)
+
+    assert result.success is False
+    assert result.promise_state != "DONE"
+    assert any(kind == "iteration_token_limit_exceeded" for kind, _ in events)
+
+
+def test_run_summary_includes_estimated_cost(tmp_path):
+    repo = _make_repo(tmp_path)
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="Total tokens: 100",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+                tokens_used=100,
+                cost_usd=0.05,
+            ),
+        ]
+    )
+    config = EngineConfig(project_dir=repo, worktree=False, max_iterations=1)
+    engine = OwloopEngine(config, adapter)
+
+    summary = engine.run()
+
+    assert summary.estimated_cost_usd == pytest.approx(0.05)
 
 
 def test_engine_stops_when_token_budget_reached(tmp_path):
