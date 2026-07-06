@@ -8,6 +8,7 @@ multiple ordered specs with dependency annotations.
 from __future__ import annotations
 
 import re
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from owloop.adapters import AgentAdapter
 from owloop.backpressure import BackpressureDiscovery, load_backpressure
 from owloop.paths import resolve_specs_dir
 from owloop.promise import parse_promise_signal
+from owloop.spec_linter import Finding, SpecLinter
 from owloop.spec_queue import find_next_spec_number
 
 SPEC_GENERATION_PROMPT = """\
@@ -139,8 +141,16 @@ Output when complete: `<promise>DONE</promise>`
 ```
 
 ## Step 8 — Self-check before outputting
+Every generated spec MUST satisfy `SpecLinter` validation (the linter owloop
+runs on every spec before the loop starts). It checks for backtick-quoted
+shell commands in Acceptance Criteria, non-empty required sections, and more.
+The linter's exact rules for this project:
+
+{lint_rules}
+
 Verify for EACH spec:
-- Every acceptance criterion is a runnable shell command with a concrete expected output.
+- Every acceptance criterion is a runnable shell command wrapped in a backtick
+  (`` ` ``) and has a concrete expected output — this is required by the linter.
 - The Exclusions section is non-empty and names specific files/directories.
 - Scope is 1-5 files / < 300 lines per spec.
 - Baseline was recorded and targets are realistic.
@@ -160,10 +170,27 @@ class SpecGenerationError(Exception):
 class SpecGenerator:
     """Generate one or more specs from a natural-language goal."""
 
-    def __init__(self, project_dir: Path, adapter: AgentAdapter) -> None:
+    def __init__(
+        self,
+        project_dir: Path,
+        adapter: AgentAdapter,
+        *,
+        lint_retries: int = 1,
+    ) -> None:
+        """Initialize the generator.
+
+        Args:
+            project_dir: Root of the target project.
+            adapter: Agent adapter used to run generation prompts.
+            lint_retries: Max number of times to feed `SpecLinter` errors back
+                to the agent and re-request a fixed spec before giving up and
+                writing the last candidate as-is.
+        """
         self.project_dir = project_dir
         self.adapter = adapter
+        self.lint_retries = lint_retries
         self.clarifications: list[str] = []
+        self._linter = SpecLinter(resolve_specs_dir(project_dir), project_dir=project_dir)
 
     def _build_prompt(self, goal: str) -> str:
         clarifications_text = ""
@@ -190,6 +217,7 @@ class SpecGenerator:
             goal=goal,
             clarifications=clarifications_text,
             backpressure_commands=backpressure_text,
+            lint_rules=self._linter.rules_summary(),
         )
 
     def _ask_user(self, questions: list[str]) -> list[str]:
@@ -266,6 +294,7 @@ class SpecGenerator:
             if parsed is None:
                 specs = self._split_specs(clean_output)
                 if specs:
+                    specs = self._lint_and_retry(specs, on_line)
                     return self._write_specs(specs)
                 raise SpecGenerationError(
                     "agent did not return a recognizable spec or clarification request"
@@ -275,6 +304,7 @@ class SpecGenerator:
             if state == "DONE":
                 specs = self._split_specs(clean_output)
                 if specs:
+                    specs = self._lint_and_retry(specs, on_line)
                     return self._write_specs(specs)
                 raise SpecGenerationError(
                     "agent returned DONE but no valid spec was found in the output"
@@ -297,6 +327,66 @@ class SpecGenerator:
             f"could not clarify the goal after {max_rounds} rounds; "
             "try describing the task more concretely"
         )
+
+    def _lint_candidate(self, markdown: str) -> list[Finding]:
+        """Lint a candidate spec's markdown before it is written to disk.
+
+        Writes the candidate to a scratch file so `SpecLinter.lint_spec()`
+        can be reused as-is rather than duplicating its checks.
+        """
+        with tempfile.TemporaryDirectory() as scratch_dir:
+            scratch_path = Path(scratch_dir) / "candidate.md"
+            scratch_path.write_text(markdown + "\n", encoding="utf-8")
+            linter = SpecLinter(scratch_path.parent, project_dir=self.project_dir)
+            return linter.lint_spec(scratch_path)
+
+    def _build_lint_feedback_prompt(self, errors_by_spec: dict[str, list[Finding]]) -> str:
+        """Build a follow-up prompt asking the agent to fix lint errors."""
+        sections = []
+        for spec, errors in errors_by_spec.items():
+            match = SPEC_FILENAME_RE.search(spec)
+            title = match.group(1).strip() if match else "spec"
+            error_lines = "\n".join(f"- {finding.message}" for finding in errors)
+            sections.append(f"### {title}\n{error_lines}")
+        errors_text = "\n\n".join(sections)
+
+        return (
+            "The spec(s) you generated failed `SpecLinter` validation. Fix ONLY "
+            "the listed errors and re-output ALL specs in the same format as "
+            "before (one or more `# Spec:` blocks, separated by `---` on its "
+            "own line if there is more than one), ending with "
+            f"`<promise>DONE</promise>`.\n\nLint errors:\n\n{errors_text}"
+        )
+
+    def _lint_and_retry(
+        self,
+        specs: list[str],
+        on_line: Callable[[str], None] | None,
+    ) -> list[str]:
+        """Lint each candidate spec and retry generation on lint errors.
+
+        Retries up to `self.lint_retries` times. If errors remain after the
+        last retry, the last candidate specs are returned as-is so the loop
+        does not stall indefinitely on an agent that cannot self-correct.
+        """
+        current = specs
+        for _attempt in range(self.lint_retries):
+            errors_by_spec = {
+                spec: errors
+                for spec in current
+                if (errors := [f for f in self._lint_candidate(spec) if f.severity == "error"])
+            }
+            if not errors_by_spec:
+                return current
+
+            feedback_prompt = self._build_lint_feedback_prompt(errors_by_spec)
+            result = self.adapter.run(feedback_prompt, cwd=self.project_dir, on_line=on_line)
+            retried_specs = self._split_specs(result.stdout)
+            if not retried_specs:
+                return current
+            current = retried_specs
+
+        return current
 
     def _write_specs(self, spec_markdowns: list[str]) -> list[Path]:
         """Write one or more spec files with sequential numbering."""
