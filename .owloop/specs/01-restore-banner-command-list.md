@@ -2,7 +2,7 @@
 
 # Spec: restore-banner-command-list
 
-**Status**: COMPLETE
+Status: COMPLETE
 
 ## Priority: 1
 

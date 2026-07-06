@@ -18,6 +18,7 @@ from rich.text import Text
 
 from owloop import _brand
 from owloop.adapters import get_adapter
+from owloop.backpressure import discover_and_save, load_backpressure
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.paths import resolve_specs_dir
 from owloop.report import ReportGenerator
@@ -523,6 +524,14 @@ def init(example: bool) -> None:
             )
             created.append(".owloop/specs/01-example.md")
 
+    backpressure_path = owloop_path / "backpressure.json"
+    if not backpressure_path.exists():
+        try:
+            _commands, bp_path = discover_and_save(cwd)
+            created.append(str(bp_path.relative_to(cwd)))
+        except Exception:
+            pass
+
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
 
@@ -837,6 +846,35 @@ def version() -> None:
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
     console.print(f"[bold]owloop[/] [{_brand.AMBER}]v{v}[/]")
+    console.print()
+
+
+@main.command()
+def discover() -> None:
+    """Discover and save project verification commands."""
+    ascii, no_color, _compact, verbose = _cli_options()
+    console = Console(no_color=no_color)
+    cwd = Path.cwd()
+
+    try:
+        commands, path = discover_and_save(cwd)
+    except Exception as exc:
+        console.print(f"[red]Error:[/] failed to discover backpressure commands: {exc}")
+        raise SystemExit(1) from None
+
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[bold]owloop[/] [{_brand.AMBER}]discover[/]")
+    console.print()
+
+    if commands:
+        console.print(f"[green]✓ {len(commands)} command(s) discovered:[/]")
+        for cmd in commands:
+            console.print(f"  [{_brand.CYAN}]{cmd.name}[/]: {cmd.command} [{_brand.GRAY}]{cmd.source}[/]")
+    else:
+        console.print("[dim]No verification commands discovered.[/]")
+
+    console.print(f"[dim]Saved to[/] {path}")
     console.print()
 
 

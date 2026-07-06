@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from owloop.adapters import AgentAdapter
+from owloop.backpressure import BackpressureDiscovery, load_backpressure
 from owloop.paths import resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.spec_queue import find_next_spec_number
@@ -70,6 +71,11 @@ decomposition patterns:
 Before writing acceptance criteria, run the proposed verification commands NOW
 and record the current values. Scan `pyproject.toml`, `package.json`, `Makefile`,
 and README to find the correct test/lint/build commands.
+
+This project already has the following discovered verification commands (from
+`.owloop/backpressure.json`). Prefer these commands for acceptance criteria:
+
+{backpressure_commands}
 
 Record the baseline in a `## Baseline` section, e.g.:
 - `ruff check src/`: 84 errors at start, target ≤ 5
@@ -167,9 +173,23 @@ class SpecGenerator:
             )
         else:
             clarifications_text = "(none yet)"
+
+        commands = load_backpressure(self.project_dir)
+        if not commands:
+            commands = BackpressureDiscovery(self.project_dir).discover()
+
+        if commands:
+            backpressure_text = "\n".join(
+                f"- `{cmd.command}` ({cmd.name}, from {cmd.source})"
+                for cmd in commands
+            )
+        else:
+            backpressure_text = "(none discovered; infer commands from project files)"
+
         return SPEC_GENERATION_PROMPT.format(
             goal=goal,
             clarifications=clarifications_text,
+            backpressure_commands=backpressure_text,
         )
 
     def _ask_user(self, questions: list[str]) -> list[str]:

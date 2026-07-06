@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
+from owloop.backpressure import load_backpressure
+
 
 @dataclass
 class Finding:
@@ -76,8 +78,15 @@ class SpecLinter:
         r"^\s*-\s*\[\s*(.+?)\s*\]\s*:",
     )
 
-    def __init__(self, specs_dir: Path | str) -> None:
+    def __init__(self, specs_dir: Path | str, project_dir: Path | str | None = None) -> None:
         self.specs_dir = Path(specs_dir)
+        if project_dir is not None:
+            self.project_dir = Path(project_dir)
+        else:
+            self.project_dir = self.specs_dir.parent
+        self._backpressure_commands = {
+            cmd.command for cmd in load_backpressure(self.project_dir)
+        }
 
     def lint_all(self, run_baseline: bool = False) -> LintReport:
         """Lint every ``*.md`` file in the specs directory."""
@@ -180,6 +189,22 @@ class SpecLinter:
             if not self._BACKTICK_RE.search(line):
                 line_number = header_line + 1 + offset
                 findings.append(Finding("error", f"no shell command in criterion: line {line_number}"))
+                continue
+
+            if self._backpressure_commands:
+                backtick = self._BACKTICK_RE.search(line)
+                command = backtick.group(0).strip("`") if backtick else ""
+                # Allow commands that start with a known backpressure command.
+                if command and not any(
+                    command == known or command.startswith(known + " ")
+                    for known in self._backpressure_commands
+                ):
+                    findings.append(
+                        Finding(
+                            "warning",
+                            f"criterion command is not in discovered backpressure commands: {command}",
+                        )
+                    )
 
     def _check_contradictions(
         self, sections: dict[str, list[str]], findings: list[Finding]
