@@ -4,7 +4,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -188,30 +187,132 @@ def _cli_options() -> tuple[bool, bool, bool]:
     return bool(obj.get("ascii")), bool(obj.get("no_color")), bool(obj.get("compact"))
 
 
+def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
+    """Auto-initialize .owloop/ if it doesn't exist (silent, no example spec)."""
+    owloop_path = cwd / ".owloop"
+    if owloop_path.exists():
+        return
+
+    if not (cwd / ".git").exists():
+        console.print("[red]Error:[/] Not a git repository. Run [bold]git init[/] first.")
+        raise SystemExit(1)
+
+    owloop_path.mkdir(parents=True)
+    (owloop_path / "specs").mkdir()
+    (owloop_path / "logs").mkdir()
+
+    gitignore = cwd / ".gitignore"
+    gitignore_entries = [".owloop/logs/", ".owloop/PROMPT_build.md"]
+    if gitignore.exists():
+        existing = gitignore.read_text(encoding="utf-8")
+        to_add = [e for e in gitignore_entries if e not in existing]
+        if to_add:
+            with open(gitignore, "a", encoding="utf-8") as f:
+                f.write("\n# owloop\n")
+                for entry in to_add:
+                    f.write(f"{entry}\n")
+    else:
+        gitignore.write_text("# owloop\n" + "\n".join(gitignore_entries) + "\n", encoding="utf-8")
+
+    console.print(f"[{_brand.GREEN}]✓[/] Initialized .owloop/")
+
+
 @click.group(invoke_without_command=True)
 @click.version_option(package_name="owloop")
 @click.option("--ascii", is_flag=True, default=False, help="Use ASCII art instead of Unicode glyphs.")
 @click.option("--no-color", is_flag=True, default=False, help="Disable colored terminal output.")
 @click.option("--compact", is_flag=True, default=False, help="Force the compact single-column TUI layout.")
+@click.argument("goal", required=False, default=None)
 @click.pass_context
-def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool) -> None:
-    """🦉 owloop — Your code evolves while you sleep."""
+def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, goal: str | None) -> None:
+    """🦉 owloop — Your code evolves while you sleep.
+
+    \b
+    Quick start:
+        owloop "refactor error handling"   # one command does it all
+    \b
+    Or step by step:
+        owloop spec "goal"    # generate specs
+        owloop run            # start the loop
+    """
     ctx.ensure_object(dict)
     ctx.obj["ascii"] = ascii
     ctx.obj["no_color"] = no_color
     ctx.obj["compact"] = compact
+
+    if ctx.invoked_subcommand is not None:
+        return
+
     console = Console(no_color=no_color)
 
-    if ctx.invoked_subcommand is None:
+    if goal is None:
         console.print(_banner_text(ascii=ascii, no_color=no_color))
         console.print(f"[dim]{_brand.TAGLINE}[/]\n")
+        console.print("Quick start:")
+        console.print('  [bold]owloop "your goal"[/]  One command: init → spec → run')
+        console.print()
         console.print("Commands:")
-        console.print("  [bold]owloop init[/]    Initialize owloop in current project")
+        console.print("  [bold]owloop spec[/]    Generate specs from a goal")
         console.print("  [bold]owloop run[/]     Start the autonomous loop")
         console.print("  [bold]owloop status[/]  Show current specs and progress")
-        console.print("  [bold]owloop version[/] Show installed version")
+        console.print("  [bold]owloop report[/]  Generate HTML summary report")
         console.print()
         console.print("[dim]Run[/] [bold]owloop <command> --help[/] [dim]for details.[/]")
+        return
+
+    # ── One-command flow: owloop "goal" ──
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[dim]Goal:[/] {goal}\n")
+
+    project_dir = Path.cwd()
+    _ensure_init(project_dir, console, ascii=ascii)
+
+    adapter = get_adapter(
+        "claude",
+        model=os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL),
+        claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+        idle_timeout=3600,
+    )
+    generator = SpecGenerator(project_dir, adapter)
+
+    def _on_line(line: str) -> None:
+        stripped = line.strip()
+        if stripped:
+            console.print(f"  [dim]{stripped}[/]")
+
+    try:
+        spec_paths = generator.generate(goal, on_line=_on_line)
+    except SpecGenerationError as exc:
+        console.print(f"\n[red]Error:[/] {exc}")
+        raise SystemExit(1) from None
+
+    console.print()
+    console.print(f"[{_brand.GREEN}]✓ {len(spec_paths)} spec(s) generated:[/]")
+    for sp in spec_paths:
+        console.print(f"  [{_brand.CYAN}]{sp.name}[/]")
+    console.print()
+    for sp in spec_paths:
+        console.print(Panel(
+            sp.read_text(encoding="utf-8"),
+            title=f"[bold]{sp.name}[/]",
+            border_style=_brand.AMBER,
+            padding=(1, 2),
+        ))
+
+    if sys.stdin.isatty():
+        start = Confirm.ask("\nStart the loop now?", default=True, console=console)
+    else:
+        console.print("\n[dim]Non-interactive: run[/] [bold]owloop run[/] [dim]to start.[/]")
+        start = False
+
+    if start:
+        console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
+        _run_engine(
+            0, True, os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL), "claude",
+            3600, 0, 0,
+            ascii=ascii, no_color=no_color, compact=compact,
+        )
 
 
 @main.command()
@@ -325,9 +426,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
-    if not (project_dir / ".git").exists():
-        console.print("[red]Error:[/] Not a git repository. Run [bold]git init[/] first.")
-        raise SystemExit(1)
+    _ensure_init(project_dir, console, ascii=ascii)
 
     console.print()
     console.print(_banner_text(ascii=ascii, no_color=no_color))
@@ -341,40 +440,16 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     )
     generator = SpecGenerator(project_dir, adapter)
 
-    from rich.status import Status
-    spec_status = Status("Scanning codebase...", console=console, spinner="dots", spinner_style=_brand.AMBER)
-    spec_last_activity = time.monotonic()
-
-    spec_phase_hints = [
-        ("Acceptance Criteria", "Defining acceptance criteria..."),
-        ("Exclusions", "Setting exclusions and constraints..."),
-        ("Baseline", "Calibrating baselines..."),
-        ("# Spec:", "Writing final spec..."),
-        ("DECIDE", "Needs clarification..."),
-        ("DONE", "Spec complete!"),
-    ]
-
     def _on_spec_line(line: str) -> None:
-        nonlocal spec_last_activity
         stripped = line.strip()
-        if not stripped:
-            return
-        spec_last_activity = time.monotonic()
-        for keyword, phase_msg in spec_phase_hints:
-            if keyword in line:
-                spec_status.update(f"{phase_msg}")
-                break
-        console.print(f"  [dim]{stripped}[/]")
+        if stripped:
+            console.print(f"  [dim]{stripped}[/]")
 
     try:
-        spec_status.start()
         spec_paths = generator.generate(goal, max_rounds=max_rounds, on_line=_on_spec_line)
     except SpecGenerationError as exc:
-        spec_status.stop()
         console.print(f"\n[red]Error:[/] {exc}")
         raise SystemExit(1) from None
-    finally:
-        spec_status.stop()
 
     console.print()
     console.print(f"[{_brand.GREEN}]✓ {len(spec_paths)} spec(s) generated:[/]")
@@ -698,25 +773,19 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
         )
         ai_generator = AIReportInsightsGenerator(project_dir, adapter)
 
-        from rich.status import Status
-        report_status = Status("Analyzing run with Claude...", console=console, spinner="dots", spinner_style=_brand.AMBER)
-
         def _on_report_line(line: str) -> None:
-            if line.strip():
-                console.print(f"  [dim]{line.strip()}[/]")
+            stripped = line.strip()
+            if stripped:
+                console.print(f"  [dim]{stripped}[/]")
 
         try:
-            report_status.start()
             insights = ai_generator.generate(on_line=_on_report_line)
         except FileNotFoundError:
-            report_status.stop()
             console.print("[red]Error:[/] No run summary found. Run [bold]owloop run[/] first.")
             raise SystemExit(1) from None
         except RuntimeError as exc:
             console.print(f"[{_brand.AMBER}]⚠ AI insights failed:[/] {exc}")
             console.print("[dim]Falling back to static report. Use --no-ai to skip AI.[/]")
-        finally:
-            report_status.stop()
 
     if output is None and ai:
         output = project_dir / ".lavish" / "owloop_report.html"
