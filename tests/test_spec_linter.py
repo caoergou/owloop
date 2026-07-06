@@ -167,6 +167,29 @@ Do a thing.
         assert marker.exists()
 
 
+def test_circular_spec_dependency_fails(tmp_path: Path) -> None:
+    specs_dir = tmp_path / "specs"
+    spec_a = VALID_SPEC.replace(
+        "## Priority: 1\n",
+        "## Priority: 1\n\n## Depends On\n- 002-b\n",
+    )
+    spec_b = VALID_SPEC.replace(
+        "## Priority: 1\n",
+        "## Priority: 2\n\n## Depends On\n- 001-a\n",
+    )
+    _write_spec(specs_dir / "001-a.md", spec_a)
+    _write_spec(specs_dir / "002-b.md", spec_b)
+
+    linter = SpecLinter(specs_dir)
+    report = linter.lint_all()
+
+    assert report.error_count > 0
+    all_messages = [f.message for findings in report.results.values() for f in findings]
+    assert any("circular" in message.lower() for message in all_messages)
+    assert any("001-a.md" in message for message in all_messages)
+    assert any("002-b.md" in message for message in all_messages)
+
+
 def test_run_baseline_reports_failed_commands(tmp_path: Path) -> None:
     specs_dir = tmp_path / "specs"
     content = VALID_SPEC.replace(

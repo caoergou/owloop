@@ -465,6 +465,11 @@ class OwloopEngine:
     def _spec_status(self) -> dict:
         specs = spec_queue.get_root_specs(self.specs_dir)
         incomplete = spec_queue.get_incomplete_root_specs(self.specs_dir)
+        # Dependency-aware pick; fall back to raw filename order only when every
+        # incomplete spec is blocked (e.g. a dependency cycle among them).
+        next_spec = spec_queue.get_next_ready_spec(self.specs_dir) or (
+            incomplete[0] if incomplete else None
+        )
         return {
             "has_specs": len(specs) > 0,
             "spec_count": len(specs),
@@ -472,7 +477,7 @@ class OwloopEngine:
             "specs": [
                 {"name": p.name, "done": p not in incomplete} for p in specs
             ],
-            "first_incomplete": incomplete[0].name if incomplete else None,
+            "first_incomplete": next_spec.name if next_spec else None,
         }
 
     def _check_fix_loop(self) -> bool:
