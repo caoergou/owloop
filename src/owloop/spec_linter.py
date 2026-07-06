@@ -89,6 +89,28 @@ class SpecLinter:
             cmd.command for cmd in load_backpressure(self.project_dir)
         }
 
+    def rules_summary(self) -> str:
+        """Return a machine-readable summary of lint rules for prompt injection.
+
+        Used by `SpecGenerator` to tell the generating agent what
+        `SpecLinter.lint_spec()` will check, so generated specs satisfy
+        validation on the first attempt.
+        """
+        vague = ", ".join(f'"{phrase}"' for phrase in self.VAGUE_PHRASES)
+        lines = [
+            "SpecLinter validation rules:",
+            "- Structure: the first non-empty line must be a top-level `# ` title.",
+            "- Required sections (must be present and non-empty): "
+            "`## Priority`, `## Requirements`, `## Acceptance Criteria`, `## Exclusions`.",
+            "- Acceptance Criteria: every `- [ ]` criterion must contain a "
+            f"backtick-quoted shell command and must avoid vague phrases ({vague}).",
+            "- Contradictions: exclusions must not name a file/module that is also "
+            "referenced in Requirements or Acceptance Criteria.",
+            "- Recommended: include a `## Verification` section, a `## Baseline` "
+            "section, and end the file with `<promise>DONE</promise>` in the last 3 lines.",
+        ]
+        return "\n".join(lines)
+
     def lint_all(self, run_baseline: bool = False) -> LintReport:
         """Lint every ``*.md`` file in the specs directory."""
         report = LintReport()
