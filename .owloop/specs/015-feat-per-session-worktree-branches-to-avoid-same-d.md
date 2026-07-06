@@ -1,5 +1,7 @@
 # Feature: feat: per-session worktree branches to avoid same-day run pollution
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
