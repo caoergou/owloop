@@ -211,6 +211,7 @@ class AgentStreamDisplay:
         self._burst_count = 0
         self._burst_suppressed = 0
         self._line_count = 0
+        self._char_count = 0
         self._real_tokens = ""
         self._has_status = False
         self._frame = 0
@@ -246,6 +247,7 @@ class AgentStreamDisplay:
             gap = now - self._last_output
             self._last_output = now
             self._line_count += 1
+            self._char_count += len(stripped)
 
             self._clear_status()
 
@@ -296,6 +298,12 @@ class AgentStreamDisplay:
         parts = [f"  {spinner} {mins}:{secs:02d}"]
         if self._real_tokens:
             parts.append(self._real_tokens)
+        else:
+            est = self._char_count // 4
+            if est >= 1000:
+                parts.append(f"~{est / 1000:.1f}k tokens")
+            elif est > 0:
+                parts.append(f"~{est} tokens")
         parts.append(f"{self._line_count} lines")
         return " · ".join(parts)
 
