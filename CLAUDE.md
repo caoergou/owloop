@@ -18,7 +18,7 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 | `src/owloop/engine.py` | Python loop engine — spawns agent per iteration, manages worktree, drives spec queue |
 | `src/owloop/adapters.py` | Agent adapter abstraction (`ClaudeCodeAdapter`, `MockAdapter`) |
 | `src/owloop/tui.py` | Full-screen Rich TUI with owl animation |
-| `src/owloop/reporter.py` | Plain-text event reporter for non-interactive terminals |
+| `src/owloop/reporter.py` | Plain-text event reporter for non-interactive terminals and for `owloop run --no-tui` / `--plain` |
 | `src/owloop/spec_queue.py` | Spec discovery, status, priority helpers |
 | `pyproject.toml`, `uv.lock` | Packaging (hatchling); `uv` is the dev tool |
 | `skills/owloop/SKILL.md` | Core loop engineering methodology skill (agent-agnostic) |
