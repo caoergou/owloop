@@ -10,13 +10,15 @@ license: MIT
 compatibility: Requires owloop methodology; works with any agentskills.io-compatible agent
 metadata:
   author: caoergou
-  version: "0.3.0"
+  version: "0.4.0"
   repository: https://github.com/caoergou/owloop
 ---
 
 # Owloop Verification
 
-Verification is the keystone of loop engineering. If "done" cannot be checked by a shell command, the loop cannot terminate reliably. This skill teaches how to design verifiable acceptance criteria and calibrate baselines.
+Verification is the keystone of loop engineering. If "done" cannot be checked by a shell command, the loop cannot terminate reliably.
+
+This skill is the entry point. Detailed reference material lives in the `references/` folder so it can be loaded only when needed.
 
 ## When to Use
 
@@ -35,11 +37,11 @@ Every acceptance criterion must be a **runnable shell command with a concrete ex
 - Bad: "Error handling is properly unified"
 - Bad: "The code works correctly"
 
+For detailed guidance on writing criteria, see [Writing Acceptance Criteria](references/writing-criteria.md).
+
 ## Baseline Calibration
 
 Run the proposed verification command BEFORE the loop starts. Record the current state and set a realistic target.
-
-### Why calibrate?
 
 | Baseline finding | What it means | Action |
 |---|---|---|
@@ -81,124 +83,31 @@ For an autonomous loop, prefer:
 
 Code review and verification overlap: both ask "is this change good enough to merge?" The difference is that verification checks functional correctness, while code review checks engineering quality. In an unattended loop, **only the machine-checkable parts of code review can become gates**.
 
-### What CAN be automated
+Add these checks to your verification pipeline when relevant. Treat them as **copy-paste command templates**, not as project-managed executable scripts. Adapt the path and tool names to the project stack.
 
-Add these checks to your verification pipeline when relevant:
-
-| Review concern | Automated check | Example command |
+| Review concern | What to check | Example command |
 |---|---|---|
-| **Scope discipline** | Changed files match spec | `git diff --name-only` vs `## Requirements` / `## Exclusions` |
-| **Test integrity** | Existing tests not weakened | `git diff -- tests/` shows no deleted assertions |
-| **No surprise dependencies** | Lock/config files unchanged unless intended | `git diff --stat pyproject.toml uv.lock package.json` |
-| **No leftover TODO/FIXME** | No unresolved markers in changed code | `git diff --diff-filter=AM -U0 | grep -E '^\+.*(TODO\|FIXME)'` |
-| **No debug prints** | No `print()`/`console.log()` left behind | `git diff --diff-filter=AM -U0 | grep -E '^\+.*(print\(|console\.log)'` |
-| **Complexity guard** | Cyclomatic complexity bounded | `radon cc -nc src/` or ruff complexity rules |
-| **Dead code guard** | No unused imports/variables | `ruff check src/` |
-| **Security surface** | No secrets in diff | `git diff | grep -Ei '(password\|secret\|api_key\|token)'` |
+| **Scope discipline** | Changed files match spec scope | `git diff --name-only` then compare with `## Requirements` / `## Exclusions` |
+| **Test integrity** | Existing tests not weakened | `git diff -- tests/` should not show deleted assertions or commented tests |
+| **No surprise dependencies** | Lock/config files unchanged unless intended | `git diff --stat pyproject.toml uv.lock package.json package-lock.json` |
+| **No leftover TODO/FIXME** | No unresolved markers in changed code | `git diff --diff-filter=AM -U0 \| grep -E '^\+.*(TODO\|FIXME)'` |
+| **No debug prints** | No `print()`/`console.log()` left behind | `git diff --diff-filter=AM -U0 \| grep -E '^\+.*(print\(\|console\.log\|debugger;)'` |
+| **Complexity guard** | Cyclomatic complexity bounded | `radon cc -nc src/` or enable ruff complexity rules |
+| **Dead code guard** | No unused imports/variables | `ruff check src/` or `eslint --max-warnings 0` |
+| **Security surface** | No secrets or sensitive literals in diff | `git diff \| grep -Ei '(password\|secret\|api_key\|token\|private_key)'` |
 
-### What CANNOT be automated
+> **Note:** Do not commit these snippets as `.sh` files inside the project. Project stacks differ too much for one script to be universally correct. Copy the relevant lines into the spec's `## Verification` section and adjust them there.
 
-Do NOT try to express these as acceptance criteria. They require human judgment and should be handled by:
-- Marking the spec `Status: REVIEW_REQUIRED` instead of `COMPLETE`
-- Adding a `## Security Review` or `## Design Review` section
-- Outputting `<promise>BLOCKED:needs-human-review` instead of `<promise>DONE</promise>`
+## Change Traps and Human Review
 
-| Human-judgment concern | Why it can't be automated |
-|---|---|
-| Architecture fit | Requires understanding trade-offs |
-| Naming clarity | Subjective; no shell command can judge |
-| Over-engineering | Requires product context |
-| Security-critical changes | Risk too high for unsupervised agent |
-| UX/design decisions | Needs human taste and context |
+Unattended loops have predictable failure modes. Before claiming completion, consult:
 
-### Recommended code-review gate in a spec
+- [Change Trap Checklist](references/change-trap-checklist.md) — 10 common drift patterns and how to detect them.
+- [Human Review Triggers](references/human-review-triggers.md) — when to stop and ask a human, even if all commands pass.
 
-```markdown
-## Verification
+## Pipeline Templates by Stack
 
-Run these commands before claiming completion:
-
-```bash
-# 1. Static checks
-uv run ruff check src/ tests/
-uv run mypy src/
-
-# 2. Automated code-review gate
-uv run pytest tests/ -q
-./scripts/check-scope.sh        # verify only expected files changed
-./scripts/check-no-todo.sh      # verify no TODO/FIXME in diff
-
-# 3. Human review trigger (if applicable)
-# If this spec touches auth/security/DB schema, stop here and ask for review.
-```
-
-Expected:
-- `ruff`: 0 errors
-- `mypy`: 0 errors
-- `pytest`: all passed
-- `check-scope.sh`: exit 0
-- `check-no-todo.sh`: exit 0
-```
-
-## Writing Acceptance Criteria
-
-### Use exact matching when possible
-
-```bash
-# Exact
-$ uv run pytest tests/test_auth.py -q
-1 passed in 0.03s
-
-# Fuzzy (when exact is fragile)
-$ uv run pytest tests/test_auth.py -q | grep -c passed
-1
-```
-
-### Count-based criteria
-
-```bash
-# Good: bounded count
-$ grep -c "print(" src/ | awk '{s+=$1} END {print s}'
-0
-
-# Good: threshold
-$ uv run ruff check src/ 2>&1 | grep -oP '\d+(?= errors?)' || echo 0
-3
-```
-
-### File existence / content criteria
-
-```bash
-# File exists
-$ test -f src/owloop/adapters.py && echo yes
-yes
-
-# Content present
-$ grep -q "class KimiCodeAdapter" src/owloop/adapters.py && echo yes
-yes
-```
-
-## Common Pitfalls
-
-1. **Criteria that depend on AI judgment**
-   - Bad: "The refactor improves readability."
-   - Good: "`uv run ruff check src/` returns 0 errors."
-
-2. **Criteria that are already true**
-   - Bad: Criterion passes before any work is done.
-   - Fix: Make it stricter or choose a different task.
-
-3. **Criteria that are never true**
-   - Bad: Target is impossible given the baseline.
-   - Fix: Adjust target or split the work.
-
-4. **Flaky criteria**
-   - Bad: Test that passes 80% of the time.
-   - Fix: Exclude flaky tests or make them deterministic.
-
-5. **Criteria outside the agent's control**
-   - Bad: "Deploy to production."
-   - Good: "CI pipeline passes on the branch."
+For ready-to-use verification blocks, see [Pipeline Templates](references/pipeline-templates.md).
 
 ## Verification Checklist for Specs
 
@@ -208,8 +117,10 @@ Before finalizing a spec, ask:
 - [ ] Does each criterion have a concrete expected output?
 - [ ] Did I run the criterion before writing the spec to establish a baseline?
 - [ ] Are pre-existing failures listed in `## Exclusions`?
-- [ ] Is the fastest/cheapest check listed first?
+- [ ] Is the fastest/cheaptest check listed first?
 - [ ] Do the criteria cover both "the change was made" and "nothing else broke"?
+- [ ] Did I include at least one change-trap check?
+- [ ] Did I list human-review triggers if the spec touches auth/DB/API/CI/secrets?
 
 ## Example Verification Section
 
@@ -225,26 +136,31 @@ uv run ruff check src/owloop tests/
 # 2. Type checks
 uv run mypy src/owloop
 
-# 3. Automated code-review gate
-./scripts/check-scope.sh
-./scripts/check-no-todo.sh
+# 3. Scope discipline
+git diff --name-only
 
-# 4. Unit tests
+# 4. Test integrity
+git diff -- tests/ | grep -E '^-(\s*)(assert|expect)' && echo "WARNING"
+
+# 5. Change-trap scan
+git diff --diff-filter=AM -U0 | grep -E '^\+.*(TODO|FIXME|print\()'
+
+# 6. Unit tests
 uv run pytest tests/test_adapters.py -q
-
-# 5. Integration check
-uv run owloop run --help | grep -q "kimi"
 ```
 
 Expected results:
 - `ruff`: 0 errors
 - `mypy`: 0 errors
-- `check-scope.sh`: exit 0
-- `check-no-todo.sh`: exit 0
+- `git diff --name-only`: only `src/owloop/adapters.py` and `tests/test_adapters.py`
+- Test-integrity warning: empty
+- Change-trap scan: empty
 - `pytest`: all passed
-- `owloop run --help`: contains `--agent [claude|kimi]`
 ```
 
 ## References
 
-- [Automated Code Review Checklist](references/code-review-checklist.md)
+- [Writing Acceptance Criteria](references/writing-criteria.md)
+- [Change Trap Checklist](references/change-trap-checklist.md)
+- [Human Review Triggers](references/human-review-triggers.md)
+- [Pipeline Templates](references/pipeline-templates.md)
