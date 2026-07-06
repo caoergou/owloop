@@ -241,7 +241,6 @@ class AgentStreamDisplay:
             now = time.monotonic()
             gap = now - self._last_output
             self._last_output = now
-            self._char_count += len(stripped)
             self._line_count += 1
 
             self._clear_status()
