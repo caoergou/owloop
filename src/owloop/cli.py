@@ -4,6 +4,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -187,6 +189,76 @@ def _cli_options() -> tuple[bool, bool, bool]:
     return bool(obj.get("ascii")), bool(obj.get("no_color")), bool(obj.get("compact"))
 
 
+class AgentStreamDisplay:
+    """Live display for streaming agent output with thinking indicator and noise folding."""
+
+    BURST_THRESHOLD = 8
+    THINKING_DELAY = 3.0
+
+    def __init__(self, console: Console) -> None:
+        self.console = console
+        self.start_time = time.monotonic()
+        self._last_output = time.monotonic()
+        self._burst_count = 0
+        self._burst_suppressed = 0
+        self._thinking_shown = False
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._ticker: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._ticker = threading.Thread(target=self._tick, daemon=True)
+        self._ticker.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._ticker:
+            self._ticker.join(timeout=2)
+        with self._lock:
+            self._flush_burst()
+
+    def on_line(self, line: str) -> None:
+        stripped = line.strip()
+        if not stripped:
+            return
+
+        with self._lock:
+            now = time.monotonic()
+            gap = now - self._last_output
+            self._last_output = now
+            self._thinking_shown = False
+
+            if gap < 0.05:
+                self._burst_count += 1
+                if self._burst_count > self.BURST_THRESHOLD:
+                    self._burst_suppressed += 1
+                    return
+            else:
+                self._flush_burst()
+                self._burst_count = 0
+
+            self.console.print(f"  [dim]{stripped}[/]")
+
+    def _flush_burst(self) -> None:
+        if self._burst_suppressed > 0:
+            self.console.print(f"  [dim]  ... ({self._burst_suppressed} lines)[/]")
+            self._burst_suppressed = 0
+
+    def _tick(self) -> None:
+        while not self._stop.wait(1.0):
+            with self._lock:
+                now = time.monotonic()
+                idle = now - self._last_output
+                elapsed = int(now - self.start_time)
+                mins, secs = divmod(elapsed, 60)
+
+                if idle >= self.THINKING_DELAY and not self._thinking_shown:
+                    self._thinking_shown = True
+                    self.console.print(f"  [dim italic]⠋ thinking... ({mins}:{secs:02d})[/]")
+                elif self._thinking_shown and int(idle) % 5 == 0 and idle > 5:
+                    self.console.print(f"  [dim italic]⠋ still thinking... ({mins}:{secs:02d})[/]")
+
+
 def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
     """Auto-initialize .owloop/ if it doesn't exist (silent, no example spec)."""
     owloop_path = cwd / ".owloop"
@@ -274,17 +346,16 @@ def go(goal: str, model: str) -> None:
         idle_timeout=3600,
     )
     generator = SpecGenerator(project_dir, adapter)
-
-    def _on_line(line: str) -> None:
-        stripped = line.strip()
-        if stripped:
-            console.print(f"  [dim]{stripped}[/]")
+    stream = AgentStreamDisplay(console)
 
     try:
-        spec_paths = generator.generate(goal, on_line=_on_line)
+        stream.start()
+        spec_paths = generator.generate(goal, on_line=stream.on_line)
     except SpecGenerationError as exc:
         console.print(f"\n[red]Error:[/] {exc}")
         raise SystemExit(1) from None
+    finally:
+        stream.stop()
 
     console.print()
     console.print(f"[{_brand.GREEN}]✓ {len(spec_paths)} spec(s) generated:[/]")
@@ -438,17 +509,16 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
         idle_timeout=3600,
     )
     generator = SpecGenerator(project_dir, adapter)
-
-    def _on_spec_line(line: str) -> None:
-        stripped = line.strip()
-        if stripped:
-            console.print(f"  [dim]{stripped}[/]")
+    stream = AgentStreamDisplay(console)
 
     try:
-        spec_paths = generator.generate(goal, max_rounds=max_rounds, on_line=_on_spec_line)
+        stream.start()
+        spec_paths = generator.generate(goal, max_rounds=max_rounds, on_line=stream.on_line)
     except SpecGenerationError as exc:
         console.print(f"\n[red]Error:[/] {exc}")
         raise SystemExit(1) from None
+    finally:
+        stream.stop()
 
     console.print()
     console.print(f"[{_brand.GREEN}]✓ {len(spec_paths)} spec(s) generated:[/]")
@@ -771,20 +841,19 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
             idle_timeout=3600,
         )
         ai_generator = AIReportInsightsGenerator(project_dir, adapter)
-
-        def _on_report_line(line: str) -> None:
-            stripped = line.strip()
-            if stripped:
-                console.print(f"  [dim]{stripped}[/]")
+        stream = AgentStreamDisplay(console)
 
         try:
-            insights = ai_generator.generate(on_line=_on_report_line)
+            stream.start()
+            insights = ai_generator.generate(on_line=stream.on_line)
         except FileNotFoundError:
             console.print("[red]Error:[/] No run summary found. Run [bold]owloop run[/] first.")
             raise SystemExit(1) from None
         except RuntimeError as exc:
             console.print(f"[{_brand.AMBER}]⚠ AI insights failed:[/] {exc}")
             console.print("[dim]Falling back to static report. Use --no-ai to skip AI.[/]")
+        finally:
+            stream.stop()
 
     if output is None and ai:
         output = project_dir / ".lavish" / "owloop_report.html"
