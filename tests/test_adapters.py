@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -180,8 +182,18 @@ def test_streaming_adapter_idle_timeout_kills_process(tmp_path: Path) -> None:
     assert result.returncode == -1
 
     pid = int(result.stdout.strip())
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)
+    if platform.system() == "Windows":
+        # `os.kill(pid, 0)` is unreliable on Windows; use tasklist instead.
+        proc = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert str(pid) not in proc.stdout
+    else:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
 
 def test_streaming_adapter_writes_prompt_to_stdin_by_default(tmp_path: Path) -> None:
