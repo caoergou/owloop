@@ -180,7 +180,9 @@ def test_streaming_adapter_idle_timeout_kills_process(tmp_path: Path) -> None:
     assert result.returncode == -1
 
     pid = int(result.stdout.strip())
-    with pytest.raises(ProcessLookupError):
+    # On Unix a dead process raises ProcessLookupError; on Windows os.kill
+    # raises a generic OSError. OSError is the common base class.
+    with pytest.raises(OSError):
         os.kill(pid, 0)
 
 
