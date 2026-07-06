@@ -29,25 +29,25 @@ owloop run → pick spec → fresh agent → verify with shell → commit → ne
 ```bash
 uv tool install owloop        # or: pip install owloop
 
-owloop init                    # scaffolds .owloop/ directory
-owloop spec "refactor error handling"   # agent scans code, drafts spec, asks for approval
-owloop run                     # start the loop — Ollie takes it from here
+owloop go "refactor error handling"   # one command: init → spec → review → run
 ```
+
+That's it. owloop auto-initializes, scans your codebase, generates spec(s), asks for approval, and starts the loop.
 
 <details>
 <summary><strong>All commands</strong></summary>
 
 | Command | Description |
 |---|---|
-| `owloop init` | Initialize project (creates `.owloop/`, `.gitignore` entries) |
-| `owloop spec "goal"` | Turn a goal into a concrete spec via agent clarification |
-| `owloop check` | Validate all specs before running (pre-flight linter) |
-| `owloop run` | Start the autonomous loop with TUI |
+| `owloop go "goal"` | **One command flow**: init → generate spec(s) → review → start loop |
+| `owloop spec "goal"` | Generate spec(s) only (also auto-inits) |
+| `owloop run` | Start the loop on existing specs |
 | `owloop run -n 20` | Limit to 20 iterations |
 | `owloop run --max-tokens 200000` | Stop after token budget reached |
-| `owloop run --idle-timeout 1800` | Kill hung agent after 30 min silence |
+| `owloop check` | Validate all specs (pre-flight linter) |
 | `owloop status` | Show specs and completion progress |
 | `owloop report` | Generate AI-powered HTML summary report |
+| `owloop -v go "goal"` | Verbose mode: show all agent output with timestamps |
 | `owloop report --no-ai` | Generate fast, offline report |
 | `owloop spec-from-issue 42` | Generate a spec from a GitHub issue |
 | `owloop version` | Show installed version |
