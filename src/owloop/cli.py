@@ -232,9 +232,13 @@ class AgentStreamDisplay:
             self._clear_status()
             self._flush_burst()
 
+    @staticmethod
+    def _is_noise(text: str) -> bool:
+        return len(text) < 3 or not any(c.isalnum() for c in text)
+
     def on_line(self, line: str) -> None:
         stripped = line.strip()
-        if not stripped:
+        if not stripped or self._is_noise(stripped):
             return
 
         with self._lock:
@@ -252,8 +256,7 @@ class AgentStreamDisplay:
 
             if self.verbose:
                 elapsed = now - self.start_time
-                if len(stripped) > 2:
-                    self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
                 self._draw_status()
                 return
 
