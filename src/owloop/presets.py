@@ -226,10 +226,8 @@ def _load_user_presets(project_dir: Path) -> list[AgentPreset]:
         return []
     try:
         import tomllib
-    except ImportError as exc:  # Python 3.10
-        raise RuntimeError(
-            f"{path} requires Python 3.11+ (tomllib) to parse"
-        ) from exc
+    except ImportError:  # Python 3.10: tomli is the tomllib backport
+        import tomli as tomllib  # type: ignore[no-redef]
     with path.open("rb") as f:
         data = tomllib.load(f)
     presets: list[AgentPreset] = []
