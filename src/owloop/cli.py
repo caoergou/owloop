@@ -702,6 +702,7 @@ def _run_engine(
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
     session_id: str | None = None, resume: bool = False,
+    no_tui: bool = False,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -731,7 +732,7 @@ def _run_engine(
             idle_timeout=idle_timeout,
         )
 
-    if sys.stdout.isatty():
+    if not no_tui and sys.stdout.isatty():
         tui = OwloopTUI(ascii=ascii, no_color=no_color, compact=compact)
 
         def _confirm_dirty() -> bool:
@@ -766,6 +767,23 @@ def _run_engine(
         console.print()
         console.print(_banner_text(ascii=ascii, no_color=no_color))
         console.print(f"[{_brand.AMBER}]Starting autonomous loop...[/]")
+
+        def _confirm_dirty_plain() -> bool:
+            console.print(
+                f"[{_brand.AMBER}]⚠[/] Workspace has uncommitted changes that won't appear in the worktree."
+            )
+            return Confirm.ask("Continue anyway?", default=False, console=console)
+
+        def _confirm_worktree_plain() -> bool:
+            return Confirm.ask(
+                "Create an isolated worktree to protect your main repository?",
+                default=True,
+                console=console,
+            )
+
+        config.confirm_dirty = _confirm_dirty_plain
+        config.confirm_worktree = _confirm_worktree_plain
+
         reporter = ConsoleReporter(console, ascii=ascii)
         engine = OwloopEngine(config, adapter, on_event=reporter.on_event)
         try:
@@ -790,10 +808,16 @@ def _run_engine(
     default=False,
     help="Resume the most recent owloop session (reuse its worktree and branch).",
 )
+@click.option(
+    "--no-tui", "--plain", "no_tui",
+    is_flag=True,
+    default=False,
+    help="Bypass the full-screen TUI and print plain console output, even in a TTY.",
+)
 @_common_run_options
-def run(max_iterations: int, resume: bool, worktree: bool, model: str, agent: str,
-        verifier_model: str | None, subagents: bool, idle_timeout: float,
-        max_duration: int, max_tokens: int) -> None:
+def run(max_iterations: int, resume: bool, no_tui: bool, worktree: bool,
+        model: str, agent: str, verifier_model: str | None, subagents: bool,
+        idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact, verbose = _cli_options()
     specs_dir = resolve_specs_dir(Path.cwd())
@@ -810,6 +834,7 @@ def run(max_iterations: int, resume: bool, worktree: bool, model: str, agent: st
         verifier_model=verifier_model,
         subagents=subagents,
         resume=resume,
+        no_tui=no_tui,
     )
 
 

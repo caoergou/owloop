@@ -65,6 +65,7 @@ Skills included:
 | `owloop run` | Start the loop on existing specs |
 | `owloop run -n 20` | Limit to 20 iterations |
 | `owloop run --max-tokens 200000` | Stop after token budget reached |
+| `owloop run --no-tui` / `--plain` | Print plain console output instead of the full-screen TUI |
 | `owloop check` | Validate all specs (pre-flight linter) |
 | `owloop status` | Show specs and completion progress |
 | `owloop report` | Generate AI-powered HTML summary report |
