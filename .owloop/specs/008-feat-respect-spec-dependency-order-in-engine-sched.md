@@ -1,5 +1,7 @@
 # Feature: feat: respect spec dependency order in engine scheduling
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
