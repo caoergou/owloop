@@ -386,3 +386,47 @@ def test_run_no_signal_counts_as_failure(tmp_path: Path, monkeypatch) -> None:
     assert summary.stopped_reason == "max_iterations"
     assert any(kind == "no_done_signal" for kind, _ in events)
     assert not any(kind in {"blocked", "decide"} for kind, _ in events)
+
+
+def test_copy_dot_dir_creates_target_when_missing(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    engine = _make_engine(repo, MockAdapter())
+    source = repo / ".owloop"
+    source.mkdir()
+    (source / "specs").mkdir()
+    (source / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    target_root = tmp_path / "worktree"
+    target_root.mkdir()
+
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+    engine._copy_dot_dir(target_root, ".owloop", "owloop_dir_copied")
+
+    assert (target_root / ".owloop" / "specs" / "01-test.md").read_text(encoding="utf-8") == "# spec"
+    assert any(kind == "owloop_dir_copied" for kind, _ in events)
+
+
+def test_copy_dot_dir_syncs_existing_target(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    engine = _make_engine(repo, MockAdapter())
+    source = repo / ".owloop"
+    source.mkdir()
+    (source / "specs").mkdir()
+    (source / "specs" / "01-old.md").write_text("# old", encoding="utf-8")
+    (source / "specs" / "02-new.md").write_text("# new", encoding="utf-8")
+
+    target_root = tmp_path / "worktree"
+    target_root.mkdir()
+    existing = target_root / ".owloop" / "specs"
+    existing.mkdir(parents=True)
+    (existing / "01-old.md").write_text("# stale", encoding="utf-8")
+
+    events: list[tuple[str, dict]] = []
+    engine.on_event = lambda kind, data: events.append((kind, data))
+    engine._copy_dot_dir(target_root, ".owloop", "owloop_dir_copied")
+
+    assert (existing / "01-old.md").read_text(encoding="utf-8") == "# old"
+    assert (existing / "02-new.md").read_text(encoding="utf-8") == "# new"
+    assert any(kind == "owloop_dir_copied_synced" for kind, _ in events)
