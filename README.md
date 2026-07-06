@@ -63,6 +63,8 @@ Skills included:
 | `owloop go "goal"` | **One command flow**: init → generate spec(s) → review → start loop |
 | `owloop spec "goal"` | Generate spec(s) only (also auto-inits) |
 | `owloop run` | Start the loop on existing specs |
+| `owloop agents` | List coding-agent presets and their readiness |
+| `owloop run --agent codex` | Run the loop on a different coding agent |
 | `owloop run -n 20` | Limit to 20 iterations |
 | `owloop run --max-tokens 200000` | Stop after token budget reached |
 | `owloop run --no-tui` / `--plain` | Print plain console output instead of the full-screen TUI |
@@ -102,6 +104,37 @@ graph LR
 | **Auto Mode** | Uses your agent's auto-permission mode. Never YOLO. |
 | **Token budget cap** | `--max-tokens` stops the run before costs spiral. |
 | **AI reports** | `owloop report` produces a reviewable HTML artifact after each run. |
+
+## Supported coding agents
+
+owloop drives agents two ways: **native adapters** for Claude Code and Kimi Code CLI, and one **[ACP](https://agentclientprotocol.com) adapter** (Agent Client Protocol — JSON-RPC over stdio) for everything else. Run `owloop agents` to see what's ready on your machine, then `owloop run --agent <name>`.
+
+| Agent | Preset | Path | Setup |
+|---|---|---|---|
+| Claude Code | `claude` (default) | native | `claude` CLI logged in |
+| Kimi Code CLI | `kimi` | native | `kimi` CLI, `default_permission_mode: auto` |
+| Claude Code | `claude-acp` | ACP | Node (`npx @agentclientprotocol/claude-agent-acp`) |
+| OpenAI Codex | `codex` | ACP | Node (`npx @agentclientprotocol/codex-acp`) |
+| OpenCode | `opencode` | ACP | `opencode` CLI |
+| Qoder CLI | `qoder` | ACP | `qodercli` + `QODER_PERSONAL_ACCESS_TOKEN` |
+| Kiro CLI | `kiro` | ACP | `kiro-cli` |
+| Gemini CLI | `gemini` | ACP | Node (`npx @google/gemini-cli`) |
+| Qwen Code | `qwen` | ACP | Node (`npx @qwen-code/qwen-code`) |
+| GLM (Z.ai) | `glm` | ACP via Anthropic-compatible endpoint | `export ZAI_API_KEY=...` |
+| DeepSeek | `deepseek` | ACP via Anthropic-compatible endpoint | `export DEEPSEEK_API_KEY=...` |
+
+GLM and DeepSeek ship no standalone agent CLI; their officially documented path is an Anthropic-compatible endpoint, so owloop launches the Claude ACP adapter with `ANTHROPIC_BASE_URL` pointed at the vendor (GLM mainland users: override the URL to `https://open.bigmodel.cn/api/anthropic` in a custom preset).
+
+ACP presets other than the ones we test against are marked *experimental* in `owloop agents` — they follow the official [ACP registry](https://github.com/agentclientprotocol/registry) launch commands but haven't been validated end-to-end yet. Add your own agents in `.owloop/agents.toml`:
+
+```toml
+[agents.mytool]
+cmd = ["mytool", "acp"]
+env = { MYTOOL_API_KEY = "${MYTOOL_API_KEY}" }
+default_model = "mytool-large"
+```
+
+Permissions on the ACP path are answered by owloop itself, one request at a time (`allow_once`) — agents are never launched in a bypass/YOLO mode.
 
 <details>
 <summary><strong>More features</strong></summary>

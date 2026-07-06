@@ -387,6 +387,7 @@ def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, verbose
         console.print('  [bold]owloop go "your goal"[/]  One command: init → spec → run')
         console.print()
         console.print("Commands:")
+        console.print("  [bold]owloop agents[/]  List available coding-agent presets")
         console.print("  [bold]owloop go[/]      One-command flow (init + spec + run)")
         console.print("  [bold]owloop init[/]    Initialize owloop in the current project")
         console.print("  [bold]owloop report[/]  Generate HTML summary report")
@@ -398,15 +399,26 @@ def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, verbose
         console.print("[dim]Run[/] [bold]owloop <command> --help[/] [dim]for details.[/]")
 
 
+def _validate_agent(ctx: click.Context, param: click.Parameter, value: str) -> str:
+    """Validate --agent against builtin + user presets (.owloop/agents.toml)."""
+    from owloop.presets import all_presets
+
+    keys = sorted(all_presets(Path.cwd()))
+    if value not in keys:
+        raise click.BadParameter(f"unknown agent {value!r}. Available: {', '.join(keys)}")
+    return value
+
+
 def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
     """Shared options for the run and go commands."""
     f = click.option(
-        "--agent", type=click.Choice(["claude", "kimi"]), default="claude",
-        help="Coding agent adapter.", show_default=True,
+        "--agent", default="claude", metavar="AGENT", callback=_validate_agent,
+        help="Coding agent preset (see `owloop agents` for the full list).",
+        show_default=True,
     )(f)
     f = click.option(
-        "--model", default=DEFAULT_MODEL,
-        help="Model to use (or set CLAUDE_MODEL).", show_default=True,
+        "--model", default=None, metavar="MODEL",
+        help="Model to use (defaults per agent; claude honors CLAUDE_MODEL).",
     )(f)
     f = click.option(
         "--verifier-model",
@@ -468,9 +480,11 @@ def go(
 
     _ensure_init(project_dir, console, ascii=ascii)
 
+    # Spec generation always runs on Claude Code today; only forward --model
+    # when it was meant for Claude, not e.g. a GLM/DeepSeek model id.
     adapter = get_adapter(
         "claude",
-        model=model,
+        model=model if agent == "claude" else None,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
         idle_timeout=idle_timeout,
     )
@@ -478,7 +492,9 @@ def go(
     stream = AgentStreamDisplay(console, verbose=verbose)
 
     if verbose:
-        console.print(f"  [dim]→ spawning: claude -p --model {model} --permission-mode auto[/]")
+        console.print(
+            f"  [dim]→ spawning: claude -p --model {model or DEFAULT_MODEL} --permission-mode auto[/]"
+        )
         console.print(f"  [dim]→ cwd: {project_dir}[/]")
 
     try:
@@ -700,6 +716,57 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     console.print()
 
 
+@main.command()
+def agents() -> None:
+    """List available coding-agent presets and whether they're ready to use.
+
+    Two integration paths exist: native adapters (claude, kimi) and ACP —
+    the Agent Client Protocol (https://agentclientprotocol.com) — which
+    covers every other preset with a single implementation. Add your own
+    ACP agents in ``.owloop/agents.toml``.
+    """
+    import shutil as _shutil
+
+    from rich.table import Table
+
+    from owloop.presets import all_presets
+
+    _ascii, no_color, _compact, _verbose = _cli_options()
+    console = Console(no_color=no_color)
+
+    table = Table(border_style=_brand.AMBER, header_style=f"bold {_brand.AMBER}")
+    table.add_column("agent")
+    table.add_column("kind")
+    table.add_column("command")
+    table.add_column("model")
+    table.add_column("status")
+
+    for key, preset in sorted(all_presets(Path.cwd()).items()):
+        binary = preset.cmd[0]
+        problems: list[str] = []
+        if not _shutil.which(binary):
+            problems.append(f"{binary} not found")
+        missing = [v for v in preset.required_env_vars() if os.environ.get(v) is None]
+        if missing:
+            problems.append(f"set {', '.join(missing)}")
+        status = f"[red]✗ {'; '.join(problems)}[/]" if problems else f"[{_brand.GREEN}]✓ ready[/]"
+        if preset.experimental and not problems:
+            status += " [dim](experimental)[/]"
+        table.add_row(
+            f"[bold]{key}[/]",
+            preset.kind,
+            " ".join(preset.cmd),
+            preset.default_model or "[dim]agent default[/]",
+            status,
+        )
+
+    console.print(table)
+    console.print(
+        "[dim]Use with[/] [bold]owloop run --agent <agent>[/]"
+        "[dim]; define custom agents in .owloop/agents.toml[/]"
+    )
+
+
 # Terminal states that mean "the loop did not finish its work" — surfaced as a
 # non-zero exit so unattended callers (CI, cron, wrappers) can detect it. An
 # exhausted budget is explicitly NOT a success.
@@ -716,7 +783,7 @@ STOPPED_REASON_EXIT_1 = {
 
 
 def _run_engine(
-    max_iterations: int, worktree: bool, model: str, agent: str,
+    max_iterations: int, worktree: bool, model: str | None, agent: str,
     idle_timeout: float = DEFAULT_IDLE_TIMEOUT, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
@@ -757,6 +824,7 @@ def _run_engine(
         idle_timeout=idle_timeout,
         max_turns=max_turns_per_iteration or None,
         max_budget_usd=max_budget_usd or None,
+        project_dir=Path.cwd(),
     )
 
     if verifier_model:
@@ -766,6 +834,7 @@ def _run_engine(
             claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
             kimi_cmd=os.environ.get("KIMI_CMD", "kimi"),
             idle_timeout=idle_timeout,
+            project_dir=Path.cwd(),
         )
 
     if not no_tui and sys.stdout.isatty():

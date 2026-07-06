@@ -16,7 +16,9 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 |---|---|
 | `src/owloop/cli.py` | Python CLI (`init` / `run` / `plan` / `status` / `version` subcommands), rich console output |
 | `src/owloop/engine.py` | Python loop engine — spawns agent per iteration, manages worktree, drives spec queue |
-| `src/owloop/adapters.py` | Agent adapter abstraction (`ClaudeCodeAdapter`, `MockAdapter`) |
+| `src/owloop/adapters.py` | Agent adapter abstraction (`ClaudeCodeAdapter`, `KimiCodeAdapter`, `MockAdapter`) |
+| `src/owloop/presets.py` | Agent preset registry — per-tool launch commands/env as data (user presets via `.owloop/agents.toml`) |
+| `src/owloop/acp.py` | `AcpAdapter` — one Agent Client Protocol client covering all non-native agents |
 | `src/owloop/tui.py` | Full-screen Rich TUI with owl animation |
 | `src/owloop/reporter.py` | Plain-text event reporter for non-interactive terminals and for `owloop run --no-tui` / `--plain` |
 | `src/owloop/spec_queue.py` | Spec discovery, status, priority helpers |
@@ -52,7 +54,8 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 
 ## Design principles
 
-- **Auto Mode, not YOLO** — always `--permission-mode auto`, never `--dangerously-skip-permissions`. This is the core premise of the fork; don't regress it.
+- **Auto Mode, not YOLO** — always `--permission-mode auto`, never `--dangerously-skip-permissions`. This is the core premise of the fork; don't regress it. On the ACP path this means owloop answers `session/request_permission` itself (`allow_once`) and never launches an agent in a bypass mode.
+- **ACP-first for new agents** — a new coding agent is integrated by adding an `AgentPreset` row in `presets.py`, not a new adapter class. Bespoke stream parsers are reserved for the pre-existing native adapters (`claude`, `kimi`).
 - **Worktree isolation, zero extra deps** — the engine uses plain `git worktree add` / `git worktree list`, nothing beyond git itself.
 - **Constraint-oriented specs** — every spec template carries Requirements, shell-verifiable Acceptance Criteria, Exclusions, Style, and Verification. Exclusions are what keep an unattended loop from wandering; never make that section optional.
 - **Fresh context per iteration** — each loop round is a brand-new `claude -p` process. State lives on disk (`.owloop/specs/`, `.owloop/logs/`), never accumulated in memory across iterations. Don't design features that assume continuity between rounds. A failed iteration is rolled back to the last good commit (`--no-rollback` opts out) so the next round starts clean; the discarded diff is saved as a patch under `.owloop/logs/`.
