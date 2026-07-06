@@ -244,12 +244,14 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
                 has_completion_signal=True,
                 done_signal="<promise>DONE</promise>",
             ),
+            # A failure *after* the success observes the reset backoff level.
+            AgentResult(stdout="f4", returncode=1, success=False, has_completion_signal=False),
         ]
     )
     engine = _make_engine(
         repo,
         adapter,
-        max_iterations=4,
+        max_iterations=5,
         max_consecutive_failures=3,
         base_retry_delay=2.0,
         max_retry_delay=60.0,
@@ -259,7 +261,9 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
 
     summary = engine.run()
 
-    assert summary.iterations == 4
+    assert summary.iterations == 5
+    # A verified success no longer sleeps at all and resets the backoff level,
+    # so the post-success failure backs off at the base delay again.
     assert sleeps == [2.0, 2.0, 4.0, 2.0]
 
 
@@ -848,3 +852,25 @@ def test_resume_continues_token_and_duration_budget(tmp_path: Path) -> None:
     session = json.loads(engine._session_file().read_text(encoding="utf-8"))
     assert session["tokens_used"] == 1100
     assert session["iterations"] == 4
+
+
+def test_copy_owloop_dir_skips_logs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    owloop_dir = repo / ".owloop"
+    (owloop_dir / "specs").mkdir(parents=True)
+    (owloop_dir / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (owloop_dir / "logs").mkdir()
+    (owloop_dir / "logs" / "events.jsonl").write_text("{}", encoding="utf-8")
+
+    engine = _make_engine(repo, MockAdapter())
+    engine.main_repo_dir = repo
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+
+    engine._copy_owloop_dir(worktree)
+
+    assert (worktree / ".owloop" / "specs" / "01-test.md").is_file()
+    # logs/ is dead weight in a fresh worktree and must not be copied.
+    assert not (worktree / ".owloop" / "logs").exists()

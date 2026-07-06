@@ -18,6 +18,7 @@ so the engine itself never shells out to `claude` directly.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -34,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from owloop import notifications, spec_queue
-from owloop.adapters import AgentAdapter, AgentResult
+from owloop.adapters import DEFAULT_IDLE_TIMEOUT, AgentAdapter, AgentResult
 from owloop.backpressure import load_backpressure
 from owloop.learnings import (
     append_learning,
@@ -262,7 +263,7 @@ class EngineConfig:
     max_duration_minutes: int = 0  # 0 = unlimited
     max_tokens: int = 0  # 0 = unlimited
     max_tokens_per_iteration: int = 0  # 0 = unlimited
-    idle_timeout: float = 3600  # seconds, passed to adapter
+    idle_timeout: float = DEFAULT_IDLE_TIMEOUT  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
     max_same_error_count: int = 5
@@ -409,6 +410,12 @@ class OwloopEngine:
         self._resumed_iterations = 0
         self._resumed_elapsed_seconds = 0.0
         self._run_start_time: float | None = None
+        # Append-mode file handles kept open across writes. The event log and
+        # session log receive one line per agent output line; reopening the
+        # file for each of those writes is measurable overhead on chatty
+        # iterations. Keyed by path because both logs can move when the run
+        # enters a worktree.
+        self._append_handles: dict[Path, Any] = {}
 
     @property
     def owloop_dir(self) -> Path:
@@ -433,18 +440,25 @@ class OwloopEngine:
         """Path to the structured, append-only JSON Lines event log."""
         return self.log_dir / "events.jsonl"
 
+    def _append_line_to(self, path: Path, text: str) -> None:
+        """Append one line via a cached open handle, flushed per write."""
+        handle = self._append_handles.get(path)
+        if handle is None or handle.closed:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("a", encoding="utf-8")
+            self._append_handles[path] = handle
+        handle.write(text + "\n")
+        handle.flush()
+
     def _log_event(self, kind: str, data: dict[str, Any]) -> None:
         """Append one JSON line for this event; creates the log lazily."""
-        path = self._events_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now().isoformat(),
             "session_id": self.session_id,
             "kind": kind,
             "data": data,
         }
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str) + "\n")
+        self._append_line_to(self._events_log_path(), json.dumps(record, default=str))
 
     def _run_git(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -457,8 +471,7 @@ class OwloopEngine:
 
     def _log_line(self, text: str) -> None:
         if self.session_log is not None:
-            with self.session_log.open("a", encoding="utf-8") as f:
-                f.write(text + "\n")
+            self._append_line_to(self.session_log, text)
 
     def _is_git_repo(self) -> bool:
         return self._run_git("rev-parse", "--is-inside-work-tree").returncode == 0
@@ -487,7 +500,9 @@ class OwloopEngine:
 
         return issues
 
-    def _copy_dot_dir(self, worktree_path: Path, name: str, event_name: str) -> None:
+    def _copy_dot_dir(
+        self, worktree_path: Path, name: str, event_name: str, skip: tuple[str, ...] = ()
+    ) -> None:
         """Copy a dot-directory from the main repo into a new worktree.
 
         Git does not track ``.owloop/`` or ``.claude/`` by default, so the
@@ -495,16 +510,18 @@ class OwloopEngine:
         If the target already exists (e.g., a tracked ``.owloop/specs/`` was
         materialized by ``git worktree add``), we still need to sync the latest
         contents from the main repo so new/untracked specs and prompts show up.
+        ``skip`` names top-level entries to leave out of the copy.
         """
         source = self.main_repo_dir / name
         target = worktree_path / name
         if not source.is_dir():
             return
+        ignore = shutil.ignore_patterns(*skip) if skip else None
         if target.exists():
-            shutil.copytree(source, target, dirs_exist_ok=True)
+            shutil.copytree(source, target, dirs_exist_ok=True, ignore=ignore)
             self._emit(f"{event_name}_synced", path=str(target))
         else:
-            shutil.copytree(source, target)
+            shutil.copytree(source, target, ignore=ignore)
             self._emit(event_name, path=str(target))
 
     def _copy_claude_config(self, worktree_path: Path) -> None:
@@ -515,10 +532,14 @@ class OwloopEngine:
     def _copy_owloop_dir(self, worktree_path: Path) -> None:
         """Copy the main repo's .owloop/ into a new worktree.
 
-        This keeps specs, logs, and prompt files in the worktree so the loop
-        can read and write them without touching the original checkout.
+        This keeps specs and prompt files in the worktree so the loop can read
+        and write them without touching the original checkout. ``logs/`` is
+        deliberately not copied: after long runs it is by far the largest part
+        of ``.owloop/`` (per-iteration logs, ``events.jsonl``), the worktree
+        writes its own logs anyway, and stale main-repo logs would only shadow
+        them.
         """
-        self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied")
+        self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied", skip=("logs",))
 
     def _session_file(self) -> Path:
         """Path to the persisted session descriptor in the main repo.
@@ -1462,7 +1483,8 @@ class OwloopEngine:
                         stopped_reason = StopReason.SUCCESS
                         self._emit("all_specs_complete", spec_count=spec_status["spec_count"])
                         break
-                    time.sleep(min(self.config.base_retry_delay, self.config.max_retry_delay))
+                    # No delay after a verified success — the next agent
+                    # iteration is minutes of work; waiting here buys nothing.
                     continue
 
                 # ── Failure: classify, roll back, and stop on a stall ──
@@ -1558,6 +1580,7 @@ class OwloopEngine:
         )
         self._write_summary(summary)
         self._notify(summary)
+        self._close_append_handles()
         return summary
 
     def _notify(self, summary: RunSummary) -> None:
@@ -1570,6 +1593,12 @@ class OwloopEngine:
             desktop=self.config.notify_desktop,
             emit=lambda kind, **data: self._emit(kind, **data),
         )
+
+    def _close_append_handles(self) -> None:
+        for handle in self._append_handles.values():
+            with contextlib.suppress(OSError):
+                handle.close()
+        self._append_handles.clear()
 
     def _write_summary(self, summary: RunSummary) -> None:
         """Persist the latest run summary so `owloop report` can read it."""
