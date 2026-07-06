@@ -356,8 +356,7 @@ class KimiCodeAdapter(AgentAdapter):
 
         try:
             probe = subprocess.run(
-                self._build_cmd(),
-                input="respond with just ok",
+                self._build_cmd(prompt="respond with just ok"),
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -373,17 +372,18 @@ class KimiCodeAdapter(AgentAdapter):
 
         return issues
 
-    def _build_cmd(self) -> list[str]:
+    def _build_cmd(self, prompt: str | None = None) -> list[str]:
         # `--auto` and `--yolo` are interactive-mode flags and cannot be
         # combined with `--prompt`. The effective permission mode is controlled
         # by `default_permission_mode` in the user's Kimi config.
-        return [
+        cmd = [
             self.kimi_cmd,
-            "--prompt",
-            "-",  # read prompt from stdin
             "--output-format",
             "stream-json",
         ]
+        if prompt is not None:
+            cmd.extend(["--prompt", prompt])
+        return cmd
 
     @staticmethod
     def _killpg(proc: subprocess.Popen) -> None:
@@ -409,7 +409,6 @@ class KimiCodeAdapter(AgentAdapter):
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
         popen_kwargs: dict = {
             "cwd": cwd,
-            "stdin": subprocess.PIPE,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
             "text": True,
@@ -421,7 +420,7 @@ class KimiCodeAdapter(AgentAdapter):
             popen_kwargs["start_new_session"] = True
 
         try:
-            proc = subprocess.Popen(self._build_cmd(), **popen_kwargs)
+            proc = subprocess.Popen(self._build_cmd(prompt=prompt), **popen_kwargs)
         except FileNotFoundError:
             return AgentResult(
                 stdout="",
@@ -432,12 +431,8 @@ class KimiCodeAdapter(AgentAdapter):
                 promise_payload="",
             )
 
-        assert proc.stdin is not None and proc.stdout is not None
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except BrokenPipeError:
-            pass
+        assert proc.stdout is not None
+        # Kimi reads the prompt from the --prompt argument, not stdin.
 
         line_queue: queue.Queue[str | None] = queue.Queue()
         result_text_parts: list[str] = []

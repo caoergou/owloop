@@ -18,7 +18,7 @@ from rich.text import Text
 
 from owloop import _brand
 from owloop.adapters import get_adapter
-from owloop.backpressure import discover_and_save, load_backpressure
+from owloop.backpressure import discover_and_save
 from owloop.engine import EngineConfig, OwloopEngine
 from owloop.paths import resolve_specs_dir
 from owloop.report import ReportGenerator
@@ -953,10 +953,10 @@ def check(strict: bool, run_baseline: bool, review: bool) -> None:
         return
 
     linter = SpecLinter(specs_dir)
-    report = linter.lint_all(run_baseline=run_baseline)
-    _print_check_report(console, report, ascii=ascii)
+    lint_report = linter.lint_all(run_baseline=run_baseline)
+    _print_check_report(console, lint_report, ascii=ascii)
 
-    failed = report.error_count > 0 or (strict and report.warning_count > 0)
+    failed = lint_report.error_count > 0 or (strict and lint_report.warning_count > 0)
     if failed:
         raise SystemExit(1)
 

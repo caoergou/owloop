@@ -27,6 +27,12 @@ from typing import Any
 
 from owloop import spec_queue
 from owloop.adapters import AgentAdapter
+from owloop.learnings import (
+    append_learning,
+    extract_learnings,
+    format_learnings_for_prompt,
+    load_learnings,
+)
 from owloop.paths import resolve_logs_dir, resolve_owloop_dir, resolve_specs_dir
 from owloop.promise import parse_promise_signal
 from owloop.sleep_inhibitor import SleepInhibitor
@@ -52,6 +58,11 @@ If you hit an external blocker (missing API key, unavailable dependency), output
 `<promise>BLOCKED:reason</promise>` and the loop will stop. If you need a human
 decision before continuing, output `<promise>DECIDE:question</promise>` and the
 loop will stop to ask for guidance.
+
+If you discover a useful operational fact during this iteration (e.g., "tests
+require a running database", "use poetry not pip"), wrap it in
+`<learning>...</learning>` tags. It will be saved to `.owloop/learnings.md` and
+loaded into the next iteration so you do not have to rediscover it.
 
 Before implementing, search the codebase for existing implementations — do not
 assume something doesn't exist without checking.
@@ -360,24 +371,35 @@ class OwloopEngine:
             "first_incomplete": incomplete[0].name if incomplete else None,
         }
 
-    def _check_fix_loop(self) -> None:
-        """Detect when the same files keep getting modified without progress."""
+    def _check_fix_loop(self) -> bool:
+        """Detect when the same files keep getting modified without progress.
+
+        Returns True when the loop should stop because the same files keep
+        changing without making progress.
+        """
         result = self._run_git("diff", "--name-only", "HEAD~1", "HEAD")
         if result.returncode != 0:
-            return
+            return False
         changed = {f.strip() for f in result.stdout.splitlines() if f.strip()}
         if not changed:
-            return
+            return False
         self._recent_file_sets.append(changed)
         threshold = self.config.fix_loop_threshold
         if len(self._recent_file_sets) < threshold:
-            return
+            return False
         window = self._recent_file_sets[-threshold:]
         repeated = set.intersection(*window)
         if repeated:
             self._emit("fix_loop_warning", files=sorted(repeated), consecutive=threshold)
+            self._emit(
+                "fix_loop_blocked",
+                files=sorted(repeated),
+                reason="same files modified repeatedly; spec needs to be split manually",
+            )
+            return True
         if len(self._recent_file_sets) > threshold * 2:
             self._recent_file_sets = self._recent_file_sets[-threshold * 2:]
+        return False
 
     def _read_run_notes(self) -> str | None:
         path = self.cwd / "run-notes.md"
@@ -392,7 +414,7 @@ class OwloopEngine:
         return None
 
     def _build_prompt_with_context(self, prompt_text: str) -> str:
-        """Prepend run-notes and STEERING.md context to the iteration prompt."""
+        """Prepend run-notes, STEERING.md, and learnings to the iteration prompt."""
         sections: list[str] = []
 
         steering = self._read_steering()
@@ -412,6 +434,11 @@ class OwloopEngine:
                 "Read them to avoid repeating mistakes.\n\n"
                 f"{notes}"
             )
+
+        learnings_text = format_learnings_for_prompt(load_learnings(self.cwd))
+        if learnings_text:
+            self._emit("learnings_loaded", path=str(self.cwd / ".owloop" / "learnings.md"))
+            sections.append(learnings_text)
 
         if not sections:
             return prompt_text
@@ -513,6 +540,13 @@ class OwloopEngine:
                 )
             else:
                 self._emit("verification_passed", iteration=iteration)
+
+        for learning in extract_learnings(result.stdout):
+            try:
+                append_learning(self.cwd, learning)
+                self._emit("learning_recorded", learning=learning)
+            except Exception:
+                pass
 
         return IterationResult(
             iteration=iteration,
@@ -642,7 +676,10 @@ class OwloopEngine:
                 if result.promise_state == "DONE":
                     consecutive_failures = 0
                     backoff_level = 0
-                    self._check_fix_loop()
+                    if self._check_fix_loop():
+                        stopped_reason = "fix_loop_blocked"
+                        blocker = "same files modified repeatedly; spec needs to be split"
+                        break
                 elif result.promise_state == "BLOCKED":
                     stopped_reason = "blocked"
                     blocker = result.promise_payload

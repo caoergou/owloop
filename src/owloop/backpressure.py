@@ -12,7 +12,7 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 class BackpressureCommand:
@@ -27,7 +27,7 @@ class BackpressureCommand:
         return {"name": self.name, "command": self.command, "source": self.source}
 
     @classmethod
-    def from_dict(cls, data: dict[str, str]) -> "BackpressureCommand":
+    def from_dict(cls, data: dict[str, str]) -> BackpressureCommand:
         return cls(
             name=data["name"],
             command=data["command"],
@@ -119,10 +119,10 @@ class BackpressureDiscovery:
     def _has_dev_dependency(self, data: dict[str, Any], package: str) -> bool:
         dep_groups = data.get("dependency-groups", {})
         dev = dep_groups.get("dev", [])
-        for item in dev:
-            if isinstance(item, str) and item.lower().startswith(package):
-                return True
-        return False
+        return any(
+            isinstance(item, str) and item.lower().startswith(package)
+            for item in dev
+        )
 
     def _guess_source_dirs(self) -> list[str]:
         candidates = ["src", "."]
@@ -263,11 +263,11 @@ class BackpressureDiscovery:
         try:
             import tomllib
 
-            return tomllib.loads(path.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], tomllib.loads(path.read_text(encoding="utf-8")))
         except ModuleNotFoundError:  # pragma: no cover - Python <3.11 fallback
             import tomli
 
-            return tomli.loads(path.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], tomli.loads(path.read_text(encoding="utf-8")))
 
 
 def resolve_backpressure_path(project_dir: Path) -> Path:

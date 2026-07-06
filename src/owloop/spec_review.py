@@ -8,10 +8,8 @@ not waste tokens on impossible tasks.
 from __future__ import annotations
 
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from owloop.adapters import AgentAdapter
 from owloop.spec_linter import Finding, SpecLinter
@@ -143,7 +141,9 @@ If the spec looks good, output `<promise>PASS</promise>`.
             f"Spec file: {spec_file.name}\n\n"
             f"{spec_file.read_text(encoding='utf-8')}"
         )
-        result = self.adapter.run(prompt, cwd=self.project_dir)
+        adapter = self.adapter
+        assert adapter is not None
+        result = adapter.run(prompt, cwd=self.project_dir)
 
         if "<promise>PASS</promise>" in result.stdout:
             return

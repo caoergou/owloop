@@ -6,9 +6,9 @@ gets a smaller context window and a single responsibility.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from owloop.adapters import AgentAdapter, AgentResult
 
