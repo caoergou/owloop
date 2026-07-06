@@ -17,7 +17,7 @@ from rich.prompt import Confirm
 from rich.text import Text
 
 from owloop import _brand
-from owloop.adapters import get_adapter
+from owloop.adapters import DEFAULT_IDLE_TIMEOUT, get_adapter
 from owloop.backpressure import discover_and_save
 from owloop.engine import EngineConfig, OwloopEngine, RunSummary
 from owloop.paths import resolve_specs_dir
@@ -420,7 +420,7 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
         help="Split large iterations into Orient/Implement/Verify subagent phases.",
     )(f)
     f = click.option(
-        "--idle-timeout", type=float, default=3600,
+        "--idle-timeout", type=float, default=DEFAULT_IDLE_TIMEOUT,
         help="Kill agent after N seconds without output.", show_default=True,
     )(f)
     f = click.option(
@@ -649,7 +649,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
         "claude",
         model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
-        idle_timeout=3600,
+        idle_timeout=DEFAULT_IDLE_TIMEOUT,
     )
     generator = SpecGenerator(project_dir, adapter)
     stream = AgentStreamDisplay(console, verbose=verbose)
@@ -692,7 +692,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
         console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
         _run_engine(
             max_iterations=0, worktree=True, model=model, agent="claude",
-            idle_timeout=3600, max_duration=0, max_tokens=0,
+            idle_timeout=DEFAULT_IDLE_TIMEOUT, max_duration=0, max_tokens=0,
             ascii=ascii, no_color=no_color, compact=compact,
         )
     else:
@@ -717,7 +717,7 @@ STOPPED_REASON_EXIT_1 = {
 
 def _run_engine(
     max_iterations: int, worktree: bool, model: str, agent: str,
-    idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
+    idle_timeout: float = DEFAULT_IDLE_TIMEOUT, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
     session_id: str | None = None, resume: bool = False,
@@ -1183,7 +1183,7 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
             "claude",
             model=model,
             claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
-            idle_timeout=3600,
+            idle_timeout=DEFAULT_IDLE_TIMEOUT,
         )
         ai_generator = AIReportInsightsGenerator(project_dir, adapter)
         stream = AgentStreamDisplay(console, verbose=verbose)

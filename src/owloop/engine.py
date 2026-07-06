@@ -18,6 +18,7 @@ so the engine itself never shells out to `claude` directly.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -34,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from owloop import notifications, spec_queue
-from owloop.adapters import AgentAdapter, AgentResult
+from owloop.adapters import DEFAULT_IDLE_TIMEOUT, AgentAdapter, AgentResult
 from owloop.backpressure import load_backpressure
 from owloop.learnings import (
     append_learning,
@@ -57,10 +58,14 @@ Read these files if they exist (in order):
 1. `AGENTS.md` — agent instructions for this project
 2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
-Find the highest-priority incomplete work item in specs/ and implement it
-completely. Run the shell commands in that spec's `## Acceptance Criteria`
-section yourself to check your work as you go. When everything is implemented
-and those criteria pass, output `<promise>DONE</promise>`.
+If a `## Target Spec` section appears above, that is your work item — the
+loop's dependency- and priority-aware scheduler already selected it, so do not
+scan specs/ for a different one. Only when no Target Spec section is present,
+find the highest-priority incomplete work item in specs/ yourself.
+
+Implement the work item completely. Run the shell commands in that spec's
+`## Acceptance Criteria` section yourself to check your work as you go. When
+everything is implemented and those criteria pass, output `<promise>DONE</promise>`.
 
 The loop — not you — owns git and completion:
 - Do NOT commit or push. The loop commits and pushes only after it has
@@ -246,6 +251,32 @@ the gap spec(s). Then output `<promise>DONE</promise>`.
 
 EventCallback = Callable[[str, dict], None]
 
+# Newest run-note entries carried into each iteration prompt. run-notes.md
+# gains an entry per iteration; shipping the whole file makes long runs
+# progressively slower (more input tokens per round) and buries the current
+# task under stale history. The full file stays on disk.
+MAX_RUN_NOTE_ENTRIES = 5
+
+_RUN_NOTE_ENTRY_RE = re.compile(r"(?m)^(?=## Iteration )")
+
+
+def trim_run_notes(notes: str, max_entries: int = MAX_RUN_NOTE_ENTRIES) -> str:
+    """Keep only the newest ``max_entries`` run-note entries for the prompt.
+
+    Content without ``## Iteration`` headers (legacy or hand-written notes)
+    is returned unchanged.
+    """
+    entries = [e for e in _RUN_NOTE_ENTRY_RE.split(notes) if e.strip()]
+    dated = [e for e in entries if e.startswith("## Iteration ")]
+    if len(dated) <= max_entries:
+        return notes
+    omitted = len(dated) - max_entries
+    kept = "".join(dated[-max_entries:]).strip()
+    return (
+        f"({omitted} older iteration notes omitted — full history in run-notes.md)\n\n"
+        f"{kept}"
+    )
+
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -262,7 +293,7 @@ class EngineConfig:
     max_duration_minutes: int = 0  # 0 = unlimited
     max_tokens: int = 0  # 0 = unlimited
     max_tokens_per_iteration: int = 0  # 0 = unlimited
-    idle_timeout: float = 3600  # seconds, passed to adapter
+    idle_timeout: float = DEFAULT_IDLE_TIMEOUT  # seconds, passed to adapter
     worktree: bool = True
     max_consecutive_failures: int = 3
     max_same_error_count: int = 5
@@ -409,6 +440,12 @@ class OwloopEngine:
         self._resumed_iterations = 0
         self._resumed_elapsed_seconds = 0.0
         self._run_start_time: float | None = None
+        # Append-mode file handles kept open across writes. The event log and
+        # session log receive one line per agent output line; reopening the
+        # file for each of those writes is measurable overhead on chatty
+        # iterations. Keyed by path because both logs can move when the run
+        # enters a worktree.
+        self._append_handles: dict[Path, Any] = {}
 
     @property
     def owloop_dir(self) -> Path:
@@ -433,18 +470,25 @@ class OwloopEngine:
         """Path to the structured, append-only JSON Lines event log."""
         return self.log_dir / "events.jsonl"
 
+    def _append_line_to(self, path: Path, text: str) -> None:
+        """Append one line via a cached open handle, flushed per write."""
+        handle = self._append_handles.get(path)
+        if handle is None or handle.closed:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("a", encoding="utf-8")
+            self._append_handles[path] = handle
+        handle.write(text + "\n")
+        handle.flush()
+
     def _log_event(self, kind: str, data: dict[str, Any]) -> None:
         """Append one JSON line for this event; creates the log lazily."""
-        path = self._events_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now().isoformat(),
             "session_id": self.session_id,
             "kind": kind,
             "data": data,
         }
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str) + "\n")
+        self._append_line_to(self._events_log_path(), json.dumps(record, default=str))
 
     def _run_git(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -457,8 +501,7 @@ class OwloopEngine:
 
     def _log_line(self, text: str) -> None:
         if self.session_log is not None:
-            with self.session_log.open("a", encoding="utf-8") as f:
-                f.write(text + "\n")
+            self._append_line_to(self.session_log, text)
 
     def _is_git_repo(self) -> bool:
         return self._run_git("rev-parse", "--is-inside-work-tree").returncode == 0
@@ -487,7 +530,9 @@ class OwloopEngine:
 
         return issues
 
-    def _copy_dot_dir(self, worktree_path: Path, name: str, event_name: str) -> None:
+    def _copy_dot_dir(
+        self, worktree_path: Path, name: str, event_name: str, skip: tuple[str, ...] = ()
+    ) -> None:
         """Copy a dot-directory from the main repo into a new worktree.
 
         Git does not track ``.owloop/`` or ``.claude/`` by default, so the
@@ -495,16 +540,18 @@ class OwloopEngine:
         If the target already exists (e.g., a tracked ``.owloop/specs/`` was
         materialized by ``git worktree add``), we still need to sync the latest
         contents from the main repo so new/untracked specs and prompts show up.
+        ``skip`` names top-level entries to leave out of the copy.
         """
         source = self.main_repo_dir / name
         target = worktree_path / name
         if not source.is_dir():
             return
+        ignore = shutil.ignore_patterns(*skip) if skip else None
         if target.exists():
-            shutil.copytree(source, target, dirs_exist_ok=True)
+            shutil.copytree(source, target, dirs_exist_ok=True, ignore=ignore)
             self._emit(f"{event_name}_synced", path=str(target))
         else:
-            shutil.copytree(source, target)
+            shutil.copytree(source, target, ignore=ignore)
             self._emit(event_name, path=str(target))
 
     def _copy_claude_config(self, worktree_path: Path) -> None:
@@ -515,10 +562,14 @@ class OwloopEngine:
     def _copy_owloop_dir(self, worktree_path: Path) -> None:
         """Copy the main repo's .owloop/ into a new worktree.
 
-        This keeps specs, logs, and prompt files in the worktree so the loop
-        can read and write them without touching the original checkout.
+        This keeps specs and prompt files in the worktree so the loop can read
+        and write them without touching the original checkout. ``logs/`` is
+        deliberately not copied: after long runs it is by far the largest part
+        of ``.owloop/`` (per-iteration logs, ``events.jsonl``), the worktree
+        writes its own logs anyway, and stale main-repo logs would only shadow
+        them.
         """
-        self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied")
+        self._copy_dot_dir(worktree_path, ".owloop", "owloop_dir_copied", skip=("logs",))
 
     def _session_file(self) -> Path:
         """Path to the persisted session descriptor in the main repo.
@@ -858,8 +909,34 @@ class OwloopEngine:
             return path.read_text(encoding="utf-8")
         return None
 
-    def _build_prompt_with_context(self, prompt_text: str) -> str:
-        """Prepend run-notes, STEERING.md, and learnings to the iteration prompt."""
+    def _target_spec_section(self, spec_name: str | None) -> str | None:
+        """Inline the engine-selected spec so the agent skips re-discovery.
+
+        Without this, every fresh-context iteration spends its opening minutes
+        (and tool calls) re-deriving what ``spec_queue.get_next_ready_spec``
+        already computed — and, not knowing the Priority/Depends-On
+        conventions, can land on a different spec than the engine will verify.
+        """
+        if not spec_name:
+            return None
+        spec_path = self.specs_dir / spec_name
+        try:
+            content = spec_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        self._emit("target_spec_selected", spec=spec_name)
+        return (
+            "## Target Spec\n\n"
+            f"The loop has selected your work item: `{spec_name}` "
+            f"(on disk at `{spec_path}`). Implement this spec — do not pick a "
+            "different one. Its current content follows:\n\n"
+            f"{content.strip()}"
+        )
+
+    def _build_prompt_with_context(
+        self, prompt_text: str, target_spec: str | None = None
+    ) -> str:
+        """Prepend run-notes, STEERING.md, learnings, and the target spec."""
         sections: list[str] = []
 
         steering = self._read_steering()
@@ -871,19 +948,33 @@ class OwloopEngine:
                 f"{steering}"
             )
 
+        failure_feedback = self._read_failure_feedback()
+        if failure_feedback is not None:
+            self._emit("failure_feedback_loaded", path=str(self._failure_feedback_path()))
+            sections.append(
+                "The previous iteration FAILED verification and was rolled back. "
+                "Start from the diagnosis below instead of rediscovering it, and "
+                "fix the root cause rather than repeating the same approach.\n\n"
+                f"{failure_feedback}"
+            )
+
         notes = self._read_run_notes()
         if notes is not None:
             self._emit("run_notes_loaded", path=str(self._run_notes_path()))
             sections.append(
                 "The following notes were recorded during previous iterations of this run. "
                 "Read them to avoid repeating mistakes.\n\n"
-                f"{notes}"
+                f"{trim_run_notes(notes)}"
             )
 
         learnings_text = format_learnings_for_prompt(load_learnings(self.cwd))
         if learnings_text:
             self._emit("learnings_loaded", path=str(self.cwd / ".owloop" / "learnings.md"))
             sections.append(learnings_text)
+
+        spec_section = self._target_spec_section(target_spec)
+        if spec_section is not None:
+            sections.append(spec_section)
 
         if not sections:
             return prompt_text
@@ -922,9 +1013,15 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
-    def _run_commands(self, commands: list[str]) -> tuple[int, int]:
-        """Run shell commands from the engine (not the agent); count pass/fail."""
-        passed = failed = 0
+    def _run_commands(self, commands: list[str]) -> tuple[int, int, list[dict[str, Any]]]:
+        """Run shell commands from the engine (not the agent).
+
+        Returns ``(passed, failed, failures)`` where each failure records the
+        command, its exit code, and an output tail — the raw material for the
+        failure-feedback file that primes the next iteration's retry.
+        """
+        passed = 0
+        failures: list[dict[str, Any]] = []
         for command in commands:
             result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
                 command, shell=True, cwd=self.cwd, capture_output=True, text=True,
@@ -932,13 +1029,19 @@ class OwloopEngine:
             if result.returncode == 0:
                 passed += 1
             else:
-                failed += 1
-        return passed, failed
+                output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+                tail = "\n".join(output.splitlines()[-30:])[-2000:]
+                failures.append(
+                    {"command": command, "returncode": result.returncode, "output": tail}
+                )
+        return passed, len(failures), failures
 
-    def _run_acceptance_criteria(self, spec_name: str | None) -> tuple[int, int]:
+    def _run_acceptance_criteria(
+        self, spec_name: str | None
+    ) -> tuple[int, int, list[dict[str, Any]]]:
         """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
         if not spec_name:
-            return 0, 0
+            return 0, 0, []
         commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
         return self._run_commands(commands)
 
@@ -961,27 +1064,29 @@ class OwloopEngine:
 
     def _run_verification_gate(
         self, iteration: int, spec_name: str | None, guard_before: str
-    ) -> tuple[bool, bool, int, int]:
+    ) -> tuple[bool, bool, list[dict[str, Any]]]:
         """Deterministically verify an iteration outside the agent's control.
 
-        Returns ``(passed, tampered, passed_count, failed_count)``. The engine
-        — never the agent — runs the spec's acceptance-criteria commands and
-        the project's backpressure commands via ``subprocess`` and lets exit
-        codes decide. A tampered guard region fails the gate immediately with
-        a distinct ``spec_tampered`` event, regardless of command results.
+        Returns ``(passed, tampered, failures)``. The engine — never the agent
+        — runs the spec's acceptance-criteria commands and the project's
+        backpressure commands via ``subprocess`` and lets exit codes decide.
+        A tampered guard region fails the gate immediately with a distinct
+        ``spec_tampered`` event, regardless of command results. ``failures``
+        carries per-command details for the next iteration's failure feedback.
         """
         self._emit("verification_gate_start", iteration=iteration, spec=spec_name)
 
         if self._guarded_hash(spec_name) != guard_before:
             self._emit("spec_tampered", iteration=iteration, spec=spec_name)
-            return False, True, 0, 0
+            return False, True, []
 
-        acc_passed, acc_failed = self._run_acceptance_criteria(spec_name)
+        acc_passed, acc_failed, acc_failures = self._run_acceptance_criteria(spec_name)
         bp_commands = [cmd.command for cmd in load_backpressure(self.cwd)]
-        bp_passed, bp_failed = self._run_commands(bp_commands)
+        bp_passed, bp_failed, bp_failures = self._run_commands(bp_commands)
 
         passed_count = acc_passed + bp_passed
         failed_count = acc_failed + bp_failed
+        failures = acc_failures + bp_failures
         gate_ok = failed_count == 0
 
         if gate_ok:
@@ -996,8 +1101,9 @@ class OwloopEngine:
                 iteration=iteration,
                 passed=passed_count,
                 failed=failed_count,
+                commands=[f["command"] for f in failures],
             )
-        return gate_ok, False, passed_count, failed_count
+        return gate_ok, False, failures
 
     def _head(self) -> str:
         return str(self._run_git("rev-parse", "HEAD").stdout).strip()
@@ -1013,6 +1119,7 @@ class OwloopEngine:
         self._run_git(
             "reset", "--quiet", "--",
             ".owloop/run-notes.md", ".owloop/logs", ".owloop/PROMPT_build.md",
+            ".owloop/last-failure.md",
         )
         subject = f"owloop: complete {spec_name}" if spec_name else f"owloop: iteration {iteration}"
         committed = self._run_git("commit", "-m", subject)
@@ -1066,7 +1173,7 @@ class OwloopEngine:
             patch=str(patch_path) if diff.stdout.strip() else None,
         )
 
-    def run_iteration(self, iteration: int) -> IterationResult:
+    def run_iteration(self, iteration: int, target_spec: str | None = None) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
         prompt_file = owloop_dir / "PROMPT_build.md"
         log_file = self.log_dir / (
@@ -1076,7 +1183,7 @@ class OwloopEngine:
         self._emit("iteration_start", iteration=iteration, timestamp=_timestamp())
 
         prompt_text = self._build_prompt_with_context(
-            prompt_file.read_text(encoding="utf-8")
+            prompt_file.read_text(encoding="utf-8"), target_spec=target_spec
         )
 
         cap_tracker = TokenTracker()
@@ -1151,24 +1258,6 @@ class OwloopEngine:
             self._emit("no_done_signal", tail=tail)
 
         success = result.success and promise_state == "DONE"
-
-        if success and self.verifier_adapter is not None and not self.config.use_subagents:
-            verifier_result = self._run_verifier(iteration, log_file)
-            if verifier_result.promise_state != "PASS":
-                success = False
-                verifier_tail = "\n".join(
-                    verifier_result.stdout.splitlines()[-self.config.tail_lines :]
-                )
-                tail = f"{tail}\nVerifier: {verifier_tail}".strip()
-                promise_state = "VERIFY_FAIL"
-                promise_payload = verifier_result.promise_payload or verifier_tail
-                self._emit(
-                    "verification_failed",
-                    iteration=iteration,
-                    tail=verifier_tail,
-                )
-            else:
-                self._emit("verification_passed", iteration=iteration)
 
         for learning in extract_learnings(result.stdout):
             try:
@@ -1255,6 +1344,81 @@ class OwloopEngine:
             return True
         self._emit("converged", sweep=sweep)
         return False
+
+    def _apply_llm_verifier(self, iteration: int, result: IterationResult) -> bool:
+        """Run the independent LLM verifier as a second, orthogonal signal.
+
+        Ordering matters for speed and cost: this model roundtrip only runs on
+        work that already survived the deterministic gate (seconds, no tokens),
+        so mechanically-broken iterations never pay for it. Returns True on
+        PASS; on FAIL mutates ``result`` into a VERIFY_FAIL failure so
+        classification and failure feedback see the verifier's verdict.
+        """
+        verifier_result = self._run_verifier(iteration, result.log_file)
+        if verifier_result.promise_state == "PASS":
+            self._emit("verification_passed", iteration=iteration)
+            return True
+        verifier_tail = "\n".join(
+            verifier_result.stdout.splitlines()[-self.config.tail_lines :]
+        )
+        result.success = False
+        result.summary = f"{result.summary}\nVerifier: {verifier_tail}".strip()
+        result.promise_state = "VERIFY_FAIL"
+        result.promise_payload = verifier_result.promise_payload or verifier_tail
+        self._emit("verification_failed", iteration=iteration, tail=verifier_tail)
+        return False
+
+    def _failure_feedback_path(self) -> Path:
+        return resolve_owloop_dir(self.cwd) / "last-failure.md"
+
+    def _write_failure_feedback(
+        self,
+        iteration: int,
+        failure_reason: FailureReason,
+        result: IterationResult,
+        gate_failures: list[dict[str, Any]],
+    ) -> None:
+        """Persist why this iteration failed so the next retry starts informed.
+
+        Without this, a fresh-context retry inherits only a five-line stdout
+        tail and usually re-diagnoses (or repeats) the same mistake — the most
+        expensive way an unattended loop can be slow. The file is injected
+        into the next prompt and deleted on the next verified success.
+        """
+        lines = [
+            f"# Previous iteration failed (iteration {iteration})",
+            "",
+            f"- Failure type: {failure_reason}",
+        ]
+        if result.promise_state == "VERIFY_FAIL" and result.promise_payload:
+            lines.append(f"- Independent verifier verdict: {result.promise_payload}")
+        if gate_failures:
+            lines += ["", "## Commands that failed verification"]
+            for failure in gate_failures:
+                lines += [
+                    "",
+                    f"### `{failure['command']}` (exit {failure['returncode']})",
+                    "```",
+                    failure["output"] or "(no output)",
+                    "```",
+                ]
+        tail = "\n".join(result.stdout.splitlines()[-30:]).strip()
+        if tail:
+            lines += ["", "## Agent output tail", "```", tail, "```"]
+        path = self._failure_feedback_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self._emit("failure_feedback_written", path=str(path), iteration=iteration)
+
+    def _read_failure_feedback(self) -> str | None:
+        path = self._failure_feedback_path()
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+        return None
+
+    def _clear_failure_feedback(self) -> None:
+        with contextlib.suppress(OSError):
+            self._failure_feedback_path().unlink(missing_ok=True)
 
     def run(self) -> RunSummary:
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -1365,19 +1529,11 @@ class OwloopEngine:
                 last_good = self._head()
 
                 iteration += 1
-                result = self.run_iteration(iteration)
-
-                # Cross-iteration notes: summarize what just happened. Read the
-                # commit subject before the engine makes its own commit below.
-                note_summary = result.summary
-                if result.success:
-                    commit_result = self._run_git("log", "-1", "--pretty=%s")
-                    if commit_result.returncode == 0 and commit_result.stdout.strip():
-                        note_summary = commit_result.stdout.strip()
-                self._append_run_note(iteration, result.success, note_summary)
+                result = self.run_iteration(iteration, target_spec=active_spec)
 
                 if self.config.dry_run:
-                    acceptance_passed, acceptance_failed = self._run_acceptance_criteria(
+                    self._append_run_note(iteration, result.success, result.summary)
+                    acceptance_passed, acceptance_failed, _ = self._run_acceptance_criteria(
                         active_spec
                     )
                     current_head = self._head()
@@ -1401,11 +1557,13 @@ class OwloopEngine:
 
                 # ── Terminal agent signals stop the loop before verification ──
                 if result.promise_state == "BLOCKED":
+                    self._append_run_note(iteration, False, result.summary)
                     stopped_reason = StopReason.BLOCKED
                     blocker = result.promise_payload
                     self._emit("blocked", payload=result.promise_payload)
                     break
                 if result.promise_state == "DECIDE":
+                    self._append_run_note(iteration, False, result.summary)
                     stopped_reason = StopReason.DECIDE
                     decision_question = result.promise_payload
                     self._emit("decide", payload=result.promise_payload)
@@ -1414,10 +1572,19 @@ class OwloopEngine:
                 # ── Deterministic verification gate (engine-owned) ──
                 gate_passed = False
                 tampered = False
+                gate_failures: list[dict[str, Any]] = []
                 if result.promise_state == "DONE":
-                    gate_passed, tampered, _gp, _gf = self._run_verification_gate(
+                    gate_passed, tampered, gate_failures = self._run_verification_gate(
                         iteration, active_spec, guard_before
                     )
+                    # Shell-first ordering: the expensive LLM verifier runs only
+                    # on work that already survived the mechanical gate.
+                    if (
+                        gate_passed
+                        and self.verifier_adapter is not None
+                        and not self.config.use_subagents
+                    ):
+                        gate_passed = self._apply_llm_verifier(iteration, result)
 
                 if gate_passed:
                     # Verified success: only now does the engine commit, mark the
@@ -1425,6 +1592,14 @@ class OwloopEngine:
                     consecutive_failures = 0
                     backoff_level = 0
                     same_error_counts.clear()
+                    self._clear_failure_feedback()
+                    # Cross-iteration note: read the commit subject before the
+                    # engine makes its own commit below.
+                    note_summary = result.summary
+                    commit_result = self._run_git("log", "-1", "--pretty=%s")
+                    if commit_result.returncode == 0 and commit_result.stdout.strip():
+                        note_summary = commit_result.stdout.strip()
+                    self._append_run_note(iteration, True, note_summary)
                     self._mark_spec_complete(active_spec)
                     self._commit_iteration(iteration, active_spec)
                     self._push(branch)
@@ -1462,10 +1637,11 @@ class OwloopEngine:
                         stopped_reason = StopReason.SUCCESS
                         self._emit("all_specs_complete", spec_count=spec_status["spec_count"])
                         break
-                    time.sleep(min(self.config.base_retry_delay, self.config.max_retry_delay))
+                    # No delay after a verified success — the next agent
+                    # iteration is minutes of work; waiting here buys nothing.
                     continue
 
-                # ── Failure: classify, roll back, and stop on a stall ──
+                # ── Failure: classify, record feedback, roll back, stop on a stall ──
                 if tampered:
                     failure_reason = FailureReason.TAMPERED
                 elif result.timed_out:
@@ -1474,12 +1650,18 @@ class OwloopEngine:
                     failure_reason = FailureReason.EXHAUSTED_ITERATION
                 elif result.crashed:
                     failure_reason = FailureReason.CRASH
+                elif result.promise_state == "VERIFY_FAIL":
+                    failure_reason = FailureReason.VERIFICATION_FAILED
                 elif result.promise_state == "DONE":
                     failure_reason = FailureReason.VERIFICATION_FAILED
                     self._emit("verification_failed", iteration=iteration, tail=result.summary)
                 else:
                     failure_reason = FailureReason.NO_DONE_SIGNAL
 
+                self._append_run_note(iteration, False, result.summary)
+                # Written before rollback; .owloop/ is excluded from the reset,
+                # so the next iteration's prompt starts from this diagnosis.
+                self._write_failure_feedback(iteration, failure_reason, result, gate_failures)
                 self._rollback_iteration(iteration, last_good)
 
                 consecutive_failures += 1
@@ -1558,6 +1740,7 @@ class OwloopEngine:
         )
         self._write_summary(summary)
         self._notify(summary)
+        self._close_append_handles()
         return summary
 
     def _notify(self, summary: RunSummary) -> None:
@@ -1570,6 +1753,12 @@ class OwloopEngine:
             desktop=self.config.notify_desktop,
             emit=lambda kind, **data: self._emit(kind, **data),
         )
+
+    def _close_append_handles(self) -> None:
+        for handle in self._append_handles.values():
+            with contextlib.suppress(OSError):
+                handle.close()
+        self._append_handles.clear()
 
     def _write_summary(self, summary: RunSummary) -> None:
         """Persist the latest run summary so `owloop report` can read it."""
