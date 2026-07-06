@@ -242,6 +242,21 @@ class ClaudeCodeAdapter(AgentAdapter):
                 text = event.get("result", "")
                 if text:
                     result_text_parts.append(text)
+                usage = event.get("usage", {})
+                cost = event.get("total_cost_usd", 0)
+                in_tok = usage.get("input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                model_usage = event.get("modelUsage", {})
+                model_name = next(iter(model_usage), "")
+                parts = []
+                if in_tok or out_tok:
+                    parts.append(f"{in_tok + out_tok:,} tokens ({in_tok:,} in + {out_tok:,} out)")
+                if cost:
+                    parts.append(f"${cost:.4f}")
+                if model_name:
+                    parts.append(model_name)
+                if parts:
+                    return f"[usage: {' · '.join(parts)}]"
                 return None
 
             return None

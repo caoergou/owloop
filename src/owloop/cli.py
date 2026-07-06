@@ -210,8 +210,8 @@ class AgentStreamDisplay:
         self._last_output = time.monotonic()
         self._burst_count = 0
         self._burst_suppressed = 0
-        self._char_count = 0
         self._line_count = 0
+        self._real_tokens = ""
         self._has_status = False
         self._frame = 0
         self._lock = threading.Lock()
@@ -246,6 +246,11 @@ class AgentStreamDisplay:
 
             self._clear_status()
 
+            if stripped.startswith("[usage:"):
+                self._real_tokens = stripped[8:-1]
+                self._draw_status()
+                return
+
             if self.verbose:
                 elapsed = now - self.start_time
                 if len(stripped) > 2:
@@ -277,19 +282,16 @@ class AgentStreamDisplay:
             self._out.flush()
             self._has_status = False
 
-    def _format_tokens(self, chars: int) -> str:
-        tokens = chars // 4
-        if tokens >= 1000:
-            return f"~{tokens / 1000:.1f}k"
-        return f"~{tokens}"
-
     def _build_status(self) -> str:
         elapsed = int(time.monotonic() - self.start_time)
         mins, secs = divmod(elapsed, 60)
-        tok = self._format_tokens(self._char_count)
         self._frame = (self._frame + 1) % len(self.SPINNERS)
         spinner = self.SPINNERS[self._frame]
-        return f"  {spinner} {mins}:{secs:02d} · {tok} tokens · {self._line_count} lines"
+        parts = [f"  {spinner} {mins}:{secs:02d}"]
+        if self._real_tokens:
+            parts.append(self._real_tokens)
+        parts.append(f"{self._line_count} lines")
+        return " · ".join(parts)
 
     def _draw_status(self) -> None:
         status = self._build_status()
