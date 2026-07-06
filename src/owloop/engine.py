@@ -210,6 +210,24 @@ class OwloopEngine:
 
     def _emit(self, kind: str, **data: Any) -> None:
         self.on_event(kind, data)
+        self._log_event(kind, data)
+
+    def _events_log_path(self) -> Path:
+        """Path to the structured, append-only JSON Lines event log."""
+        return self.log_dir / "events.jsonl"
+
+    def _log_event(self, kind: str, data: dict[str, Any]) -> None:
+        """Append one JSON line for this event; creates the log lazily."""
+        path = self._events_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "kind": kind,
+            "data": data,
+        }
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str) + "\n")
 
     def _run_git(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         return subprocess.run(
