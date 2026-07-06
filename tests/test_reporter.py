@@ -117,7 +117,10 @@ def test_print_summary_shows_token_warning_for_max_tokens(tmp_path):
     reporter.print_summary(summary)
     text = console.export_text()
 
-    assert "Token budget exhausted" in text
+    # `max_tokens` is an `exhausted` terminal state — surfaced as a distinct,
+    # not-a-success warning (wording may wrap across lines in the panel).
+    assert "Budget exhausted" in text
+    assert "review costs" in text
 
 
 def test_print_summary_ascii_mode_avoids_emoji(tmp_path):

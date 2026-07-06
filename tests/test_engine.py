@@ -80,6 +80,7 @@ def test_append_run_note_creates_file_and_formats_entry(tmp_path: Path) -> None:
 
     engine._append_run_note(2, True, "fixed bug", "add tests")
 
+    # No .owloop/ dir here, so run-notes falls back to the repo root (legacy layout).
     path = repo / "run-notes.md"
     assert path.is_file()
     text = path.read_text(encoding="utf-8")
@@ -168,7 +169,9 @@ def test_run_appends_run_notes_after_iteration(tmp_path: Path) -> None:
     summary = engine.run()
 
     assert summary.iterations == 1
-    run_notes = repo / "run-notes.md"
+    # Loop metadata now lives under .owloop/ so the engine's own commits can
+    # never pick it up via `git add -A`.
+    run_notes = repo / ".owloop" / "run-notes.md"
     assert run_notes.is_file()
     text = run_notes.read_text(encoding="utf-8")
     assert "## Iteration 1" in text
@@ -203,7 +206,7 @@ def test_run_uses_commit_message_as_summary_when_available(tmp_path: Path) -> No
 
     engine.run()
 
-    text = (repo / "run-notes.md").read_text(encoding="utf-8")
+    text = (repo / ".owloop" / "run-notes.md").read_text(encoding="utf-8")
     assert "agent commit message" in text
 
 
@@ -212,7 +215,11 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
     repo.mkdir()
     _git_init(repo)
     (repo / ".owloop" / "specs").mkdir(parents=True)
+    # Two specs so the single success (4th iteration) does not drain the queue
+    # and end the run early — the loop must reach max_iterations to observe the
+    # post-success backoff reset.
     (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs" / "02-test.md").write_text("# spec", encoding="utf-8")
 
     sleeps: list[float] = []
 
@@ -246,6 +253,8 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
         max_consecutive_failures=3,
         base_retry_delay=2.0,
         max_retry_delay=60.0,
+        # Exercise the backoff path rather than the default hard-stop-on-stall.
+        keep_retrying=True,
     )
 
     summary = engine.run()
@@ -284,6 +293,9 @@ def test_run_exponential_backoff_continues_to_grow(tmp_path: Path, monkeypatch) 
         max_consecutive_failures=3,
         base_retry_delay=2.0,
         max_retry_delay=60.0,
+        # Backoff continues to grow only in legacy keep-retrying mode; the
+        # default would hard-stop with `stalled` after 3 failures.
+        keep_retrying=True,
     )
 
     summary = engine.run()
@@ -751,7 +763,10 @@ def test_session_state_persisted_on_interrupt(tmp_path: Path) -> None:
     repo.mkdir()
     _git_init(repo)
     (repo / ".owloop" / "specs").mkdir(parents=True)
+    # Two specs so the first (successful) iteration does not drain the queue —
+    # the second iteration then raises KeyboardInterrupt as intended.
     (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs" / "02-test.md").write_text("# spec", encoding="utf-8")
 
     adapter = _InterruptingAdapter(
         responses=[
@@ -786,7 +801,10 @@ def test_resume_continues_token_and_duration_budget(tmp_path: Path) -> None:
     repo.mkdir()
     _git_init(repo)
     (repo / ".owloop" / "specs").mkdir(parents=True)
+    # Two specs so the resumed success does not drain the queue — the loop then
+    # continues and trips the carried-over token budget as intended.
     (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (repo / ".owloop" / "specs" / "02-test.md").write_text("# spec", encoding="utf-8")
 
     adapter = MockAdapter()
     engine = _make_engine(repo, adapter, resume=True, max_tokens=1000)

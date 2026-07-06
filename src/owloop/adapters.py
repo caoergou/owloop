@@ -51,6 +51,10 @@ class AgentResult:
     cost_usd: float = 0.0
     promise_state: str = ""  # "DONE" | "BLOCKED" | "DECIDE" | ""
     promise_payload: str = ""  # text after the colon for BLOCKED/DECIDE
+    # True when the CLI hit a native hard limit (e.g. --max-turns) rather than
+    # finishing or crashing. The engine treats this as a per-iteration
+    # ``exhausted`` failure (roll back), never as success.
+    limit_reached: bool = False
 
 
 class AgentAdapter(ABC):
@@ -130,6 +134,7 @@ class StreamingAgentAdapter(AgentAdapter):
 
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
         self._result_text_parts: list[str] = []
+        self._limit_reached = False
         self.token_tracker.reset()
 
         popen_kwargs: dict = {
@@ -228,6 +233,7 @@ class StreamingAgentAdapter(AgentAdapter):
             cost_usd=self.token_tracker.cost_usd,
             promise_state=parsed[0] if parsed else "",
             promise_payload=parsed[1] if parsed else "",
+            limit_reached=getattr(self, "_limit_reached", False),
         )
 
 
@@ -239,16 +245,50 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
         claude_cmd: str = "claude",
         idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
         token_tracker: TokenTracker | None = None,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
     ) -> None:
         self.model = model
         self.permission_mode = permission_mode
         self.claude_cmd = claude_cmd
         self.idle_timeout = idle_timeout
         self.token_tracker = token_tracker or TokenTracker()
+        # Native per-iteration hard limits forwarded to `claude -p`. They bound
+        # a single runaway iteration at the source rather than only being
+        # checked between iterations. Silently ignored on CLIs too old to
+        # support the flag (see `_supported_flags`).
+        self.max_turns = max_turns
+        self.max_budget_usd = max_budget_usd
+        self._supported_flags_cache: set[str] | None = None
 
     @property
     def name(self) -> str:
         return f"Claude Code ({self.model})"
+
+    def _supported_flags(self) -> set[str]:
+        """Return the set of long flags this `claude` CLI advertises in --help.
+
+        Probed once and cached. On any failure we assume no optional flags are
+        supported and degrade gracefully (the base command still works).
+        """
+        if self._supported_flags_cache is not None:
+            return self._supported_flags_cache
+        flags: set[str] = set()
+        try:
+            help_out = subprocess.run(
+                [self.claude_cmd, "--help"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            text = (help_out.stdout or "") + (help_out.stderr or "")
+            for flag in ("--max-turns", "--max-budget-usd"):
+                if flag in text:
+                    flags.add(flag)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        self._supported_flags_cache = flags
+        return flags
 
     def preflight(self) -> list[str]:
         issues: list[str] = []
@@ -282,7 +322,7 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
         return issues
 
     def _build_cmd(self, prompt: str = "") -> list[str]:
-        return [
+        cmd = [
             self.claude_cmd,
             "-p",
             "--model",
@@ -292,6 +332,13 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
             "--output-format",
             "stream-json",
         ]
+        if self.max_turns is not None or self.max_budget_usd is not None:
+            supported = self._supported_flags()
+            if self.max_turns is not None and "--max-turns" in supported:
+                cmd += ["--max-turns", str(self.max_turns)]
+            if self.max_budget_usd is not None and "--max-budget-usd" in supported:
+                cmd += ["--max-budget-usd", str(self.max_budget_usd)]
+        return cmd
 
     def _parse_stream_event(self, raw: str) -> str | None:
         """Parse a stream-json line and return displayable text, or None."""
@@ -345,6 +392,12 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
             return None
 
         if etype == "result":
+            # `claude -p` marks a native hard-limit exit via the result
+            # subtype (e.g. "error_max_turns"). Flag it so the engine can
+            # classify the iteration as `exhausted` rather than a crash.
+            subtype = str(event.get("subtype", ""))
+            if "max_turns" in subtype or "max_budget" in subtype or "budget" in subtype:
+                self._limit_reached = True
             text = event.get("result", "")
             if text:
                 self._result_text_parts.clear()
@@ -561,6 +614,8 @@ def get_adapter(
     kimi_cmd: str = "kimi",
     idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
     token_tracker: TokenTracker | None = None,
+    max_turns: int | None = None,
+    max_budget_usd: float | None = None,
 ) -> AgentAdapter:
     if agent == "claude":
         return ClaudeCodeAdapter(
@@ -569,6 +624,8 @@ def get_adapter(
             claude_cmd=claude_cmd,
             idle_timeout=idle_timeout,
             token_tracker=token_tracker,
+            max_turns=max_turns,
+            max_budget_usd=max_budget_usd,
         )
     if agent == "kimi":
         return KimiCodeAdapter(

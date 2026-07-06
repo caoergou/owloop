@@ -167,3 +167,45 @@ def test_get_next_ready_spec_ignores_missing_dependency_tokens(tmp_path: Path) -
 
 def test_get_next_ready_spec_no_specs_returns_none(tmp_path: Path) -> None:
     assert spec_queue.get_next_ready_spec(tmp_path / "empty") is None
+
+
+# ── mark_spec_complete / get_acceptance_criteria_section (engine gate support) ──
+
+
+def test_mark_spec_complete_inserts_status_after_title(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text("# Spec: t\n\n## Requirements\n- do it\n", encoding="utf-8")
+
+    assert spec_queue.mark_spec_complete(spec) is True
+    assert spec_queue.is_root_spec_complete(spec) is True
+    text = spec.read_text(encoding="utf-8")
+    assert "**Status**: COMPLETE" in text
+    # Inserted right after the title, before Requirements.
+    assert text.index("**Status**: COMPLETE") < text.index("## Requirements")
+
+
+def test_mark_spec_complete_is_noop_when_already_complete(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text("# Spec\n\n**Status**: COMPLETE\n\n## Requirements\n- x\n", encoding="utf-8")
+
+    assert spec_queue.mark_spec_complete(spec) is False
+
+
+def test_get_acceptance_criteria_section_includes_verification(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text(
+        "# Spec\n\n## Acceptance Criteria\n- `pytest -q`\n\n"
+        "## Verification\nRun the tests.\n\n## Exclusions\n- none\n",
+        encoding="utf-8",
+    )
+    section = spec_queue.get_acceptance_criteria_section(spec)
+    assert "pytest -q" in section
+    assert "Run the tests." in section
+    # Stops at the next section (Exclusions is not part of the guarded region).
+    assert "none" not in section
+
+
+def test_get_acceptance_criteria_section_missing_returns_empty(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text("# Spec\n\n## Requirements\n- x\n", encoding="utf-8")
+    assert spec_queue.get_acceptance_criteria_section(spec) == ""

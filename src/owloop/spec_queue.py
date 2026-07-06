@@ -39,6 +39,10 @@ _ACCEPTANCE_CRITERIA_SECTION_RE = re.compile(
     r"^##\s+Acceptance Criteria\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
+_VERIFICATION_SECTION_RE = re.compile(
+    r"^##\s+Verification\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
 
 DEFAULT_PRIORITY = 999
 
@@ -173,6 +177,47 @@ def get_acceptance_criteria_commands(spec_file: Path) -> list[str]:
         if command:
             commands.append(command)
     return commands
+
+
+def get_acceptance_criteria_section(spec_file: Path) -> str:
+    """Return the raw text of a spec's ``## Acceptance Criteria`` section.
+
+    Used for tamper detection: the engine snapshots this section (plus the
+    Verification section) before an iteration and fails the iteration if the
+    agent rewrote its own success conditions. Missing section yields "".
+    """
+    if not spec_file.is_file():
+        return ""
+    content = spec_file.read_text(encoding="utf-8", errors="replace")
+    parts: list[str] = []
+    for pattern in (_ACCEPTANCE_CRITERIA_SECTION_RE, _VERIFICATION_SECTION_RE):
+        match = pattern.search(content)
+        if match is not None:
+            parts.append(match.group(1))
+    return "\n".join(parts)
+
+
+def mark_spec_complete(spec_file: Path) -> bool:
+    """Insert a ``**Status**: COMPLETE`` line near the top of a spec.
+
+    No-op (returns False) if the spec is already complete or missing. The
+    status line is placed right after the leading ``# `` title so the next
+    iteration's queue scan skips it. This is engine-owned: the build agent no
+    longer marks its own work complete.
+    """
+    if not spec_file.is_file() or is_root_spec_complete(spec_file):
+        return False
+    content = spec_file.read_text(encoding="utf-8", errors="replace")
+    lines = content.splitlines()
+    insert_at = 0
+    for idx, line in enumerate(lines):
+        if line.startswith("# "):
+            insert_at = idx + 1
+            break
+    status_block = ["", "**Status**: COMPLETE"]
+    lines[insert_at:insert_at] = status_block
+    spec_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
 
 
 def build_dependency_graph(specs_dir: Path) -> dict[Path, list[Path]]:
