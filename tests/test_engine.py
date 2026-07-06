@@ -934,3 +934,80 @@ def test_missing_target_spec_falls_back_to_agent_discovery(tmp_path: Path) -> No
 
     assert "## Target Spec" not in built
     assert built == "PROMPT BODY"
+
+
+def test_gate_failure_writes_failure_feedback(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "01-test.md").write_text(
+        "# Spec\n\n## Acceptance Criteria\n- check: `echo broken-thing >&2; exit 3`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, max_iterations=1)
+    engine.run()
+
+    feedback = (repo / ".owloop" / "last-failure.md").read_text(encoding="utf-8")
+    assert "verification_failed" in feedback
+    assert "echo broken-thing >&2; exit 3" in feedback  # the failing command
+    assert "(exit 3)" in feedback  # its exit code
+    assert "broken-thing" in feedback  # its output tail
+
+
+def test_failure_feedback_injected_into_next_prompt_and_cleared_on_success(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    flag = repo / "fixed.flag"
+    # Fails until the "agent" creates the flag file on its second attempt.
+    (specs / "01-test.md").write_text(
+        f"# Spec\n\n## Acceptance Criteria\n- check: `test -f {flag}`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    class _FixingAdapter(MockAdapter):
+        def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+            if len(self.calls) == 1:  # second attempt "fixes" the criterion
+                flag.write_text("ok", encoding="utf-8")
+            return super().run(prompt, cwd, on_line=on_line)
+
+    done = AgentResult(
+        stdout="done\n<promise>DONE</promise>",
+        returncode=0,
+        success=True,
+        has_completion_signal=True,
+        done_signal="<promise>DONE</promise>",
+    )
+    adapter = _FixingAdapter(responses=[done, done])
+    engine = _make_engine(repo, adapter, max_iterations=2)
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+    engine.run()
+
+    # First prompt had no feedback; the retry prompt carried the diagnosis.
+    first_prompt, _ = adapter.calls[0]
+    retry_prompt, _ = adapter.calls[1]
+    assert "FAILED verification" not in first_prompt
+    assert "FAILED verification" in retry_prompt
+    assert f"test -f {flag}" in retry_prompt
+    # The verified success removed the feedback file.
+    assert not (repo / ".owloop" / "last-failure.md").exists()
