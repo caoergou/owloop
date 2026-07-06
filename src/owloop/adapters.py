@@ -225,10 +225,22 @@ class ClaudeCodeAdapter(AgentAdapter):
                             parts.append(f"[{name}]")
                 return "\n".join(parts) if parts else None
 
+            if etype == "tool_result":
+                content = event.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    lines = content.strip().splitlines()
+                    if len(lines) <= 3:
+                        return content.strip()
+                    return f"{lines[0]}\n... ({len(lines)} lines)\n{lines[-1]}"
+                return None
+
             if etype == "result":
                 text = event.get("result", "")
                 if text:
                     result_text_parts.append(text)
+                return None
+
+            if etype == "system":
                 return None
 
             return None
@@ -239,9 +251,8 @@ class ClaudeCodeAdapter(AgentAdapter):
                     text = _parse_stream_event(raw_line)
                     if text:
                         for sub_line in text.splitlines():
-                            line_queue.put(sub_line)
-                    else:
-                        line_queue.put("")
+                            if sub_line.strip():
+                                line_queue.put(sub_line)
             finally:
                 line_queue.put(None)
 

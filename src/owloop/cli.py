@@ -249,7 +249,8 @@ class AgentStreamDisplay:
 
             if self.verbose:
                 elapsed = now - self.start_time
-                self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                if not stripped.startswith("[") or len(stripped) > 3:
+                    self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
                 return
 
             if gap < 0.05:
