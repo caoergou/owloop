@@ -1,5 +1,7 @@
 # Feature: feat: make TUI optional with --no-tui / --plain flag
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
@@ -11,13 +13,13 @@
 - Update `README.md` and `CLAUDE.md` to document the new `--no-tui` / `--plain` option.
 
 ## Acceptance Criteria
-- [ ] `uv run owloop run --help | grep -q -- --no-tui && echo ok` → `ok`
-- [ ] `uv run owloop run --help | grep -q -- --plain && echo ok` → `ok`
-- [ ] `uv run python -c "from click.testing import CliRunner; from owloop.cli import main; r = CliRunner().invoke(main, ['run', '--no-tui']); print('no such option' not in r.output.lower())"` → `True`
-- [ ] `uv run pytest tests/test_cli.py -k "no_tui or plain" -q` → all passed
-- [ ] `uv run pytest tests/test_cli.py -q` → all passed
-- [ ] `grep -q -- --no-tui README.md && echo ok` → `ok`
-- [ ] `grep -q -- --plain CLAUDE.md && echo ok` → `ok`
+- [x] `uv run owloop run --help | grep -q -- --no-tui && echo ok` → `ok`
+- [x] `uv run owloop run --help | grep -q -- --plain && echo ok` → `ok`
+- [x] `uv run python -c "from click.testing import CliRunner; from owloop.cli import main; r = CliRunner().invoke(main, ['run', '--no-tui']); print('no such option' not in r.output.lower())"` → `True`
+- [x] `uv run pytest tests/test_cli.py -k "no_tui or plain" -q` → all passed
+- [x] `uv run pytest tests/test_cli.py -q` → all passed
+- [x] `grep -q -- --no-tui README.md && echo ok` → `ok`
+- [x] `grep -q -- --plain CLAUDE.md && echo ok` → `ok`
 
 ## Exclusions
 - Do NOT modify `pyproject.toml`, `uv.lock`, or `.gitignore`.
