@@ -105,6 +105,7 @@ class AppState:
     done: bool = False
     stopped_reason: str = ""
     tokens_used: int = 0
+    estimated_cost_usd: float = 0.0
     moon_frame: int = 0
     _spinner: str = "⠋"
 
@@ -284,6 +285,7 @@ class OwloopTUI:
                 self._update_action(line)
         elif kind == "tokens_update":
             s.tokens_used = data["total_tokens"]
+            s.estimated_cost_usd = data.get("total_cost_usd", s.estimated_cost_usd)
         elif kind == "max_tokens_reached":
             s.phase = "complete"
             s.done = True
@@ -418,6 +420,8 @@ class OwloopTUI:
             if s.max_tokens:
                 token_text += f" / {s.max_tokens:,}"
             table.add_row("Tokens", Text(token_text, style=CYAN))
+        if s.estimated_cost_usd:
+            table.add_row("Est. cost", Text(f"${s.estimated_cost_usd:,.4f}", style=CYAN))
         if s.specs:
             table.add_row("Specs", Text(f"{done}/{len(s.specs)} done", style=GREEN))
         current_spec = self._current_spec_name()
@@ -640,6 +644,8 @@ class OwloopTUI:
             facts.add_row("Decision", summary.decision_question)
         if summary.tokens_used:
             facts.add_row("Tokens", f"{summary.tokens_used:,}")
+        if summary.estimated_cost_usd:
+            facts.add_row("Est. cost", f"${summary.estimated_cost_usd:,.4f}")
         facts.add_row("Time", _format_elapsed(elapsed))
 
         hints_lines = [

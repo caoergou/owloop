@@ -211,3 +211,66 @@ def test_streaming_adapter_missing_binary_returns_failure(tmp_path: Path) -> Non
     assert result.returncode == 127
     assert result.success is False
     assert result.has_completion_signal is False
+
+
+class _ScriptedClaudeAdapter(ClaudeCodeAdapter):
+    """`ClaudeCodeAdapter` whose `_build_cmd` runs a scripted fake CLI instead of `claude`."""
+
+    def __init__(self, script: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._script = script
+
+    def _build_cmd(self, prompt: str = "") -> list[str]:
+        return [sys.executable, "-c", self._script]
+
+
+class _ScriptedKimiAdapter(KimiCodeAdapter):
+    """`KimiCodeAdapter` whose `_build_cmd` runs a scripted fake CLI instead of `kimi`."""
+
+    def __init__(self, script: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._script = script
+
+    def _build_cmd(self, prompt: str | None = None) -> list[str]:
+        return [sys.executable, "-c", self._script]
+
+
+def test_claude_adapter_updates_token_tracker_from_stream(tmp_path: Path) -> None:
+    script = (
+        "import json\n"
+        "print(json.dumps({'type': 'result', 'result': 'done', "
+        "'usage': {'input_tokens': 100, 'output_tokens': 50}, "
+        "'total_cost_usd': 0.02}))\n"
+    )
+    adapter = _ScriptedClaudeAdapter(script, model="claude-sonnet-5")
+
+    result = adapter.run("prompt", tmp_path)
+
+    assert adapter.token_tracker.has_explicit_usage is True
+    assert result.tokens_used == 150
+    assert result.cost_usd == pytest.approx(0.02)
+
+
+def test_kimi_adapter_extracts_usage_or_falls_back_to_heuristic(tmp_path: Path) -> None:
+    script_with_usage = (
+        "import json\n"
+        "print(json.dumps({'role': 'assistant', 'content': 'working', "
+        "'usage': {'prompt_tokens': 40, 'completion_tokens': 10}}))\n"
+    )
+    adapter = _ScriptedKimiAdapter(script_with_usage)
+
+    result = adapter.run("prompt", tmp_path)
+
+    assert adapter.token_tracker.has_explicit_usage is True
+    assert result.tokens_used == 50
+
+    script_without_usage = (
+        "import json\n"
+        "print(json.dumps({'role': 'assistant', 'content': 'Total tokens: 77'}))\n"
+    )
+    fallback_adapter = _ScriptedKimiAdapter(script_without_usage)
+
+    fallback_result = fallback_adapter.run("prompt", tmp_path)
+
+    assert fallback_adapter.token_tracker.has_explicit_usage is False
+    assert fallback_result.tokens_used == 77

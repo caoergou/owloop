@@ -1,5 +1,7 @@
 # Feature: feat: real-time token tracking with per-iteration budget cap
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements
@@ -14,14 +16,14 @@
 
 ## Acceptance Criteria
 
-- [ ] `uv run pytest tests/test_adapters.py::test_claude_adapter_updates_token_tracker_from_stream -q` → all passed.
-- [ ] `uv run pytest tests/test_adapters.py::test_kimi_adapter_extracts_usage_or_falls_back_to_heuristic -q` → all passed.
-- [ ] `uv run owloop run --help | grep -q -- --max-tokens-per-iteration && echo ok` → `ok`.
-- [ ] `uv run pytest tests/test_cli.py::test_run_parses_max_tokens_per_iteration -q` → all passed.
-- [ ] `uv run pytest tests/test_tokens.py::test_engine_kills_iteration_exceeding_per_iteration_cap -q` → all passed.
-- [ ] `uv run pytest tests/test_tokens.py::test_run_summary_includes_estimated_cost -q` → all passed.
-- [ ] `uv run pytest tests/test_report.py tests/test_tui.py -q` → all passed.
-- [ ] `uv run pytest tests/test_tokens.py tests/test_adapters.py tests/test_cli.py -q` → all passed.
+- [x] `uv run pytest tests/test_adapters.py::test_claude_adapter_updates_token_tracker_from_stream -q` → all passed.
+- [x] `uv run pytest tests/test_adapters.py::test_kimi_adapter_extracts_usage_or_falls_back_to_heuristic -q` → all passed.
+- [x] `uv run owloop run --help | grep -q -- --max-tokens-per-iteration && echo ok` → `ok`.
+- [x] `uv run pytest tests/test_cli.py::test_run_parses_max_tokens_per_iteration -q` → all passed.
+- [x] `uv run pytest tests/test_tokens.py::test_engine_kills_iteration_exceeding_per_iteration_cap -q` → all passed.
+- [x] `uv run pytest tests/test_tokens.py::test_run_summary_includes_estimated_cost -q` → all passed.
+- [x] `uv run pytest tests/test_report.py tests/test_tui.py -q` → all passed.
+- [x] `uv run pytest tests/test_tokens.py tests/test_adapters.py tests/test_cli.py -q` → all passed.
 
 ## Exclusions
 
