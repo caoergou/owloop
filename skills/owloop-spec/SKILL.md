@@ -5,7 +5,13 @@ description: >-
   with baseline calibration and pre-flight validation —
   创建高质量 Owloop spec 的交互式向导，含基线校准和预检验证。
   Use when user says "create a spec", "write a spec", "new spec",
-  "帮我写 spec", "新建 spec", "创建规范".
+  "帮我写 spec", "新建 spec", "创建规范", "spec wizard".
+license: MIT
+compatibility: Requires owloop methodology; works with any agentskills.io-compatible agent
+metadata:
+  author: caoergou
+  version: "0.3.0"
+  repository: https://github.com/caoergou/owloop
 ---
 
 # Interactive Owloop Spec Creation
@@ -14,7 +20,17 @@ description: >-
 
 Guide the user through a structured interview to produce a spec that **converges instead of looping forever**. The process has 7 steps: intent → feasibility gate → scope & sizing → baseline calibration → constraints → stuck behavior → generate & validate.
 
-For loop engineering best practices, see [references/loop-engineering-guide.md](../references/loop-engineering-guide.md).
+## When to Use
+
+Use this skill when the user wants to:
+- Create a new spec for an owloop run
+- Turn a vague goal into a concrete, verifiable task
+- Write a constraint-oriented spec with proper acceptance criteria
+
+## When NOT to Use
+
+- Do not use for non-owloop tasks that don't need shell-verifiable acceptance criteria.
+- Do not use if the user has already provided a complete, valid spec.
 
 ---
 
@@ -224,3 +240,7 @@ Show the complete spec and the calibration summary:
   - "Recommended: watch the first 2-3 iterations to make sure the agent understands the task, then leave it running"
   - "运行 `owloop run` 启动循环。建议先看前 2-3 轮确认方向正确，再放手让它跑"
 - User requests changes → edit and re-present. Repeat until confirmed.
+
+## References
+
+- [Spec Format Reference](references/spec-format.md)
