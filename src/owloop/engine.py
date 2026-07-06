@@ -18,7 +18,6 @@ so the engine itself never shells out to `claude` directly.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import shutil
@@ -33,9 +32,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from owloop import notifications, spec_queue
+from owloop import notifications, spec_queue, verification
 from owloop.adapters import AgentAdapter, AgentResult
-from owloop.backpressure import load_backpressure
 from owloop.learnings import (
     append_learning,
     extract_learnings,
@@ -922,82 +920,39 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
-    def _run_commands(self, commands: list[str]) -> tuple[int, int]:
-        """Run shell commands from the engine (not the agent); count pass/fail."""
-        passed = failed = 0
-        for command in commands:
-            result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
-                command, shell=True, cwd=self.cwd, capture_output=True, text=True,
-            )
-            if result.returncode == 0:
-                passed += 1
-            else:
-                failed += 1
-        return passed, failed
-
     def _run_acceptance_criteria(self, spec_name: str | None) -> tuple[int, int]:
         """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
-        if not spec_name:
-            return 0, 0
-        commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
-        return self._run_commands(commands)
+        return verification.run_acceptance_criteria(self.cwd, self.specs_dir, spec_name)
 
     def _guarded_hash(self, spec_name: str | None) -> str:
-        """Hash the spec sections + backpressure file the agent must not edit.
-
-        The engine snapshots this before an iteration and re-checks it after,
-        so an agent that rewrites its own success conditions (acceptance
-        criteria, verification section, or the project's backpressure
-        commands) is caught regardless of whether the commands then "pass".
-        """
-        h = hashlib.sha256()
-        if spec_name:
-            section = spec_queue.get_acceptance_criteria_section(self.specs_dir / spec_name)
-            h.update(section.encode("utf-8"))
-        backpressure = resolve_owloop_dir(self.cwd) / "backpressure.json"
-        if backpressure.is_file():
-            h.update(backpressure.read_bytes())
-        return h.hexdigest()
+        """Hash the spec sections + backpressure file the agent must not edit."""
+        return verification.guarded_hash(self.cwd, self.specs_dir, spec_name)
 
     def _run_verification_gate(
         self, iteration: int, spec_name: str | None, guard_before: str
     ) -> tuple[bool, bool, int, int]:
         """Deterministically verify an iteration outside the agent's control.
 
-        Returns ``(passed, tampered, passed_count, failed_count)``. The engine
-        — never the agent — runs the spec's acceptance-criteria commands and
-        the project's backpressure commands via ``subprocess`` and lets exit
-        codes decide. A tampered guard region fails the gate immediately with
-        a distinct ``spec_tampered`` event, regardless of command results.
+        Delegates to the shared gate in ``verification.py`` (the single
+        definition of "verified" used by both the sequential engine and the
+        parallel orchestrator) and emits the gate events. A tampered guard
+        region fails the iteration with a distinct ``spec_tampered`` event.
         """
         self._emit("verification_gate_start", iteration=iteration, spec=spec_name)
+        result = verification.run_gate(self.cwd, self.specs_dir, spec_name, guard_before)
 
-        if self._guarded_hash(spec_name) != guard_before:
+        if result.tampered:
             self._emit("spec_tampered", iteration=iteration, spec=spec_name)
-            return False, True, 0, 0
-
-        acc_passed, acc_failed = self._run_acceptance_criteria(spec_name)
-        bp_commands = [cmd.command for cmd in load_backpressure(self.cwd)]
-        bp_passed, bp_failed = self._run_commands(bp_commands)
-
-        passed_count = acc_passed + bp_passed
-        failed_count = acc_failed + bp_failed
-        gate_ok = failed_count == 0
-
-        if gate_ok:
-            self._emit(
-                "verification_gate_passed",
-                iteration=iteration,
-                passed=passed_count,
-            )
+        elif result.passed:
+            self._emit("verification_gate_passed", iteration=iteration, passed=result.passed_count)
         else:
             self._emit(
                 "verification_gate_failed",
                 iteration=iteration,
-                passed=passed_count,
-                failed=failed_count,
+                passed=result.passed_count,
+                failed=result.failed_count,
             )
-        return gate_ok, False, passed_count, failed_count
+        return result.passed, result.tampered, result.passed_count, result.failed_count
 
     def _head(self) -> str:
         return str(self._run_git("rev-parse", "HEAD").stdout).strip()

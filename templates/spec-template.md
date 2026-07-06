@@ -2,6 +2,14 @@
 
 ## Priority: [1-5]
 
+## Files
+[The files/directories this spec is allowed to touch, one per line — paths or
+globs. This scope is what lets `owloop run --workers N` schedule this spec
+alongside others whose scopes don't overlap. Omit it and the spec runs alone.]
+
+- src/[module]/
+- tests/test_[module].py
+
 ## Requirements
 [What to build — the functional description of the feature. EARS-style phrasing
 maps cleanly onto shell-verifiable criteria: "WHEN <trigger>, THE SYSTEM SHALL

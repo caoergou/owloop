@@ -209,3 +209,93 @@ def test_get_acceptance_criteria_section_missing_returns_empty(tmp_path: Path) -
     spec = tmp_path / "01-t.md"
     spec.write_text("# Spec\n\n## Requirements\n- x\n", encoding="utf-8")
     assert spec_queue.get_acceptance_criteria_section(spec) == ""
+
+
+# ── file-disjoint parallel scheduling (Phase 4) ──
+
+
+def _scoped_spec(priority: int, files: list[str], depends_on: list[str] | None = None,
+                 complete: bool = False) -> str:
+    lines = ["# Spec: test", ""]
+    if complete:
+        lines += ["**Status**: COMPLETE", ""]
+    lines += [f"## Priority: {priority}", ""]
+    if depends_on is not None:
+        lines += ["## Depends On"] + ([f"- {d}" for d in depends_on] or ["- none"]) + [""]
+    lines += ["## Files"] + [f"- {f}" for f in files] + [""]
+    lines += ["## Requirements", "Do a thing.", ""]
+    return "\n".join(lines)
+
+
+def test_get_spec_file_scope_parses_files_section(tmp_path: Path) -> None:
+    spec = _write(tmp_path, "001-a.md", _scoped_spec(1, ["src/a/", "`tests/test_a.py`"]))
+    assert spec_queue.get_spec_file_scope(spec) == ["src/a/", "tests/test_a.py"]
+
+
+def test_get_spec_file_scope_missing_section_is_empty(tmp_path: Path) -> None:
+    spec = _write(tmp_path, "001-a.md", _spec(priority=1))
+    assert spec_queue.get_spec_file_scope(spec) == []
+
+
+def test_specs_are_disjoint_true_for_separate_dirs(tmp_path: Path) -> None:
+    a = _write(tmp_path, "001-a.md", _scoped_spec(1, ["src/a/"]))
+    b = _write(tmp_path, "002-b.md", _scoped_spec(1, ["src/b/"]))
+    assert spec_queue.specs_are_disjoint(a, b) is True
+
+
+def test_specs_are_disjoint_false_on_overlap(tmp_path: Path) -> None:
+    a = _write(tmp_path, "001-a.md", _scoped_spec(1, ["src/a/"]))
+    b = _write(tmp_path, "002-b.md", _scoped_spec(1, ["src/a/util.py"]))
+    assert spec_queue.specs_are_disjoint(a, b) is False
+
+
+def test_specs_are_disjoint_false_on_glob_match(tmp_path: Path) -> None:
+    a = _write(tmp_path, "001-a.md", _scoped_spec(1, ["src/*.py"]))
+    b = _write(tmp_path, "002-b.md", _scoped_spec(1, ["src/main.py"]))
+    assert spec_queue.specs_are_disjoint(a, b) is False
+
+
+def test_specs_are_disjoint_false_when_scope_unknown(tmp_path: Path) -> None:
+    a = _write(tmp_path, "001-a.md", _scoped_spec(1, ["src/a/"]))
+    b = _write(tmp_path, "002-b.md", _spec(priority=1))  # no ## Files
+    assert spec_queue.specs_are_disjoint(a, b) is False
+
+
+def test_get_parallel_batch_groups_disjoint_specs(tmp_path: Path) -> None:
+    specs = tmp_path / "specs"
+    _write(specs, "001-a.md", _scoped_spec(1, ["src/a/"]))
+    _write(specs, "002-b.md", _scoped_spec(1, ["src/b/"]))
+    _write(specs, "003-c.md", _scoped_spec(1, ["src/a/deep.py"]))  # conflicts with a
+    batch = spec_queue.get_parallel_batch(specs, max_workers=4)
+    names = {p.name for p in batch}
+    assert names == {"001-a.md", "002-b.md"}  # c excluded (overlaps a)
+
+
+def test_get_parallel_batch_respects_max_workers(tmp_path: Path) -> None:
+    specs = tmp_path / "specs"
+    _write(specs, "001-a.md", _scoped_spec(1, ["src/a/"]))
+    _write(specs, "002-b.md", _scoped_spec(1, ["src/b/"]))
+    _write(specs, "003-c.md", _scoped_spec(1, ["src/c/"]))
+    batch = spec_queue.get_parallel_batch(specs, max_workers=2)
+    assert len(batch) == 2
+
+
+def test_get_parallel_batch_lead_without_scope_runs_alone(tmp_path: Path) -> None:
+    specs = tmp_path / "specs"
+    _write(specs, "001-a.md", _spec(priority=1))  # highest priority, no ## Files
+    _write(specs, "002-b.md", _scoped_spec(2, ["src/b/"]))
+    batch = spec_queue.get_parallel_batch(specs, max_workers=4)
+    assert [p.name for p in batch] == ["001-a.md"]
+
+
+def test_get_parallel_batch_max_workers_one_is_sequential(tmp_path: Path) -> None:
+    specs = tmp_path / "specs"
+    _write(specs, "001-a.md", _scoped_spec(1, ["src/a/"]))
+    _write(specs, "002-b.md", _scoped_spec(1, ["src/b/"]))
+    assert len(spec_queue.get_parallel_batch(specs, max_workers=1)) == 1
+
+
+def test_get_parallel_batch_empty_when_nothing_ready(tmp_path: Path) -> None:
+    specs = tmp_path / "specs"
+    _write(specs, "001-a.md", _scoped_spec(1, ["src/a/"], complete=True))
+    assert spec_queue.get_parallel_batch(specs, max_workers=4) == []

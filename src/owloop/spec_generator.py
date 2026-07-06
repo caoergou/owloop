@@ -63,6 +63,8 @@ Identify ALL files/directories involved and estimate the total scope.
 - Touch 1-5 files / < 300 lines
 - Be independently verifiable (has its own acceptance criteria)
 - Have a clear dependency order (which specs must complete first)
+- Declare its file scope in a `## Files` section, and prefer DISJOINT scopes
+  across independent specs so they can be run concurrently by parallel workers
 
 Plan the decomposition as an ordered list before writing any spec. Common
 decomposition patterns:
@@ -111,6 +113,10 @@ Each spec uses this exact structure:
 
 ## Depends On
 - [list spec names this depends on, or "none"]
+
+## Files
+- [each file/dir this spec may touch, one per line — paths or globs. Keep scopes
+  DISJOINT across sibling specs so they can run in parallel (`--workers N`).]
 
 ## Requirements
 - [ ] Concrete, scoped task description. Prefer EARS-style phrasing where it

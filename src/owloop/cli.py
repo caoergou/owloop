@@ -730,7 +730,16 @@ def _run_engine(
     notify_webhook: str | None = None,
     notify_desktop: bool = False,
     converge_sweeps: int = 0,
+    workers: int = 1,
 ) -> None:
+    resolved_webhook = notify_webhook or os.environ.get("OWLOOP_NOTIFY_WEBHOOK") or None
+    if workers > 1:
+        _run_parallel(
+            workers=workers, model=model, agent=agent, idle_timeout=idle_timeout,
+            ascii=ascii, no_color=no_color,
+            notify_webhook=resolved_webhook, notify_desktop=notify_desktop,
+        )
+        return
     config = EngineConfig(
         project_dir=Path.cwd(),
         max_iterations=max_iterations,
@@ -745,7 +754,7 @@ def _run_engine(
         dry_run=dry_run,
         keep_retrying=keep_retrying,
         rollback=rollback,
-        notify_webhook=notify_webhook or os.environ.get("OWLOOP_NOTIFY_WEBHOOK") or None,
+        notify_webhook=resolved_webhook,
         notify_desktop=notify_desktop,
         converge_sweeps=converge_sweeps,
     )
@@ -833,6 +842,47 @@ def _run_engine(
         if config.dry_run:
             _print_dry_run_report(console, summary)
 
+    if summary.stopped_reason in STOPPED_REASON_EXIT_1:
+        raise SystemExit(1)
+
+
+def _run_parallel(
+    *, workers: int, model: str, agent: str, idle_timeout: float,
+    ascii: bool, no_color: bool,
+    notify_webhook: str | None, notify_desktop: bool,
+) -> None:
+    """Run the file-disjoint parallel worker mode (`owloop run --workers N`)."""
+    from owloop.parallel import ParallelConfig, ParallelOrchestrator
+
+    console = Console(no_color=no_color)
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+    console.print(f"[{_brand.AMBER}]Starting {workers} parallel workers...[/]")
+
+    def _adapter_factory() -> Any:
+        # Fresh adapter per worker: adapters hold per-run streaming state, so
+        # concurrent workers must not share one instance.
+        return get_adapter(
+            agent, model=model,
+            claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
+            kimi_cmd=os.environ.get("KIMI_CMD", "kimi"),
+            idle_timeout=idle_timeout,
+        )
+
+    config = ParallelConfig(
+        project_dir=Path.cwd(),
+        workers=workers,
+        notify_webhook=notify_webhook,
+        notify_desktop=notify_desktop,
+    )
+    reporter = ConsoleReporter(console, ascii=ascii)
+    orchestrator = ParallelOrchestrator(config, _adapter_factory, on_event=reporter.on_event)
+    try:
+        summary = orchestrator.run()
+    except KeyboardInterrupt:
+        console.print("\n[dim]owloop stopped.[/]")
+        raise SystemExit(0) from None
+    reporter.print_summary(summary)
     if summary.stopped_reason in STOPPED_REASON_EXIT_1:
         raise SystemExit(1)
 
@@ -934,10 +984,16 @@ def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
     "specs until the codebase converges on the goal (0 = disabled).",
     show_default=True,
 )
+@click.option(
+    "--workers", type=int, default=1, metavar="N",
+    help="Run up to N file-disjoint specs concurrently, each in its own worktree "
+    "(1 = sequential). Specs need a `## Files` scope to be scheduled in parallel.",
+    show_default=True,
+)
 @_common_run_options
 def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
         max_turns_per_iteration: int, max_budget_usd: float, keep_retrying: bool, rollback: bool,
-        notify_webhook: str | None, notify_desktop: bool, converge_sweeps: int,
+        notify_webhook: str | None, notify_desktop: bool, converge_sweeps: int, workers: int,
         worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
@@ -966,6 +1022,7 @@ def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_toke
         notify_webhook=notify_webhook,
         notify_desktop=notify_desktop,
         converge_sweeps=converge_sweeps,
+        workers=workers,
     )
 
 

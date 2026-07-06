@@ -24,6 +24,7 @@ Spec dependencies:
   number, then the lexicographically earliest filename.
 """
 
+import fnmatch
 import re
 from pathlib import Path
 
@@ -41,6 +42,10 @@ _ACCEPTANCE_CRITERIA_SECTION_RE = re.compile(
 )
 _VERIFICATION_SECTION_RE = re.compile(
     r"^##\s+Verification\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+_FILES_SECTION_RE = re.compile(
+    r"^##\s+Files\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 
@@ -277,3 +282,108 @@ def get_next_ready_spec(specs_dir: Path) -> Path | None:
 
     ready.sort(key=lambda spec: (get_spec_priority(spec), spec.name))
     return ready[0]
+
+
+def get_ready_specs(specs_dir: Path) -> list[Path]:
+    """Return all incomplete specs whose dependencies are complete, in run order.
+
+    Same readiness rule as ``get_next_ready_spec`` but returns the whole ready
+    frontier, sorted by (Priority, filename). Because two *ready* specs can only
+    depend on already-complete specs, they are guaranteed dependency-independent
+    of each other — so parallel scheduling only has to reason about file scope.
+    """
+    all_specs = get_root_specs(specs_dir)
+    incomplete = get_incomplete_root_specs(specs_dir)
+    incomplete_set = set(incomplete)
+    ready = [
+        spec
+        for spec in incomplete
+        if all(dep not in incomplete_set for dep in get_spec_dependencies(spec, all_specs))
+    ]
+    ready.sort(key=lambda spec: (get_spec_priority(spec), spec.name))
+    return ready
+
+
+def get_spec_file_scope(spec_file: Path) -> list[str]:
+    """Return the path/glob tokens a spec declares under its ``## Files`` section.
+
+    This is the contract that makes safe parallelism possible: a spec that
+    declares which files it touches can be scheduled alongside other specs whose
+    scopes don't overlap. A missing/empty section yields ``[]`` — an unknown
+    scope, which the scheduler treats conservatively (never parallel-safe).
+    """
+    if not spec_file.is_file():
+        return []
+    content = spec_file.read_text(encoding="utf-8", errors="replace")
+    match = _FILES_SECTION_RE.search(content)
+    if match is None:
+        return []
+    scope: list[str] = []
+    for item in _LIST_ITEM_RE.findall(match.group(1)):
+        cleaned = item.strip().strip("`").strip()
+        if cleaned and cleaned.lower() != "none":
+            scope.append(cleaned)
+    return scope
+
+
+def _paths_conflict(a: str, b: str) -> bool:
+    """True if two path/glob tokens could touch a common file."""
+    if a == b:
+        return True
+    if fnmatch.fnmatch(a, b) or fnmatch.fnmatch(b, a):
+        return True
+    an, bn = a.rstrip("/"), b.rstrip("/")
+    # Directory-prefix containment (only for non-glob tokens).
+    if "*" not in a and "?" not in a and (bn == an or bn.startswith(an + "/")):
+        return True
+    if "*" not in b and "?" not in b and (an == bn or an.startswith(bn + "/")):  # noqa: SIM103
+        return True
+    return False
+
+
+def scopes_overlap(scope_a: list[str], scope_b: list[str]) -> bool:
+    """True if any token in one scope could touch a file in the other."""
+    return any(_paths_conflict(a, b) for a in scope_a for b in scope_b)
+
+
+def specs_are_disjoint(spec_a: Path, spec_b: Path) -> bool:
+    """True if two specs declare non-empty, non-overlapping file scopes.
+
+    An empty (undeclared) scope is never disjoint — the safe default is that an
+    unscoped spec might touch anything, so it must not run in parallel.
+    """
+    scope_a = get_spec_file_scope(spec_a)
+    scope_b = get_spec_file_scope(spec_b)
+    if not scope_a or not scope_b:
+        return False
+    return not scopes_overlap(scope_a, scope_b)
+
+
+def get_parallel_batch(specs_dir: Path, max_workers: int) -> list[Path]:
+    """Select a batch of ready specs safe to run concurrently.
+
+    Greedy: start from the highest-priority ready spec and add further ready
+    specs whose declared ``## Files`` scope is disjoint from every spec already
+    in the batch, up to ``max_workers``. If the lead spec has no declared scope
+    the batch is just ``[lead]`` (run it alone) — correctness over parallelism.
+    Returns ``[]`` only when nothing is ready.
+    """
+    ready = get_ready_specs(specs_dir)
+    if not ready:
+        return []
+    if max_workers <= 1:
+        return [ready[0]]
+
+    lead = ready[0]
+    batch = [lead]
+    if not get_spec_file_scope(lead):
+        return batch  # unknown scope → run alone
+
+    for candidate in ready[1:]:
+        if len(batch) >= max_workers:
+            break
+        if get_spec_file_scope(candidate) and all(
+            specs_are_disjoint(candidate, chosen) for chosen in batch
+        ):
+            batch.append(candidate)
+    return batch
