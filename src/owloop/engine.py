@@ -239,10 +239,18 @@ class OwloopEngine:
 
         Git does not track ``.owloop/`` or ``.claude/`` by default, so the
         worktree needs its own copies for prompts, specs, and agent settings.
+        If the target already exists (e.g., a tracked ``.owloop/specs/`` was
+        materialized by ``git worktree add``), we still need to sync the latest
+        contents from the main repo so new/untracked specs and prompts show up.
         """
         source = self.main_repo_dir / name
         target = worktree_path / name
-        if source.is_dir() and not target.exists():
+        if not source.is_dir():
+            return
+        if target.exists():
+            shutil.copytree(source, target, dirs_exist_ok=True)
+            self._emit(f"{event_name}_synced", path=str(target))
+        else:
             shutil.copytree(source, target)
             self._emit(event_name, path=str(target))
 
