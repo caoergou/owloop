@@ -517,7 +517,7 @@ class OwloopEngine:
         elif not result.success:
             self._emit("agent_failed", returncode=result.returncode, tail=tail)
         elif promise_state == "DONE":
-            self._emit("done_signal", signal=result.done_signal)
+            self._emit("done_signal", signal=result.done_signal, iteration=iteration)
         else:
             self._emit("no_done_signal", tail=tail)
 
