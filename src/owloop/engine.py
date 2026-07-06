@@ -493,6 +493,9 @@ class OwloopEngine:
                 stopped_reason="dirty_workspace_declined",
             )
 
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.session_log = self.log_dir / f"owloop_build_session_{_file_timestamp()}.log"
+
         self._write_prompt_file()
 
         branch = self._current_branch()
