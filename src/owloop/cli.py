@@ -701,6 +701,7 @@ def _run_engine(
     idle_timeout: float = 3600, max_duration: int = 0, max_tokens: int = 0,
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
+    session_id: str | None = None, resume: bool = False,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -710,6 +711,8 @@ def _run_engine(
         idle_timeout=idle_timeout,
         worktree=worktree,
         use_subagents=subagents,
+        session_id=session_id,
+        resume=resume,
     )
     adapter = get_adapter(
         agent,
@@ -781,8 +784,14 @@ def _run_engine(
     "--max-iterations", "-n", type=int, default=0,
     help="Maximum iterations (0 = unlimited).", show_default=True,
 )
+@click.option(
+    "--resume",
+    is_flag=True,
+    default=False,
+    help="Resume the most recent owloop session (reuse its worktree and branch).",
+)
 @_common_run_options
-def run(max_iterations: int, worktree: bool, model: str, agent: str,
+def run(max_iterations: int, resume: bool, worktree: bool, model: str, agent: str,
         verifier_model: str | None, subagents: bool, idle_timeout: float,
         max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
@@ -800,6 +809,7 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
         ascii=ascii, no_color=no_color, compact=compact,
         verifier_model=verifier_model,
         subagents=subagents,
+        resume=resume,
     )
 
 
