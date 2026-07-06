@@ -1,5 +1,7 @@
 # Feature: feat: inject linter rules into spec generation and auto-retry on lint errors
 
+**Status**: COMPLETE
+
 ## Priority: 3
 
 ## Requirements

@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from owloop.adapters import AgentResult, MockAdapter
-from owloop.spec_generator import SpecGenerationError, SpecGenerator
+from owloop.spec_generator import SPEC_GENERATION_PROMPT, SpecGenerationError, SpecGenerator
+from owloop.spec_linter import SpecLinter
 from owloop.spec_queue import find_next_spec_number
 
 
@@ -18,6 +19,28 @@ def _done_spec_result(name: str = "refactor errors") -> AgentResult:
             "- [ ] Unify error handling\n\n"
             "## Acceptance Criteria\n"
             "- [ ] `pytest tests/` exits 0\n\n"
+            "## Exclusions\n"
+            "- Do NOT modify pyproject.toml\n\n"
+            "<promise>DONE</promise>"
+        ),
+        returncode=0,
+        success=True,
+        has_completion_signal=True,
+        done_signal="<promise>DONE</promise>",
+        promise_state="DONE",
+    )
+
+
+def _invalid_spec_result(name: str = "fix lint") -> AgentResult:
+    """A spec whose Acceptance Criteria line has no backtick-quoted command."""
+    return AgentResult(
+        stdout=(
+            f"# Spec: {name}\n\n"
+            "## Priority: 3\n\n"
+            "## Requirements\n"
+            "- [ ] Fix the broken thing\n\n"
+            "## Acceptance Criteria\n"
+            "- [ ] pytest tests/ exits 0\n\n"
             "## Exclusions\n"
             "- Do NOT modify pyproject.toml\n\n"
             "<promise>DONE</promise>"
@@ -163,3 +186,75 @@ def test_find_next_spec_number_ignores_non_numeric_files(tmp_path: Path) -> None
     (specs_dir / "README.md").write_text("# Spec\n", encoding="utf-8")
 
     assert find_next_spec_number(specs_dir) == 1
+
+
+def test_rules_summary_exports_lint_rules() -> None:
+    """SpecLinter exposes a machine-readable summary for prompt injection."""
+    summary = SpecLinter("irrelevant").rules_summary()
+
+    assert "backtick" in summary.lower()
+    assert "exclusions" in summary.lower()
+
+
+def test_prompt_injects_lint_rules(tmp_path: Path) -> None:
+    """Step 8 of the generation prompt requires SpecLinter validation."""
+    (tmp_path / ".owloop").mkdir()
+    generator = SpecGenerator(tmp_path, MockAdapter(responses=[]))
+
+    assert "linter" in SPEC_GENERATION_PROMPT.lower()
+    assert "backtick" in SPEC_GENERATION_PROMPT.lower()
+
+    prompt = generator._build_prompt("do a thing")
+    assert "SpecLinter validation rules" in prompt
+
+
+def test_lint_candidate_flags_missing_backtick(tmp_path: Path) -> None:
+    """Candidate specs are linted (via SpecLinter.lint_spec) before writing."""
+    (tmp_path / ".owloop").mkdir()
+    generator = SpecGenerator(tmp_path, MockAdapter(responses=[]))
+    markdown = _invalid_spec_result().stdout.replace("\n<promise>DONE</promise>", "")
+
+    findings = generator._lint_candidate(markdown)
+
+    assert any(
+        f.severity == "error" and "no shell command in criterion" in f.message for f in findings
+    )
+
+
+def test_lint_retry_on_invalid_spec(tmp_path: Path) -> None:
+    """An invalid candidate spec triggers one retry with lint feedback."""
+    (tmp_path / ".owloop").mkdir()
+    adapter = MockAdapter(
+        responses=[
+            _invalid_spec_result("fix lint"),
+            _done_spec_result("fix lint"),
+        ]
+    )
+    generator = SpecGenerator(tmp_path, adapter)
+
+    paths = generator.generate("fix the lint errors")
+
+    assert len(adapter.calls) == 2
+    assert "no shell command in criterion" in adapter.calls[1][0]
+    assert len(paths) == 1
+    content = paths[0].read_text(encoding="utf-8")
+    assert "`pytest tests/` exits 0" in content
+
+
+def test_lint_retry_gives_up_after_limit(tmp_path: Path) -> None:
+    """If the agent never fixes the lint errors, the last candidate is written."""
+    (tmp_path / ".owloop").mkdir()
+    adapter = MockAdapter(
+        responses=[
+            _invalid_spec_result("still broken"),
+            _invalid_spec_result("still broken"),
+        ]
+    )
+    generator = SpecGenerator(tmp_path, adapter, lint_retries=1)
+
+    paths = generator.generate("fix the lint errors")
+
+    assert len(adapter.calls) == 2
+    assert len(paths) == 1
+    content = paths[0].read_text(encoding="utf-8")
+    assert "pytest tests/ exits 0" in content
