@@ -1,45 +1,89 @@
 ---
 name: owloop
 description: >-
-  Spec-driven autonomous coding loop for Claude Code — 规范驱动的自主编码循环。
-  Write constraint-oriented specs with shell-verifiable acceptance criteria,
-  run the loop overnight, wake up to verified commits.
-  Use when user mentions owloop, autonomous loop, spec-driven, overnight coding,
-  loop engineering, 自主循环, 写 spec, 跑循环, 无人值守, 循环工程, 隔夜编码.
+  Core methodology for loop engineering — 规范驱动的自主编码循环核心方法论。
+  Learn when to run autonomous coding loops, how to keep them convergent,
+  and how to write specs that don't drift.
+  Use when user mentions owloop, loop engineering, autonomous loop,
+  spec-driven, overnight coding, 自主循环, 循环工程, 隔夜编码, 跑循环.
 license: MIT
-compatibility: Requires Python 3.10+, git, and Claude Code CLI
+compatibility: Requires git and a CLI-based coding agent (Claude Code, Kimi Code CLI, Codex, Cursor, etc.)
 metadata:
   author: caoergou
-  version: "0.2.0"
+  version: "0.3.0"
   repository: https://github.com/caoergou/owloop
 ---
 
 # Owloop
 
-> **Language policy:** Respond in the user's language. If the user writes in Chinese, respond entirely in Chinese. If in English, respond in English. Section headers in generated spec files are always English (`## Requirements`, `## Exclusions`, etc.).
+> **Language policy:** Respond in the user's language. Spec section headers in generated files are always English (`## Requirements`, `## Exclusions`, etc.).
 
-Owloop is a **loop engineering** tool: it combines spec-driven development with an autonomous coding loop for Claude Code. Each iteration spawns a fresh `claude -p` process against one spec, verifies acceptance criteria with shell commands, and commits only on success.
+Owloop is **loop engineering**: spec-driven development plus an autonomous coding loop. Each iteration spawns a fresh agent process against one spec, verifies acceptance criteria with shell commands, and commits only on success.
 
 ## When to Use
 
-- Mechanical improvements: lint fixes, type annotations, dead code removal, error handling unification
-- Overnight unattended runs against a backlog of well-defined tasks
-- Any task where "done" can be expressed as a shell command
-- When `/goal` stops early because the Haiku evaluator misjudges completion
+Use the owloop methodology when the user asks about:
+- Running an autonomous coding loop overnight
+- Writing specs for agent-driven development
+- Keeping agent loops from drifting or looping forever
+- owloop commands (`owloop init`, `owloop run`, `owloop spec`, etc.)
+
+Also use for these task shapes:
+- Mechanical improvements: lint fixes, type annotations, dead code removal
+- Overnight unattended runs against well-defined tasks
+- Anything where "done" can be expressed as a shell command
 
 ## When NOT to Use
 
 - Tasks requiring product judgment or design decisions
 - Security-sensitive changes
 - Anything where "done" can't be expressed as a shell command
+- Vague requests like "improve the code" or "make it better"
+
+## Core Principles
+
+1. **Constraint-oriented specs**
+   - Define what's off-limits first (Exclusions).
+   - Every acceptance criterion must be a shell command with a verifiable output.
+
+2. **Fresh context per iteration**
+   - Each loop round is a brand-new agent process.
+   - State lives on disk (`.owloop/specs/`, `.owloop/logs/`, git history).
+
+3. **Deterministic completion signal**
+   - The agent outputs `<promise>DONE</promise>`.
+   - The loop detects this with `grep`, not with an AI judgment call.
+
+4. **Auto mode, not YOLO**
+   - Use your agent's non-interactive auto-permission mode.
+   - Never use dangerously-skip-permissions or equivalent YOLO modes.
+
+5. **One concern per spec**
+   - Ideal spec: 1-3 files, < 100 lines of change, 15-45 minutes per iteration.
+   - If a spec touches > 5 files or needs sequential sub-steps, split it.
+
+## Installation
+
+Install the owloop Python CLI from PyPI:
+
+```bash
+uv tool install owloop
+# or: pip install owloop
+```
+
+Install the companion skills for your agent:
+
+```bash
+# Claude Code
+npx skills add caoergou/owloop --agent claude-code
+
+# Kimi Code CLI / Codex / Cursor / etc.
+npx skills add caoergou/owloop --agent '*'
+```
 
 ## Quick Start
 
 ```bash
-# Install from PyPI
-uv tool install owloop
-# or: pip install owloop
-
 # Initialize in your project (creates only .owloop/)
 owloop init
 
@@ -50,87 +94,51 @@ owloop spec "refactor error handling"
 owloop run
 ```
 
-## Core Architecture
+## The Loop
 
 ```
 Loop iteration N:
-  1. Pick highest-priority incomplete spec from specs/
-  2. Spawn fresh `claude -p --permission-mode auto` (zero accumulated context)
-  3. Agent implements spec, runs verification commands
+  1. Pick highest-priority incomplete spec from .owloop/specs/
+  2. Spawn fresh agent process with auto permission mode
+  3. Agent implements spec and runs verification commands
   4. Agent outputs <promise>DONE</promise> on success
-  5. Loop detects signal via grep (deterministic, not AI judgment)
+  5. Loop detects signal via grep (deterministic)
   6. Commit + push, move to next spec
 ```
-
-**Key properties:**
-- **Natural-language spec generation** — `owloop spec` reads the codebase, asks clarifying questions, drafts a concrete spec
-- **Pre-flight spec linting** — `owloop check` validates specs before the loop starts
-- **Fresh context every iteration** — no context overflow, no degradation
-- **Cross-iteration notes** — `run-notes.md` carries learnings between iterations
-- **State on disk** — `.owloop/specs/`, `.owloop/logs/` (legacy `specs/` and `logs/` still supported)
-- **Auto Mode** — `--permission-mode auto`, never YOLO
-- **Worktree isolation** — runs in a separate `git worktree`, main checkout untouched
-- **AI-generated reports** — `owloop report` analyzes the run with Claude and produces a reviewable HTML artifact
-- **Fix-loop detection** — same files modified 3+ rounds warns of possible death spiral
-- **Token budget cap** — `--max-tokens` stops the run before costs spiral
-- **Sleep prevention** — keeps your machine awake during overnight runs
-- **Promise protocol** — `DONE`, `BLOCKED:reason`, `DECIDE:question` for rich loop control
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `owloop init` | Initialize owloop in current project (creates `.owloop/`) |
-| `owloop spec "goal"` | Turn a vague goal into a concrete spec via agent clarification and approval |
-| `owloop check` | Pre-flight linter: validate all specs before running the loop |
-| `owloop run` | Start the autonomous loop with TUI |
-| `owloop run -n 20` | Limit to 20 iterations |
-| `owloop run --max-duration 120` | Stop after 2 hours |
-| `owloop run --max-tokens 200000` | Stop after token budget reached |
+| `owloop init` | Initialize owloop in current project |
+| `owloop spec "goal"` | Turn a vague goal into a concrete spec |
+| `owloop run` | Start the autonomous loop |
+| `owloop run --agent kimi` | Use Kimi Code CLI as the loop agent |
+| `owloop check` | Pre-flight lint for specs |
 | `owloop status` | Show specs and completion progress |
-| `owloop report` | Generate AI-powered HTML summary report (default) |
-| `owloop report --no-ai` | Generate fast, offline HTML summary report |
-| `owloop report --open` | Generate AI report and open with lavish-axi |
-| `owloop spec-from-issue 42` | Generate a spec draft from a GitHub issue |
+| `owloop report` | Generate HTML summary report |
 
-## Writing Specs
+## Running the Loop Without the CLI
 
-The spec format is **constraint-oriented**: define what's off-limits, then make every acceptance criterion a shell command. See [references/spec-format.md](references/spec-format.md) for the complete template and examples.
+If the owloop Python CLI is not installed, use the **`owloop-runner`** skill to execute the same loop manually through your agent. See `owloop-runner` for the full manual loop lifecycle.
 
-Key sections:
-- **Requirements** — what to build
-- **Acceptance Criteria** — `command → expected output` (shell-verifiable)
-- **Exclusions** — what NOT to touch (highest-leverage section for preventing drift)
-- **Style** — conventions to follow
-- **Verification** — exact commands to run before claiming completion
+## Related Skills
 
-## Loop Engineering Best Practices
+Use these companion skills for specific parts of the workflow:
 
-See [references/loop-engineering-guide.md](references/loop-engineering-guide.md) for the full guide on writing specs that converge, baseline calibration, task sizing, stuck behavior, and common failure modes.
+- **`owloop-spec`** — Interactive wizard to create high-quality specs
+- **`owloop-loop-control`** — Promise protocol (DONE/BLOCKED/DECIDE) and stuck behavior
+- **`owloop-verify`** — Baseline calibration, change-trap checks, and verification pipeline design
+- **`owloop-runner`** — Manual loop execution when the owloop CLI is unavailable
+- **`owloop-report`** — Generate reviewable reports from loop state
 
-## Scenario References
+## References
 
-> These references summarize established practices and community experience.
-> Hard constraints are marked explicitly; heuristic advice should be adapted to your project.
-> See [references/SOURCES.md](references/SOURCES.md) for evidence levels.
-
-When the user's task matches one of these scenarios, read the corresponding reference before writing or executing a spec:
-
-- **Legacy refactoring** → read [references/legacy-refactoring.md](references/legacy-refactoring.md)
-- **ML / DS code hygiene** → read [references/ml-engineering-hygiene.md](references/ml-engineering-hygiene.md)
-- **API / framework / dependency migration** → read [references/api-migration.md](references/api-migration.md)
-
-Use the matching spec template in `templates/` when available.
-
-## How It Compares
-
-See [references/comparison.md](references/comparison.md) for detailed comparison with `/goal`, gnhf, and roborev.
-
-| | owloop | /goal | gnhf |
-|---|---|---|---|
-| Completion check | grep (deterministic) | Haiku model (probabilistic) | grep |
-| Context management | Fresh per iteration | Same session | Fresh per iteration |
-| Spec format | Constraint-oriented | Free-form prompt | Free-form prompt |
+- [Loop Engineering Best Practices](references/loop-engineering-guide.md)
+- [Comparison with /goal, gnhf, roborev](references/comparison.md)
+- [Scenario: Legacy Refactoring](references/legacy-refactoring.md)
+- [Scenario: ML / DS Code Hygiene](references/ml-engineering-hygiene.md)
+- [Scenario: API / Framework Migration](references/api-migration.md)
 
 ## Links
 

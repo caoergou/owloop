@@ -21,9 +21,12 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 | `src/owloop/reporter.py` | Plain-text event reporter for non-interactive terminals |
 | `src/owloop/spec_queue.py` | Spec discovery, status, priority helpers |
 | `pyproject.toml`, `uv.lock` | Packaging (hatchling); `uv` is the dev tool |
-| `skills/owloop/SKILL.md` | Claude Code skill documenting the constraint-oriented spec methodology |
-| `skills/owloop/commands/` | Skill slash commands (e.g., `/owloop-spec` interactive spec wizard) |
-| `skills/ralph-wiggum/SKILL.md` | Upstream-legacy skill, kept for compatibility |
+| `skills/owloop/SKILL.md` | Core loop engineering methodology skill (agent-agnostic) |
+| `skills/owloop-spec/SKILL.md` | Interactive spec-creation wizard skill |
+| `skills/owloop-loop-control/SKILL.md` | Promise protocol and loop convergence skill |
+| `skills/owloop-verify/SKILL.md` | Verification pipeline and baseline calibration skill |
+| `skills/owloop/references/` | Scenario references for the core skill |
+| `.claude/commands/` | Slash commands for owloop |
 | `templates/` | Files copied into **consumer** projects by `owloop init` (spec, constitution, checklist, prompts) |
 | `prototypes/tui_concept.py` | Standalone ANSI TUI concept (owl animation, exit summary) — stdlib only |
 | `.claude/commands/` | Slash commands for owloop |

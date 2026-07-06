@@ -19,3 +19,8 @@ htmlcov/
 logs/
 PROMPT_build.md
 PROMPT_plan.md
+
+# owloop
+.owloop/logs/
+.owloop/reports/
+.owloop/PROMPT_build.md

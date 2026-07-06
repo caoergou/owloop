@@ -5,7 +5,13 @@ description: >-
   with baseline calibration and pre-flight validation —
   创建高质量 Owloop spec 的交互式向导，含基线校准和预检验证。
   Use when user says "create a spec", "write a spec", "new spec",
-  "帮我写 spec", "新建 spec", "创建规范".
+  "帮我写 spec", "新建 spec", "创建规范", "spec wizard".
+license: MIT
+compatibility: Requires owloop methodology; works with any agentskills.io-compatible agent
+metadata:
+  author: caoergou
+  version: "0.3.0"
+  repository: https://github.com/caoergou/owloop
 ---
 
 # Interactive Owloop Spec Creation
@@ -14,7 +20,17 @@ description: >-
 
 Guide the user through a structured interview to produce a spec that **converges instead of looping forever**. The process has 7 steps: intent → feasibility gate → scope & sizing → baseline calibration → constraints → stuck behavior → generate & validate.
 
-For loop engineering best practices, see [references/loop-engineering-guide.md](../references/loop-engineering-guide.md).
+## When to Use
+
+Use this skill when the user wants to:
+- Create a new spec for an owloop run
+- Turn a vague goal into a concrete, verifiable task
+- Write a constraint-oriented spec with proper acceptance criteria
+
+## When NOT to Use
+
+- Do not use for non-owloop tasks that don't need shell-verifiable acceptance criteria.
+- Do not use if the user has already provided a complete, valid spec.
 
 ---
 
@@ -161,7 +177,7 @@ Present the user with options (suggest the most appropriate one based on task ty
 
 With all information collected:
 
-1. **Read the template**: Read `.owloop/templates/spec-template.md` (or fall back to `templates/spec-template.md` in legacy projects) for the canonical section structure.
+1. **Read the template**: Read `.owloop/templates/spec-template.md` if it exists (or fall back to `templates/spec-template.md` in legacy projects). If neither exists, use the canonical section structure documented in [references/spec-format.md](references/spec-format.md).
 
 2. **Generate a short name**: Extract a 2-4 word English kebab-case slug from the intent. Examples: `add-rate-limiting`, `fix-login-redirect`, `extract-validation-handler`.
 
@@ -220,7 +236,12 @@ Show the complete spec and the calibration summary:
 > （这份 spec 可以吗？需要调整哪里？）
 
 - User confirms → done. Mention the file path and suggest:
-  - "Run `owloop run` to start the loop"
+  - "Run `owloop run` to start the loop (if the owloop CLI is installed)."
+  - "If the CLI is not available, follow the `owloop-runner` skill to execute the loop manually."
   - "Recommended: watch the first 2-3 iterations to make sure the agent understands the task, then leave it running"
-  - "运行 `owloop run` 启动循环。建议先看前 2-3 轮确认方向正确，再放手让它跑"
+  - "运行 `owloop run` 启动循环（如果已安装 owloop CLI）。如果未安装，参考 `owloop-runner` skill 手工执行循环。建议先看前 2-3 轮确认方向正确，再放手让它跑"
 - User requests changes → edit and re-present. Repeat until confirmed.
+
+## References
+
+- [Spec Format Reference](references/spec-format.md)

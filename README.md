@@ -16,7 +16,7 @@
 
 ---
 
-owloop is a **spec-driven autonomous coding loop** for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). You write specs, start the loop, and wake up to clean commits.
+owloop is a **spec-driven autonomous coding loop** for Claude Code, Kimi Code CLI, Codex, Cursor, and other CLI-based coding agents. You write specs, start the loop, and wake up to clean commits.
 
 Each iteration spawns a **fresh agent** with zero accumulated context, verifies every acceptance criterion with **real shell commands**, and only commits when they pass.
 
@@ -33,6 +33,27 @@ owloop go "refactor error handling"   # one command: init → spec → review �
 ```
 
 That's it. owloop auto-initializes, scans your codebase, generates spec(s), asks for approval, and starts the loop.
+
+## Install as an Agent Skill
+
+Owloop also ships as a set of composable agent skills for any agentskills.io-compatible agent:
+
+```bash
+# Claude Code
+npx skills add caoergou/owloop --agent claude-code
+
+# Kimi Code CLI / Codex / Cursor / etc.
+npx skills add caoergou/owloop --agent '*'
+```
+
+Skills included:
+
+| Skill | Purpose |
+|---|---|
+| `owloop` | Core loop engineering methodology |
+| `owloop-spec` | Interactive spec-creation wizard |
+| `owloop-loop-control` | Promise protocol (DONE/BLOCKED/DECIDE) and stuck behavior |
+| `owloop-verify` | Baseline calibration and verification pipeline design |
 
 <details>
 <summary><strong>All commands</strong></summary>
@@ -74,10 +95,10 @@ graph LR
 
 | Property | How |
 |---|---|
-| **Fresh context** | Each iteration is a brand-new `claude -p` process. No context rot. |
+| **Fresh context** | Each iteration is a brand-new agent process. No context rot. |
 | **Deterministic completion** | `grep` for `<promise>DONE</promise>` — no AI judgment needed. |
 | **Worktree isolation** | Runs in a separate `git worktree`. Your main checkout stays untouched. |
-| **Auto Mode** | `--permission-mode auto`: asks before risky moves, never YOLO. |
+| **Auto Mode** | Uses your agent's auto-permission mode. Never YOLO. |
 | **Token budget cap** | `--max-tokens` stops the run before costs spiral. |
 | **AI reports** | `owloop report` produces a reviewable HTML artifact after each run. |
 
@@ -136,7 +157,7 @@ Specs are **constraint-oriented**: define what to do, what's off-limits, and mak
 <details>
 <summary><strong>Is this safe to run on production code?</strong></summary>
 
-owloop runs in a separate `git worktree` with `--permission-mode auto`. Your main branch stays clean. Treat every overnight run as a PR to review in the morning, not a deploy.
+owloop runs in a separate `git worktree` with your agent's auto-permission mode. Your main branch stays clean. Treat every overnight run as a PR to review in the morning, not a deploy.
 
 </details>
 

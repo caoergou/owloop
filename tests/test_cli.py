@@ -4,7 +4,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, _NamedTextIOWrapper
 
 from owloop.cli import main, parse_max_tokens
 
@@ -145,3 +145,66 @@ def test_parse_max_tokens_empty():
     import click
     with pytest.raises(click.BadParameter):
         parse_max_tokens("")
+
+
+def test_go_help_exposes_run_options():
+    runner = CliRunner()
+    result = runner.invoke(main, ["go", "--help"])
+    assert result.exit_code == 0
+    for option in (
+        "--agent",
+        "--model",
+        "--verifier-model",
+        "--subagents",
+        "--idle-timeout",
+        "--max-duration",
+        "--max-tokens",
+        "--worktree",
+        "--no-worktree",
+    ):
+        assert option in result.output, f"{option} should appear in owloop go --help"
+
+
+def test_go_forwards_options_to_engine_runner():
+    from unittest.mock import MagicMock, patch
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        import subprocess
+        subprocess.run(["git", "init"], check=True, capture_output=True)
+
+        with (
+            patch.object(_NamedTextIOWrapper, "isatty", return_value=True),
+            patch("owloop.cli._run_engine") as mock_engine,
+            patch("owloop.cli.Confirm.ask", return_value=True),
+            patch("owloop.cli.SpecGenerator") as mock_gen,
+            patch("owloop.cli.get_adapter") as mock_adapter,
+        ):
+            mock_gen.return_value.generate.return_value = []
+            mock_adapter.return_value = MagicMock()
+            result = runner.invoke(main, [
+                "go", "test goal",
+                "--agent=kimi",
+                "--model=test-model",
+                "--verifier-model=v-model",
+                "--subagents",
+                "--idle-timeout=120",
+                "--max-duration=30",
+                "--max-tokens=10k",
+                "--no-worktree",
+            ])
+            assert result.exit_code == 0, result.output
+            mock_engine.assert_called_once()
+            args, kwargs = mock_engine.call_args
+            assert args[0] == 0
+            assert args[1] is False
+            assert args[2] == "test-model"
+            assert args[3] == "kimi"
+            assert args[4] == 120.0
+            assert args[5] == 30
+            assert args[6] == 10000
+            assert kwargs.get("verifier_model") == "v-model"
+            assert kwargs.get("subagents") is True
+            assert kwargs.get("ascii") is False
+            assert kwargs.get("no_color") is False
+            assert kwargs.get("compact") is False
