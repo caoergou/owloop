@@ -84,6 +84,11 @@ class EngineConfig:
     max_retry_delay: float = 60.0
     fix_loop_threshold: int = 3
     tail_lines: int = 5
+    # Optional confirm callbacks so a caller (e.g. the TUI) can render its own
+    # styled prompt instead of the engine falling back to raw input(). When
+    # None, setup_worktree() keeps the original input()-based behavior.
+    confirm_dirty: Callable[[], bool] | None = None
+    confirm_worktree: Callable[[], bool] | None = None
 
 
 @dataclass
@@ -241,7 +246,11 @@ class OwloopEngine:
 
         if self._is_dirty():
             self._emit("dirty_workspace_warning")
-            if sys.stdin.isatty():
+            if self.config.confirm_dirty is not None:
+                if not self.config.confirm_dirty():
+                    self._emit("dirty_workspace_declined")
+                    return False
+            elif sys.stdin.isatty():
                 try:
                     reply = input("> ").strip().lower() or "n"
                 except EOFError:
@@ -252,7 +261,12 @@ class OwloopEngine:
             else:
                 self._emit("dirty_workspace_noninteractive_continue")
 
-        if sys.stdin.isatty():
+        if self.config.confirm_worktree is not None:
+            self._emit("worktree_prompt")
+            if not self.config.confirm_worktree():
+                self._emit("worktree_declined")
+                return True
+        elif sys.stdin.isatty():
             self._emit("worktree_prompt")
             try:
                 reply = input("> ").strip() or "Y"

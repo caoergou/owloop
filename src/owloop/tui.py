@@ -196,14 +196,11 @@ class OwloopTUI:
 
     # ── engine event handling ──
 
-    PROMPT_MESSAGES = {
-        "worktree_prompt": "It is recommended to run in an isolated git worktree to protect the main repository. Create one automatically? (Y/n)",
-        "dirty_workspace_warning": (
-            "⚠ The workspace has uncommitted changes that will not appear in the worktree.\n"
-            "   Please commit or stash before running owloop.\n"
-            "   Continue anyway? (y/N)"
-        ),
-    }
+    # Events that require handing the terminal back to the caller for an
+    # interactive confirm prompt (see EngineConfig.confirm_dirty/confirm_worktree
+    # in engine.py). The prompt text itself is owned by the caller's callback,
+    # not the TUI — this just steps out of the Live screen to make room for it.
+    PROMPT_EVENTS = {"worktree_prompt", "dirty_workspace_warning"}
 
     def on_event(self, kind: str, data: dict) -> None:
         if self._paused:
@@ -214,10 +211,9 @@ class OwloopTUI:
             self._handle(kind, data)
             self._render()
 
-        if kind in self.PROMPT_MESSAGES:
+        if kind in self.PROMPT_EVENTS:
             self.live.stop()
             self._paused = True
-            self.console.print(self.PROMPT_MESSAGES[kind])
 
     def _log(self, line: str) -> None:
         self.state.logs.append(line)

@@ -35,8 +35,10 @@ def test_generate_writes_spec_on_done_signal(tmp_path: Path) -> None:
     adapter = MockAdapter(responses=[_done_spec_result("unify errors")])
     generator = SpecGenerator(tmp_path, adapter)
 
-    path = generator.generate("unify error handling")
+    paths = generator.generate("unify error handling")
 
+    assert len(paths) == 1
+    path = paths[0]
     assert path.exists()
     assert path.parent.name == "specs"
     assert path.parent.parent.name == ".owloop"
@@ -67,12 +69,51 @@ def test_generate_asks_clarification_then_writes_spec(tmp_path: Path) -> None:
         asked.append(questions)
         return ["owloop/helpers.py"]
 
-    path = generator.generate("refactor stuff", ask_fn=fake_ask)
+    paths = generator.generate("refactor stuff", ask_fn=fake_ask)
 
     assert len(asked) == 1
     assert asked[0] == ["Which module should I refactor?"]
+    path = paths[0]
     assert path.parent.parent.name == ".owloop"
     assert path.name == "01-refactor-helpers.md"
+
+
+def test_generate_splits_multiple_specs(tmp_path: Path) -> None:
+    (tmp_path / ".owloop").mkdir()
+    multi_output = (
+        "# Spec: extract-helpers\n\n"
+        "## Priority: 1\n\n"
+        "## Depends On\n- none\n\n"
+        "## Requirements\n- [ ] Extract shared helpers\n\n"
+        "## Acceptance Criteria\n- [ ] `pytest` exits 0\n\n"
+        "## Exclusions\n- Do NOT modify config files\n\n"
+        "---\n\n"
+        "# Spec: refactor-api\n\n"
+        "## Priority: 2\n\n"
+        "## Depends On\n- extract-helpers\n\n"
+        "## Requirements\n- [ ] Refactor API layer\n\n"
+        "## Acceptance Criteria\n- [ ] `pytest` exits 0\n\n"
+        "## Exclusions\n- Do NOT modify models\n\n"
+        "<promise>DONE</promise>"
+    )
+    adapter = MockAdapter(responses=[
+        AgentResult(
+            stdout=multi_output,
+            returncode=0,
+            success=True,
+            has_completion_signal=True,
+            done_signal="<promise>DONE</promise>",
+            promise_state="DONE",
+        ),
+    ])
+    generator = SpecGenerator(tmp_path, adapter)
+
+    paths = generator.generate("refactor the codebase")
+
+    assert len(paths) == 2
+    assert paths[0].name == "01-extract-helpers.md"
+    assert paths[1].name == "02-refactor-api.md"
+    assert "Depends On" in paths[1].read_text(encoding="utf-8")
 
 
 def test_generate_gives_up_after_max_rounds(tmp_path: Path) -> None:

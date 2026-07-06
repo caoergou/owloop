@@ -12,6 +12,7 @@ from typing import Any
 import click
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm
 from rich.text import Text
 
 from owloop import _brand
@@ -367,7 +368,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
 
     try:
         spec_status.start()
-        spec_path = generator.generate(goal, max_rounds=max_rounds, on_line=_on_spec_line)
+        spec_paths = generator.generate(goal, max_rounds=max_rounds, on_line=_on_spec_line)
     except SpecGenerationError as exc:
         spec_status.stop()
         console.print(f"\n[red]Error:[/] {exc}")
@@ -375,16 +376,18 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     finally:
         spec_status.stop()
 
-    spec_content = spec_path.read_text(encoding="utf-8")
     console.print()
-    console.print(f"[{_brand.GREEN}]✓ Spec generated:[/] {spec_path}")
+    console.print(f"[{_brand.GREEN}]✓ {len(spec_paths)} spec(s) generated:[/]")
+    for sp in spec_paths:
+        console.print(f"  [{_brand.CYAN}]{sp}[/]")
     console.print()
-    console.print(Panel(
-        spec_content,
-        title="[bold]Spec review[/]",
-        border_style=_brand.AMBER,
-        padding=(1, 2),
-    ))
+    for sp in spec_paths:
+        console.print(Panel(
+            sp.read_text(encoding="utf-8"),
+            title=f"[bold]{sp.name}[/]",
+            border_style=_brand.AMBER,
+            padding=(1, 2),
+        ))
 
     start_loop = yes
     if not yes:
@@ -435,6 +438,25 @@ def _run_engine(
 
     if sys.stdout.isatty():
         tui = OwloopTUI(ascii=ascii, no_color=no_color, compact=compact)
+
+        def _confirm_dirty() -> bool:
+            # TUI 已在 setup_worktree() 触发的事件里暂停了 Live 渲染，
+            # 这里直接用 rich 的 Confirm 在普通终端上提问即可。
+            tui.console.print(
+                f"[{_brand.AMBER}]⚠[/] Workspace has uncommitted changes that won't appear in the worktree."
+            )
+            return Confirm.ask("Continue anyway?", default=False, console=tui.console)
+
+        def _confirm_worktree() -> bool:
+            return Confirm.ask(
+                "Create an isolated worktree to protect your main repository?",
+                default=True,
+                console=tui.console,
+            )
+
+        config.confirm_dirty = _confirm_dirty
+        config.confirm_worktree = _confirm_worktree
+
         try:
             with tui:
                 engine = OwloopEngine(config, adapter, on_event=tui.on_event)
