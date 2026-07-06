@@ -137,6 +137,9 @@ class EngineConfig:
     # ``resume`` is True, the engine reuses the latest recorded session.
     session_id: str | None = None
     resume: bool = False
+    # When True, run exactly one iteration, skip push, revert any commit the
+    # iteration made, and produce a DryRunReport instead of looping.
+    dry_run: bool = False
 
 
 @dataclass
@@ -155,6 +158,26 @@ class IterationResult:
 
 
 @dataclass
+class DryRunReport:
+    """Concise pass/fail report produced by a ``--dry-run`` / ``--one-shot`` run."""
+
+    promise_done: bool
+    acceptance_passed: int
+    acceptance_failed: int
+    tokens_used: int
+    spec_name: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "promise_done": self.promise_done,
+            "acceptance_passed": self.acceptance_passed,
+            "acceptance_failed": self.acceptance_failed,
+            "tokens_used": self.tokens_used,
+            "spec_name": self.spec_name,
+        }
+
+
+@dataclass
 class RunSummary:
     iterations: int
     branch: str
@@ -167,6 +190,7 @@ class RunSummary:
     decision_question: str | None = None
     session_id: str = ""
     resumed_from_session: str | None = None
+    dry_run_report: DryRunReport | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -181,6 +205,7 @@ class RunSummary:
             "decision_question": self.decision_question,
             "session_id": self.session_id,
             "resumed_from_session": self.resumed_from_session,
+            "dry_run_report": self.dry_run_report.as_dict() if self.dry_run_report else None,
         }
 
 
@@ -707,6 +732,22 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
+    def _run_acceptance_criteria(self, spec_name: str | None) -> tuple[int, int]:
+        """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
+        if not spec_name:
+            return 0, 0
+        commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
+        passed = failed = 0
+        for command in commands:
+            result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
+                command, shell=True, cwd=self.cwd, capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                passed += 1
+            else:
+                failed += 1
+        return passed, failed
+
     def run_iteration(self, iteration: int) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
         prompt_file = owloop_dir / "PROMPT_build.md"
@@ -880,12 +921,19 @@ class OwloopEngine:
         stopped_reason = "max_iterations"
         blocker: str | None = None
         decision_question: str | None = None
+        dry_run_report: DryRunReport | None = None
+        dry_run_original_head = ""
+        if self.config.dry_run:
+            dry_run_original_head = self._run_git("rev-parse", "HEAD").stdout.strip()
+        # A dry run always stops after exactly one iteration, no matter what
+        # --max-iterations was passed.
+        max_iterations = 1 if self.config.dry_run else self.config.max_iterations
         start_time = time.monotonic() - self._resumed_elapsed_seconds
         self._run_start_time = start_time
 
         try:
             while True:
-                if self.config.max_iterations > 0 and iteration >= self.config.max_iterations:
+                if max_iterations > 0 and iteration >= max_iterations:
                     break
 
                 if self.config.max_duration_minutes > 0:
@@ -911,10 +959,31 @@ class OwloopEngine:
                         note_summary = commit_result.stdout.strip()
                 self._append_run_note(iteration, result.success, note_summary)
 
+                if self.config.dry_run:
+                    acceptance_passed, acceptance_failed = self._run_acceptance_criteria(
+                        status["first_incomplete"]
+                    )
+                    current_head = self._run_git("rev-parse", "HEAD").stdout.strip()
+                    if current_head and current_head != dry_run_original_head:
+                        self._run_git("reset", "--soft", dry_run_original_head)
+                        self._emit(
+                            "dry_run_commit_reverted",
+                            from_head=current_head,
+                            to_head=dry_run_original_head,
+                        )
+                    dry_run_report = DryRunReport(
+                        promise_done=result.promise_state == "DONE",
+                        acceptance_passed=acceptance_passed,
+                        acceptance_failed=acceptance_failed,
+                        tokens_used=result.tokens_used,
+                        spec_name=status["first_incomplete"],
+                    )
+                    self._emit("dry_run_report", **dry_run_report.as_dict())
+
                 if result.promise_state == "DONE":
                     consecutive_failures = 0
                     backoff_level = 0
-                    if self._check_fix_loop():
+                    if not self.config.dry_run and self._check_fix_loop():
                         stopped_reason = "fix_loop_blocked"
                         blocker = "same files modified repeatedly; spec needs to be split"
                         break
@@ -934,6 +1003,10 @@ class OwloopEngine:
                         self._emit("stuck_warning", consecutive_failures=consecutive_failures)
                         backoff_level += 1
                         consecutive_failures = self.config.max_consecutive_failures
+
+                if self.config.dry_run:
+                    stopped_reason = "dry_run_complete"
+                    break
 
                 self._push(branch)
                 spec_status = self._spec_status()
@@ -976,6 +1049,7 @@ class OwloopEngine:
             decision_question=decision_question,
             session_id=self.session_id or "",
             resumed_from_session=self.resumed_from_session,
+            dry_run_report=dry_run_report,
         )
         self._write_summary(summary)
         return summary

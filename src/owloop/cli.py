@@ -19,7 +19,7 @@ from rich.text import Text
 from owloop import _brand
 from owloop.adapters import get_adapter
 from owloop.backpressure import discover_and_save
-from owloop.engine import EngineConfig, OwloopEngine
+from owloop.engine import EngineConfig, OwloopEngine, RunSummary
 from owloop.paths import resolve_specs_dir
 from owloop.report import ReportGenerator
 from owloop.report_ai import AIReportInsightsGenerator
@@ -702,7 +702,7 @@ def _run_engine(
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
     session_id: str | None = None, resume: bool = False,
-    no_tui: bool = False,
+    no_tui: bool = False, dry_run: bool = False,
 ) -> None:
     config = EngineConfig(
         project_dir=Path.cwd(),
@@ -714,6 +714,7 @@ def _run_engine(
         use_subagents=subagents,
         session_id=session_id,
         resume=resume,
+        dry_run=dry_run,
     )
     adapter = get_adapter(
         agent,
@@ -762,6 +763,8 @@ def _run_engine(
             console.print("\n[dim]owloop stopped.[/]")
             raise SystemExit(0) from None
         tui.print_exit_summary(summary)
+        if config.dry_run:
+            _print_dry_run_report(tui.console, summary)
     else:
         console = Console(no_color=no_color)
         console.print()
@@ -792,9 +795,42 @@ def _run_engine(
             console.print("\n[dim]owloop stopped.[/]")
             raise SystemExit(0) from None
         reporter.print_summary(summary)
+        if config.dry_run:
+            _print_dry_run_report(console, summary)
 
     if summary.stopped_reason in STOPPED_REASON_EXIT_1:
         raise SystemExit(1)
+
+
+def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
+    """Print the concise pass/fail report produced by ``--dry-run`` / ``--one-shot``."""
+    report = summary.dry_run_report
+    if report is None:
+        return
+
+    promise_line = (
+        f"[{_brand.GREEN}]<promise>DONE</promise> emitted[/]"
+        if report.promise_done
+        else f"[{_brand.RED}]<promise>DONE</promise> not emitted[/]"
+    )
+    lines = [promise_line]
+    if report.spec_name:
+        lines.append(f"Spec: {report.spec_name}")
+    lines.append(
+        f"Acceptance criteria: [{_brand.GREEN}]{report.acceptance_passed} passed[/] / "
+        f"[{_brand.RED}]{report.acceptance_failed} failed[/]"
+    )
+    lines.append(f"Tokens used: {report.tokens_used}")
+
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Dry-run report[/]",
+            border_style=_brand.AMBER,
+            padding=(1, 2),
+        )
+    )
 
 
 @main.command()
@@ -814,8 +850,16 @@ def _run_engine(
     default=False,
     help="Bypass the full-screen TUI and print plain console output, even in a TTY.",
 )
+@click.option(
+    "--dry-run", "--one-shot", "dry_run",
+    is_flag=True,
+    default=False,
+    help="Run exactly one iteration, print a pass/fail report, and skip push "
+    "(no committed changes are left behind). Use to validate specs without "
+    "burning a full overnight run.",
+)
 @_common_run_options
-def run(max_iterations: int, resume: bool, no_tui: bool, worktree: bool,
+def run(max_iterations: int, resume: bool, no_tui: bool, dry_run: bool, worktree: bool,
         model: str, agent: str, verifier_model: str | None, subagents: bool,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
@@ -835,6 +879,7 @@ def run(max_iterations: int, resume: bool, no_tui: bool, worktree: bool,
         subagents=subagents,
         resume=resume,
         no_tui=no_tui,
+        dry_run=dry_run,
     )
 
 

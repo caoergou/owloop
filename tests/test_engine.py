@@ -596,6 +596,147 @@ def test_on_event_callback_still_fires(tmp_path: Path) -> None:
     assert _read_jsonl(engine._events_log_path())[0]["kind"] == "iteration_start"
 
 
+def test_engine_config_dry_run_defaults_false(tmp_path: Path) -> None:
+    config = EngineConfig(project_dir=tmp_path)
+    assert config.dry_run is False
+
+
+def test_dry_run_stops_after_one_iteration_regardless_of_max_iterations(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n## Acceptance Criteria\n- `true`\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+                tokens_used=25,
+            ),
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            ),
+        ]
+    )
+    engine = _make_engine(repo, adapter, dry_run=True, max_iterations=10)
+
+    summary = engine.run()
+
+    assert summary.iterations == 1
+    assert summary.stopped_reason == "dry_run_complete"
+    assert len(adapter.calls) == 1
+    assert summary.dry_run_report is not None
+    assert summary.dry_run_report.promise_done is True
+    assert summary.dry_run_report.tokens_used == 25
+    assert summary.dry_run_report.spec_name == "01-test.md"
+
+
+def test_dry_run_report_counts_passed_and_failed_acceptance_criteria(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n## Acceptance Criteria\n- `true`\n- `false`\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, dry_run=True)
+
+    summary = engine.run()
+
+    assert summary.dry_run_report is not None
+    assert summary.dry_run_report.acceptance_passed == 1
+    assert summary.dry_run_report.acceptance_failed == 1
+
+
+class _CommittingAdapter(MockAdapter):
+    """Simulates an agent that edits a file and commits before returning."""
+
+    def __init__(self, repo: Path, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._repo = repo
+
+    def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+        (self._repo / "agent_change.txt").write_text("changed", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self._repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "agent commit"], cwd=self._repo, check=True, capture_output=True
+        )
+        return super().run(prompt, cwd, on_line=on_line)
+
+
+def test_dry_run_reverts_commit_and_skips_push(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n## Acceptance Criteria\n- `true`\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    original_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    adapter = _CommittingAdapter(
+        repo,
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ],
+    )
+    engine = _make_engine(repo, adapter, dry_run=True)
+
+    push_calls: list[str] = []
+    monkeypatch.setattr(engine, "_push", lambda branch: push_calls.append(branch))
+
+    summary = engine.run()
+
+    assert push_calls == []
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert head_after == original_head
+    # The agent's file edit is preserved as an uncommitted change.
+    assert (repo / "agent_change.txt").is_file()
+    assert summary.dry_run_report is not None
+    assert summary.dry_run_report.acceptance_passed == 1
+
+
 class _InterruptingAdapter(MockAdapter):
     """Adapter that completes one iteration, then simulates Ctrl+C on the next."""
 
