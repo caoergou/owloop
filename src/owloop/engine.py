@@ -58,10 +58,14 @@ Read these files if they exist (in order):
 1. `AGENTS.md` — agent instructions for this project
 2. `CLAUDE.md` — coding conventions, architecture rules, tool commands
 
-Find the highest-priority incomplete work item in specs/ and implement it
-completely. Run the shell commands in that spec's `## Acceptance Criteria`
-section yourself to check your work as you go. When everything is implemented
-and those criteria pass, output `<promise>DONE</promise>`.
+If a `## Target Spec` section appears above, that is your work item — the
+loop's dependency- and priority-aware scheduler already selected it, so do not
+scan specs/ for a different one. Only when no Target Spec section is present,
+find the highest-priority incomplete work item in specs/ yourself.
+
+Implement the work item completely. Run the shell commands in that spec's
+`## Acceptance Criteria` section yourself to check your work as you go. When
+everything is implemented and those criteria pass, output `<promise>DONE</promise>`.
 
 The loop — not you — owns git and completion:
 - Do NOT commit or push. The loop commits and pushes only after it has
@@ -879,8 +883,34 @@ class OwloopEngine:
             return path.read_text(encoding="utf-8")
         return None
 
-    def _build_prompt_with_context(self, prompt_text: str) -> str:
-        """Prepend run-notes, STEERING.md, and learnings to the iteration prompt."""
+    def _target_spec_section(self, spec_name: str | None) -> str | None:
+        """Inline the engine-selected spec so the agent skips re-discovery.
+
+        Without this, every fresh-context iteration spends its opening minutes
+        (and tool calls) re-deriving what ``spec_queue.get_next_ready_spec``
+        already computed — and, not knowing the Priority/Depends-On
+        conventions, can land on a different spec than the engine will verify.
+        """
+        if not spec_name:
+            return None
+        spec_path = self.specs_dir / spec_name
+        try:
+            content = spec_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        self._emit("target_spec_selected", spec=spec_name)
+        return (
+            "## Target Spec\n\n"
+            f"The loop has selected your work item: `{spec_name}` "
+            f"(on disk at `{spec_path}`). Implement this spec — do not pick a "
+            "different one. Its current content follows:\n\n"
+            f"{content.strip()}"
+        )
+
+    def _build_prompt_with_context(
+        self, prompt_text: str, target_spec: str | None = None
+    ) -> str:
+        """Prepend run-notes, STEERING.md, learnings, and the target spec."""
         sections: list[str] = []
 
         steering = self._read_steering()
@@ -905,6 +935,10 @@ class OwloopEngine:
         if learnings_text:
             self._emit("learnings_loaded", path=str(self.cwd / ".owloop" / "learnings.md"))
             sections.append(learnings_text)
+
+        spec_section = self._target_spec_section(target_spec)
+        if spec_section is not None:
+            sections.append(spec_section)
 
         if not sections:
             return prompt_text
@@ -1087,7 +1121,7 @@ class OwloopEngine:
             patch=str(patch_path) if diff.stdout.strip() else None,
         )
 
-    def run_iteration(self, iteration: int) -> IterationResult:
+    def run_iteration(self, iteration: int, target_spec: str | None = None) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
         prompt_file = owloop_dir / "PROMPT_build.md"
         log_file = self.log_dir / (
@@ -1097,7 +1131,7 @@ class OwloopEngine:
         self._emit("iteration_start", iteration=iteration, timestamp=_timestamp())
 
         prompt_text = self._build_prompt_with_context(
-            prompt_file.read_text(encoding="utf-8")
+            prompt_file.read_text(encoding="utf-8"), target_spec=target_spec
         )
 
         cap_tracker = TokenTracker()
@@ -1386,7 +1420,7 @@ class OwloopEngine:
                 last_good = self._head()
 
                 iteration += 1
-                result = self.run_iteration(iteration)
+                result = self.run_iteration(iteration, target_spec=active_spec)
 
                 # Cross-iteration notes: summarize what just happened. Read the
                 # commit subject before the engine makes its own commit below.

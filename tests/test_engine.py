@@ -874,3 +874,63 @@ def test_copy_owloop_dir_skips_logs(tmp_path: Path) -> None:
     assert (worktree / ".owloop" / "specs" / "01-test.md").is_file()
     # logs/ is dead weight in a fresh worktree and must not be copied.
     assert not (worktree / ".owloop" / "logs").exists()
+
+
+def test_target_spec_injected_into_prompt(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "02-feature.md").write_text(
+        "# Spec: feature\n\n## Requirements\n- do the thing\n", encoding="utf-8"
+    )
+
+    engine = _make_engine(repo, MockAdapter())
+    built = engine._build_prompt_with_context("PROMPT BODY", target_spec="02-feature.md")
+
+    assert "## Target Spec" in built
+    assert "02-feature.md" in built
+    assert "do the thing" in built  # full spec content inlined
+    assert built.endswith("PROMPT BODY")
+
+
+def test_run_iteration_passes_engine_selected_spec_to_agent(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "01-first.md").write_text("# Spec: first\n\ndetails-first\n", encoding="utf-8")
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, max_iterations=1)
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+    engine.run()
+
+    prompt, _cwd = adapter.calls[0]
+    assert "## Target Spec" in prompt
+    assert "01-first.md" in prompt
+    assert "details-first" in prompt
+
+
+def test_missing_target_spec_falls_back_to_agent_discovery(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    engine = _make_engine(repo, MockAdapter())
+
+    built = engine._build_prompt_with_context("PROMPT BODY", target_spec=None)
+
+    assert "## Target Spec" not in built
+    assert built == "PROMPT BODY"
