@@ -182,11 +182,11 @@ def _print_check_report(console: Console, report: LintReport, *, ascii: bool = F
     console.print()
 
 
-def _cli_options() -> tuple[bool, bool, bool]:
-    """Read global --ascii / --no-color / --compact flags from the current Click context."""
+def _cli_options() -> tuple[bool, bool, bool, bool]:
+    """Read global --ascii / --no-color / --compact / --verbose flags from the current Click context."""
     ctx = click.get_current_context()
     obj = ctx.ensure_object(dict)
-    return bool(obj.get("ascii")), bool(obj.get("no_color")), bool(obj.get("compact"))
+    return bool(obj.get("ascii")), bool(obj.get("no_color")), bool(obj.get("compact")), bool(obj.get("verbose"))
 
 
 class AgentStreamDisplay:
@@ -203,8 +203,9 @@ class AgentStreamDisplay:
     THINKING_DELAY = 2.0
     SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-    def __init__(self, console: Console) -> None:
+    def __init__(self, console: Console, *, verbose: bool = False) -> None:
         self.console = console
+        self.verbose = verbose
         self.start_time = time.monotonic()
         self._last_output = time.monotonic()
         self._burst_count = 0
@@ -245,6 +246,11 @@ class AgentStreamDisplay:
                 self._recent.pop(0)
 
             self._clear_status()
+
+            if self.verbose:
+                elapsed = now - self.start_time
+                self.console.print(f"  [dim][{elapsed:.1f}s][/] {stripped}")
+                return
 
             if gap < 0.05:
                 self._burst_count += 1
@@ -338,13 +344,15 @@ def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
 @click.option("--ascii", is_flag=True, default=False, help="Use ASCII art instead of Unicode glyphs.")
 @click.option("--no-color", is_flag=True, default=False, help="Disable colored terminal output.")
 @click.option("--compact", is_flag=True, default=False, help="Force the compact single-column TUI layout.")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show all agent output without folding.")
 @click.pass_context
-def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool) -> None:
+def main(ctx: click.Context, ascii: bool, no_color: bool, compact: bool, verbose: bool) -> None:
     """🦉 owloop — Your code evolves while you sleep."""
     ctx.ensure_object(dict)
     ctx.obj["ascii"] = ascii
     ctx.obj["no_color"] = no_color
     ctx.obj["compact"] = compact
+    ctx.obj["verbose"] = verbose
     console = Console(no_color=no_color)
 
     if ctx.invoked_subcommand is None:
@@ -373,7 +381,7 @@ def go(goal: str, model: str) -> None:
     Example:
         owloop go "refactor error handling in the API layer"
     """
-    ascii, no_color, compact = _cli_options()
+    ascii, no_color, compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
@@ -390,7 +398,7 @@ def go(goal: str, model: str) -> None:
         idle_timeout=3600,
     )
     generator = SpecGenerator(project_dir, adapter)
-    stream = AgentStreamDisplay(console)
+    stream = AgentStreamDisplay(console, verbose=verbose)
 
     try:
         stream.start()
@@ -443,7 +451,7 @@ def init(example: bool) -> None:
     All specs, logs, and runtime prompts live inside it so the original
     project stays clean.
     """
-    ascii, no_color, _compact = _cli_options()
+    ascii, no_color, _compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     cwd = Path.cwd()
 
@@ -536,7 +544,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     constraint-oriented spec. The spec is shown for approval before the loop
     starts unless --yes is passed.
     """
-    ascii, no_color, compact = _cli_options()
+    ascii, no_color, compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
@@ -553,7 +561,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
         idle_timeout=3600,
     )
     generator = SpecGenerator(project_dir, adapter)
-    stream = AgentStreamDisplay(console)
+    stream = AgentStreamDisplay(console, verbose=verbose)
 
     try:
         stream.start()
@@ -710,7 +718,7 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
 def run(max_iterations: int, worktree: bool, model: str, agent: str,
         idle_timeout: float, max_duration: int, max_tokens: int) -> None:
     """Start the autonomous coding loop."""
-    ascii, no_color, compact = _cli_options()
+    ascii, no_color, compact, verbose = _cli_options()
     specs_dir = resolve_specs_dir(Path.cwd())
     if not specs_dir.exists() or not list(specs_dir.glob("*.md")):
         console = Console(no_color=no_color)
@@ -728,7 +736,7 @@ def run(max_iterations: int, worktree: bool, model: str, agent: str,
 @main.command()
 def status() -> None:
     """Show current specs and their completion status."""
-    ascii, no_color, _compact = _cli_options()
+    ascii, no_color, _compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     specs_dir = resolve_specs_dir(Path.cwd())
 
@@ -794,7 +802,7 @@ def status() -> None:
 @main.command()
 def version() -> None:
     """Show the owloop version."""
-    ascii, no_color, _compact = _cli_options()
+    ascii, no_color, _compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as pkg_version
@@ -819,7 +827,7 @@ def version() -> None:
 )
 def check(strict: bool, run_baseline: bool) -> None:
     """Validate all specs before running the loop."""
-    ascii, no_color, _compact = _cli_options()
+    ascii, no_color, _compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     specs_dir = resolve_specs_dir(Path.cwd())
 
@@ -872,7 +880,7 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
     review focus) and is styled as a reviewable artifact. Use --no-ai for a
     fast, offline report.
     """
-    ascii, no_color, _compact = _cli_options()
+    ascii, no_color, _compact, verbose = _cli_options()
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
@@ -885,7 +893,7 @@ def report(output: Path | None, ai: bool, open_report: bool, model: str) -> None
             idle_timeout=3600,
         )
         ai_generator = AIReportInsightsGenerator(project_dir, adapter)
-        stream = AgentStreamDisplay(console)
+        stream = AgentStreamDisplay(console, verbose=verbose)
 
         try:
             stream.start()
@@ -947,7 +955,7 @@ def spec_from_issue(
     dry_run: bool,
 ) -> None:
     """Generate a spec draft from a GitHub issue."""
-    _ascii, no_color, _compact = _cli_options()
+    _ascii, no_color, _compact, _verbose = _cli_options()
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
     converter = IssueToSpecConverter(project_dir)
