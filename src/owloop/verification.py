@@ -60,14 +60,44 @@ def run_commands(
     return passed, failed, failures
 
 
+def _tail_output(result: subprocess.CompletedProcess[str]) -> str:
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+    return "\n".join(output.splitlines()[-30:])[-2000:]
+
+
 def run_acceptance_criteria(
     cwd: Path, specs_dir: Path, spec_name: str | None
 ) -> tuple[int, int, list[dict[str, Any]]]:
     """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
     if not spec_name:
         return 0, 0, []
-    commands = spec_queue.get_acceptance_criteria_commands(specs_dir / spec_name)
-    return run_commands(cwd, commands)
+
+    criteria = spec_queue.get_acceptance_criteria_commands(specs_dir / spec_name)
+    passed = failed = 0
+    failures: list[dict[str, Any]] = []
+    for criterion in criteria:
+        result = subprocess.run(  # noqa: S602
+            criterion.command, shell=True, cwd=cwd, capture_output=True, text=True,
+        )
+        if criterion.expect_no_output:
+            # grep-style tools exit 1 when they find no matches; the expectation
+            # is about empty stdout, not the exit code.
+            ok = result.stdout.strip() == "" and result.returncode in (0, 1)
+        else:
+            ok = result.returncode == 0
+
+        if ok:
+            passed += 1
+        else:
+            failed += 1
+            failures.append(
+                {
+                    "command": criterion.command,
+                    "returncode": result.returncode,
+                    "output": _tail_output(result),
+                }
+            )
+    return passed, failed, failures
 
 
 def guarded_hash(cwd: Path, specs_dir: Path, spec_name: str | None) -> str:

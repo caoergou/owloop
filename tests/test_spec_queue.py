@@ -211,6 +211,50 @@ def test_get_acceptance_criteria_section_missing_returns_empty(tmp_path: Path) -
     assert spec_queue.get_acceptance_criteria_section(spec) == ""
 
 
+# ── acceptance-criteria command extraction ──
+
+
+def test_get_acceptance_criteria_commands_extracts_plain_command(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text(
+        "# Spec\n\n## Acceptance Criteria\n- `pytest -q`\n- `ruff check .`\n",
+        encoding="utf-8",
+    )
+    criteria = spec_queue.get_acceptance_criteria_commands(spec)
+    assert [c.command for c in criteria] == ["pytest -q", "ruff check ."]
+    assert all(not c.expect_no_output for c in criteria)
+
+
+def test_get_acceptance_criteria_commands_detects_no_output(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text(
+        "# Spec\n\n## Acceptance Criteria\n"
+        "- `grep foo bar.txt` → no output\n"
+        "- `grep baz qux.txt` -> no output\n"
+        "- `echo hi` → at least 1 match\n",
+        encoding="utf-8",
+    )
+    criteria = spec_queue.get_acceptance_criteria_commands(spec)
+    assert [c.command for c in criteria] == [
+        "grep foo bar.txt",
+        "grep baz qux.txt",
+        "echo hi",
+    ]
+    assert criteria[0].expect_no_output is True
+    assert criteria[1].expect_no_output is True
+    assert criteria[2].expect_no_output is False
+
+
+def test_get_acceptance_criteria_commands_ignores_free_form_bullets(tmp_path: Path) -> None:
+    spec = tmp_path / "01-t.md"
+    spec.write_text(
+        "# Spec\n\n## Acceptance Criteria\n- just a free-form note\n- `true`\n",
+        encoding="utf-8",
+    )
+    criteria = spec_queue.get_acceptance_criteria_commands(spec)
+    assert [c.command for c in criteria] == ["true"]
+
+
 # ── file-disjoint parallel scheduling (Phase 4) ──
 
 

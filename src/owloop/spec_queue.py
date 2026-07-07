@@ -26,6 +26,7 @@ Spec dependencies:
 
 import fnmatch
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 _COMPLETE_RE = re.compile(r"^(#{1,3} )?(\*\*)?Status(\*\*)?:\s+COMPLETE", re.MULTILINE)
@@ -50,6 +51,23 @@ _FILES_SECTION_RE = re.compile(
 )
 
 DEFAULT_PRIORITY = 999
+
+
+@dataclass(frozen=True)
+class AcceptanceCriterion:
+    """A single shell command parsed from a spec's Acceptance Criteria bullet.
+
+    The optional ``expect_no_output`` flag is set when the bullet carries an
+    expectation such as ``→ no output``. In that case the verifier treats a
+    command that exits 0/1 with empty stdout as passing, instead of requiring a
+    zero exit code (which grep naturally returns when it finds no matches).
+    """
+
+    command: str
+    expect_no_output: bool = False
+
+
+_NO_OUTPUT_RE = re.compile(r"(?:→|->)\s*no output", re.IGNORECASE)
 
 
 def get_root_specs(specs_dir: Path) -> list[Path]:
@@ -158,10 +176,12 @@ def get_spec_dependencies(spec_file: Path, specs: list[Path]) -> list[Path]:
     return resolved
 
 
-def get_acceptance_criteria_commands(spec_file: Path) -> list[str]:
+def get_acceptance_criteria_commands(spec_file: Path) -> list[AcceptanceCriterion]:
     """Extract the first backtick-quoted shell command from each Acceptance Criteria bullet.
 
     Bullets without a backtick-quoted command (free-form descriptions) are skipped.
+    A trailing expectation such as ``→ no output`` is parsed so the verifier can
+    treat grep-style "no match" exit codes as passing.
     """
     if not spec_file.is_file():
         return []
@@ -170,7 +190,7 @@ def get_acceptance_criteria_commands(spec_file: Path) -> list[str]:
     if match is None:
         return []
 
-    commands: list[str] = []
+    commands: list[AcceptanceCriterion] = []
     for line in match.group(1).splitlines():
         stripped = line.strip()
         if "`" not in stripped:
@@ -179,8 +199,11 @@ def get_acceptance_criteria_commands(spec_file: Path) -> list[str]:
         if len(parts) < 3:
             continue
         command = parts[1].strip()
-        if command:
-            commands.append(command)
+        if not command:
+            continue
+        tail = "".join(parts[2:]).strip()
+        expect_no_output = bool(_NO_OUTPUT_RE.search(tail))
+        commands.append(AcceptanceCriterion(command, expect_no_output))
     return commands
 
 
