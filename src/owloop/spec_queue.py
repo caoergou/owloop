@@ -49,6 +49,10 @@ _FILES_SECTION_RE = re.compile(
     r"^##\s+Files\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
+_EXCLUSIONS_SECTION_RE = re.compile(
+    r"^##\s+Exclusions\s*$\n(.*?)(?=^#{1,2}\s|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
 
 DEFAULT_PRIORITY = 999
 
@@ -347,6 +351,25 @@ def get_spec_file_scope(spec_file: Path) -> list[str]:
         if cleaned and cleaned.lower() != "none":
             scope.append(cleaned)
     return scope
+
+
+def get_spec_exclusions(spec_file: Path) -> list[str]:
+    """Return the path/glob tokens listed under a spec's ``## Exclusions`` section.
+
+    Missing/empty sections or ``none`` entries yield an empty list.
+    """
+    if not spec_file.is_file():
+        return []
+    content = spec_file.read_text(encoding="utf-8", errors="replace")
+    match = _EXCLUSIONS_SECTION_RE.search(content)
+    if match is None:
+        return []
+    exclusions: list[str] = []
+    for item in _LIST_ITEM_RE.findall(match.group(1)):
+        cleaned = item.strip().strip("`").strip()
+        if cleaned and cleaned.lower() != "none":
+            exclusions.append(cleaned)
+    return exclusions
 
 
 def _paths_conflict(a: str, b: str) -> bool:

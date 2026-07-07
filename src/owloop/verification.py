@@ -100,6 +100,35 @@ def run_acceptance_criteria(
     return passed, failed, failures
 
 
+def _restore_exclusions(cwd: Path, specs_dir: Path, spec_name: str | None) -> None:
+    """Revert any tracked files listed in the spec's Exclusions section.
+
+    Acceptance-criteria commands (e.g. ``uv run --with pytest``) can mutate
+    files the spec promised not to touch, such as ``uv.lock``. This best-effort
+    cleanup restores those tracked files to HEAD so they never leak into the
+    iteration's commit.
+    """
+    if not spec_name:
+        return
+    exclusions = spec_queue.get_spec_exclusions(specs_dir / spec_name)
+    if not exclusions:
+        return
+    for pattern in exclusions:
+        result = subprocess.run(
+            ["git", "ls-files", "--", pattern],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
+        if files:
+            subprocess.run(
+                ["git", "checkout", "--", *files],
+                cwd=cwd,
+                capture_output=True,
+            )
+
+
 def guarded_hash(cwd: Path, specs_dir: Path, spec_name: str | None) -> str:
     """Hash the spec sections + backpressure file the agent must not edit."""
     h = hashlib.sha256()
@@ -125,8 +154,11 @@ def run_gate(
         return GateResult(passed=False, tampered=True, passed_count=0, failed_count=0)
 
     acc_passed, acc_failed, acc_failures = run_acceptance_criteria(cwd, specs_dir, spec_name)
+    _restore_exclusions(cwd, specs_dir, spec_name)
+
     bp_commands = [cmd.command for cmd in load_backpressure(cwd)]
     bp_passed, bp_failed, bp_failures = run_commands(cwd, bp_commands)
+    _restore_exclusions(cwd, specs_dir, spec_name)
 
     passed_count = acc_passed + bp_passed
     failed_count = acc_failed + bp_failed

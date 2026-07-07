@@ -185,3 +185,42 @@ def test_run_acceptance_criteria_no_output_fails_on_nonempty_stdout(tmp_path: Pa
     assert passed == 0
     assert failed == 1
     assert len(failures) == 1
+
+
+def test_run_gate_restores_excluded_tracked_files(tmp_path: Path) -> None:
+    """Acceptance-criteria commands must not leave mutations in spec-excluded files."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+    (repo / "uv.lock").write_text("original\n", encoding="utf-8")
+    (repo / "README.md").write_text("# test", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    spec = specs / "01-test.md"
+    spec.write_text(
+        "# Spec\n\n"
+        "## Acceptance Criteria\n"
+        "- `echo changed > uv.lock`\n\n"
+        "## Exclusions\n"
+        "- `uv.lock`\n",
+        encoding="utf-8",
+    )
+
+    guard_before = verification.guarded_hash(repo, specs, "01-test.md")
+    result = verification.run_gate(repo, specs, "01-test.md", guard_before)
+
+    assert result.tampered is False
+    assert result.passed is True
+    assert (repo / "uv.lock").read_text(encoding="utf-8") == "original\n"
