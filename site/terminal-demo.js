@@ -8,6 +8,7 @@
   var copyBtn = document.querySelector(".copy-btn");
   var replayBtn = document.getElementById("terminal-replay");
   var termBody = output ? output.closest(".terminal-body") : null;
+  var terminalWrap = document.querySelector(".hero-terminal-wrap");
 
   if (!output || !inputLine || !typed) return;
 
@@ -42,6 +43,14 @@
   function hideReportPreview() {
     var el = document.getElementById("report-browser");
     if (el) { el.classList.remove("open"); el.style.display = "none"; }
+  }
+
+  function isTerminalVisible() {
+    var el = terminalWrap || document.querySelector(".terminal");
+    if (!el) return true;
+    var rect = el.getBoundingClientRect();
+    return rect.top < window.innerHeight && rect.bottom > 0 &&
+           rect.left < window.innerWidth && rect.right > 0;
   }
 
   function setStatus(color, text) {
@@ -196,6 +205,7 @@
   }
 
   function showReportPreview() {
+    if (!isTerminalVisible()) return;
     var container = document.getElementById("report-browser");
     if (!container) {
       container = document.createElement("div");
