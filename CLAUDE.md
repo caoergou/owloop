@@ -14,8 +14,9 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 
 | Path | Purpose |
 |---|---|
-| `src/owloop/cli.py` | Python CLI (`init` / `run` / `plan` / `status` / `version` subcommands), rich console output |
+| `src/owloop/cli.py` | Python CLI (`init`, `run`, `go`, `spec`, `check`, `status`, `finish`, `logs`, `report`, `agents`, `discover`, `spec-from-issue`, `version`), rich console output |
 | `src/owloop/engine.py` | Python loop engine — spawns agent per iteration, manages worktree, drives spec queue |
+| `src/owloop/config.py` | Persistent `.owloop/config.toml` `[run]` loader and CLI-default merging |
 | `src/owloop/verification.py` | The shared deterministic gate (acceptance criteria + backpressure via `subprocess`, tamper hash) used by both engine and parallel orchestrator |
 | `src/owloop/parallel.py` | File-disjoint parallel workers (`owloop run --workers N`): per-worker worktrees, shared gate, merge-back |
 | `src/owloop/notifications.py` | Best-effort completion notifications (webhook/desktop) when a run stops |
@@ -59,7 +60,7 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 
 - **Auto Mode, not YOLO** — always `--permission-mode auto`, never `--dangerously-skip-permissions`. This is the core premise of the fork; don't regress it. On the ACP path this means owloop answers `session/request_permission` itself (`allow_once`) and never launches an agent in a bypass mode.
 - **ACP-first for new agents** — a new coding agent is integrated by adding an `AgentPreset` row in `presets.py`, not a new adapter class. Bespoke stream parsers are reserved for the pre-existing native adapters (`claude`, `kimi`).
-- **Worktree isolation, zero extra deps** — the engine uses plain `git worktree add` / `git worktree list`, nothing beyond git itself.
+- **Worktree isolation, zero extra deps** — the engine uses plain `git worktree add` / `git worktree list`. Worktrees are created next to the project as `{project_dir}-owloop-wt/owloop-{date}-{slug}-{id}`, nothing beyond git itself.
 - **Constraint-oriented specs** — every spec template carries Requirements, shell-verifiable Acceptance Criteria, Exclusions, Style, and Verification. Exclusions are what keep an unattended loop from wandering; never make that section optional.
 - **Fresh context per iteration** — each loop round is a brand-new `claude -p` process. State lives on disk (`.owloop/specs/`, `.owloop/logs/`), never accumulated in memory across iterations. Don't design features that assume continuity between rounds. A failed iteration is rolled back to the last good commit (`--no-rollback` opts out) so the next round starts clean; the discarded diff is saved as a patch under `.owloop/logs/`.
 - **Enforced verification, not trusted verification** — the engine, not the agent, owns git and completion. When the agent signals DONE, the engine runs the spec's Acceptance Criteria + `backpressure.json` commands itself (the deterministic gate) and only then commits, pushes, and marks the spec `COMPLETE`. The agent must not commit/push, mark status, or edit its own Acceptance Criteria/Verification (tamper detection fails the iteration). Never move these guarantees back into prompts.
