@@ -244,12 +244,14 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
                 has_completion_signal=True,
                 done_signal="<promise>DONE</promise>",
             ),
+            # A failure *after* the success observes the reset backoff level.
+            AgentResult(stdout="f4", returncode=1, success=False, has_completion_signal=False),
         ]
     )
     engine = _make_engine(
         repo,
         adapter,
-        max_iterations=4,
+        max_iterations=5,
         max_consecutive_failures=3,
         base_retry_delay=2.0,
         max_retry_delay=60.0,
@@ -259,7 +261,9 @@ def test_run_exponential_backoff_doubles_then_resets_on_success(tmp_path: Path, 
 
     summary = engine.run()
 
-    assert summary.iterations == 4
+    assert summary.iterations == 5
+    # A verified success no longer sleeps at all and resets the backoff level,
+    # so the post-success failure backs off at the base delay again.
     assert sleeps == [2.0, 2.0, 4.0, 2.0]
 
 
@@ -848,3 +852,178 @@ def test_resume_continues_token_and_duration_budget(tmp_path: Path) -> None:
     session = json.loads(engine._session_file().read_text(encoding="utf-8"))
     assert session["tokens_used"] == 1100
     assert session["iterations"] == 4
+
+
+def test_copy_owloop_dir_skips_logs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    owloop_dir = repo / ".owloop"
+    (owloop_dir / "specs").mkdir(parents=True)
+    (owloop_dir / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    (owloop_dir / "logs").mkdir()
+    (owloop_dir / "logs" / "events.jsonl").write_text("{}", encoding="utf-8")
+
+    engine = _make_engine(repo, MockAdapter())
+    engine.main_repo_dir = repo
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+
+    engine._copy_owloop_dir(worktree)
+
+    assert (worktree / ".owloop" / "specs" / "01-test.md").is_file()
+    # logs/ is dead weight in a fresh worktree and must not be copied.
+    assert not (worktree / ".owloop" / "logs").exists()
+
+
+def test_target_spec_injected_into_prompt(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "02-feature.md").write_text(
+        "# Spec: feature\n\n## Requirements\n- do the thing\n", encoding="utf-8"
+    )
+
+    engine = _make_engine(repo, MockAdapter())
+    built = engine._build_prompt_with_context("PROMPT BODY", target_spec="02-feature.md")
+
+    assert "## Target Spec" in built
+    assert "02-feature.md" in built
+    assert "do the thing" in built  # full spec content inlined
+    assert built.endswith("PROMPT BODY")
+
+
+def test_run_iteration_passes_engine_selected_spec_to_agent(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "01-first.md").write_text("# Spec: first\n\ndetails-first\n", encoding="utf-8")
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, max_iterations=1)
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+    engine.run()
+
+    prompt, _cwd = adapter.calls[0]
+    assert "## Target Spec" in prompt
+    assert "01-first.md" in prompt
+    assert "details-first" in prompt
+
+
+def test_missing_target_spec_falls_back_to_agent_discovery(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    engine = _make_engine(repo, MockAdapter())
+
+    built = engine._build_prompt_with_context("PROMPT BODY", target_spec=None)
+
+    assert "## Target Spec" not in built
+    assert built == "PROMPT BODY"
+
+
+def test_gate_failure_writes_failure_feedback(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "01-test.md").write_text(
+        "# Spec\n\n## Acceptance Criteria\n- check: `echo broken-thing >&2; exit 3`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    adapter = MockAdapter(
+        responses=[
+            AgentResult(
+                stdout="done\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ]
+    )
+    engine = _make_engine(repo, adapter, max_iterations=1)
+    engine.run()
+
+    feedback = (repo / ".owloop" / "last-failure.md").read_text(encoding="utf-8")
+    assert "verification_failed" in feedback
+    assert "echo broken-thing >&2; exit 3" in feedback  # the failing command
+    assert "(exit 3)" in feedback  # its exit code
+    assert "broken-thing" in feedback  # its output tail
+
+
+def test_failure_feedback_injected_into_next_prompt_and_cleared_on_success(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    flag = repo / "fixed.flag"
+    # Fails until the "agent" creates the flag file on its second attempt.
+    (specs / "01-test.md").write_text(
+        f"# Spec\n\n## Acceptance Criteria\n- check: `test -f {flag}`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    class _FixingAdapter(MockAdapter):
+        def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+            if len(self.calls) == 1:  # second attempt "fixes" the criterion
+                flag.write_text("ok", encoding="utf-8")
+            return super().run(prompt, cwd, on_line=on_line)
+
+    done = AgentResult(
+        stdout="done\n<promise>DONE</promise>",
+        returncode=0,
+        success=True,
+        has_completion_signal=True,
+        done_signal="<promise>DONE</promise>",
+    )
+    adapter = _FixingAdapter(responses=[done, done])
+    engine = _make_engine(repo, adapter, max_iterations=2)
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+    engine.run()
+
+    # First prompt had no feedback; the retry prompt carried the diagnosis.
+    first_prompt, _ = adapter.calls[0]
+    retry_prompt, _ = adapter.calls[1]
+    assert "FAILED verification" not in first_prompt
+    assert "FAILED verification" in retry_prompt
+    assert f"test -f {flag}" in retry_prompt
+    # The verified success removed the feedback file.
+    assert not (repo / ".owloop" / "last-failure.md").exists()
+
+
+def test_trim_run_notes_keeps_only_newest_entries() -> None:
+    from owloop.engine import trim_run_notes
+
+    notes = "\n".join(
+        f"## Iteration {i} — ts\n- Status: success\n- Summary: s{i}\n" for i in range(1, 10)
+    )
+    trimmed = trim_run_notes(notes, max_entries=3)
+
+    assert "older iteration notes omitted" in trimmed
+    assert "s9" in trimmed and "s8" in trimmed and "s7" in trimmed
+    assert "s1" not in trimmed and "s6" not in trimmed
+    # Under the cap (or unstructured content), nothing is touched.
+    assert trim_run_notes("free-form note", max_entries=3) == "free-form note"
+    assert trim_run_notes(notes, max_entries=20) == notes

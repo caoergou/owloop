@@ -101,9 +101,11 @@ class SubagentOrchestrator:
     ) -> AgentResult:
         stdout_parts = ["## Orient\n", orient.stdout, "\n## Implement\n", implement.stdout]
         tokens_used = orient.tokens_used + implement.tokens_used
+        cost_usd = orient.cost_usd + implement.cost_usd
         if verify is not None:
             stdout_parts.extend(["\n## Verify\n", verify.stdout])
             tokens_used += verify.tokens_used
+            cost_usd += verify.cost_usd
 
         combined = "".join(stdout_parts)
         success = implement.success and implement.promise_state == "DONE"
@@ -120,6 +122,7 @@ class SubagentOrchestrator:
             done_signal=implement.done_signal,
             timed_out=implement.timed_out,
             tokens_used=tokens_used,
+            cost_usd=cost_usd,
             promise_state=promise_state,
             promise_payload=verify.promise_payload if verify else implement.promise_payload,
         )

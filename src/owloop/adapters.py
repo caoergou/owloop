@@ -9,6 +9,7 @@ tests.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import queue
@@ -18,6 +19,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,15 +30,90 @@ from owloop.tokens import IterationTokenLimitExceededError, TokenTracker
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
-DEFAULT_IDLE_TIMEOUT = 3600  # 60 minutes — claude -p buffers all output until
-# the end of a turn, so "no output" ≠ "stuck". Real-test showed spec 01 took
-# 18 minutes with zero intermediate output. 60min gives headroom for large specs.
+DEFAULT_IDLE_TIMEOUT = 600  # 10 minutes. Both adapters run with
+# `--output-format stream-json`, which emits an event per assistant message and
+# tool call, so sustained silence really does mean the process is stuck (the old
+# 60-minute default predates streaming, when a whole turn could arrive at once).
+# 10 minutes still comfortably covers a single long-running tool call; raise it
+# with --idle-timeout for projects with slower builds or test suites.
+
+# How long a successful adapter preflight (live CLI smoke test) stays cached
+# before it is re-run. The smoke test costs a real model roundtrip (up to 30s)
+# on every `owloop run`, so a recent pass is reused instead.
+PREFLIGHT_CACHE_TTL_SECONDS = 12 * 3600
 
 OnLine = Callable[[str], None]
 
 
 def strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text)
+
+
+def _preflight_cache_path(resolved_cmd: str) -> Path:
+    """Cache file for one CLI binary's last successful smoke test."""
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    digest = hashlib.sha256(resolved_cmd.encode("utf-8")).hexdigest()[:16]
+    return cache_root / "owloop" / f"preflight_{digest}.json"
+
+
+def has_recent_preflight_pass(cmd: str) -> bool:
+    """True when this binary passed a smoke test recently and hasn't changed.
+
+    The cache is keyed on the resolved binary path and invalidated by the
+    binary's mtime (an upgrade or reinstall forces a fresh probe) and by
+    ``PREFLIGHT_CACHE_TTL_SECONDS``.
+    """
+    resolved = shutil.which(cmd)
+    if not resolved:
+        return False
+    try:
+        data = json.loads(_preflight_cache_path(resolved).read_text(encoding="utf-8"))
+        return (
+            data.get("binary") == resolved
+            and data.get("mtime") == os.path.getmtime(resolved)
+            and 0 <= time.time() - float(data.get("ts", 0)) < PREFLIGHT_CACHE_TTL_SECONDS
+        )
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def record_preflight_pass(cmd: str) -> None:
+    """Persist a successful smoke test so the next run can skip it."""
+    resolved = shutil.which(cmd)
+    if not resolved:
+        return
+    path = _preflight_cache_path(resolved)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {"binary": resolved, "mtime": os.path.getmtime(resolved), "ts": time.time()}
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass  # a cold cache next run is the only consequence
+
+
+def terminate_process(proc: subprocess.Popen) -> None:
+    """Terminate an agent process (and its group when possible)."""
+    if sys.platform == "win32":
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return
+
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
 
 
 @dataclass
@@ -87,6 +164,10 @@ class StreamingAgentAdapter(AgentAdapter):
     idle_timeout: float
     token_tracker: TokenTracker
 
+    # Project config directories a worktree needs copies of (see
+    # OwloopEngine._copy_claude_config).
+    config_dirs: tuple[str, ...] = (".claude",)
+
     # Claude receives its prompt via stdin; Kimi receives it as a `--prompt`
     # CLI arg. Adapters that pass the prompt through argv should set this to
     # False so `run()` never opens/writes a stdin pipe — writing to a pipe
@@ -114,23 +195,7 @@ class StreamingAgentAdapter(AgentAdapter):
     @staticmethod
     def _killpg(proc: subprocess.Popen) -> None:
         """Terminate the agent process (and its group when possible)."""
-        if sys.platform == "win32":
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            return
-
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
+        terminate_process(proc)
 
     def run(self, prompt: str, cwd: Path, *, on_line: OnLine | None = None) -> AgentResult:
         self._result_text_parts: list[str] = []
@@ -297,6 +362,9 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
             issues.append(f"{self.claude_cmd} command not found, please install and log in to Claude Code CLI")
             return issues
 
+        if has_recent_preflight_pass(self.claude_cmd):
+            return issues
+
         try:
             # Feed the smoke-test prompt via stdin (like real iterations do,
             # see run() below) rather than as a CLI arg — subprocess.run's
@@ -314,6 +382,8 @@ class ClaudeCodeAdapter(StreamingAgentAdapter):
                 detail = (probe.stderr or probe.stdout).strip().splitlines()
                 tail = detail[-1] if detail else "(no output)"
                 issues.append(f"claude smoke test failed (returncode={probe.returncode}): {tail}")
+            else:
+                record_preflight_pass(self.claude_cmd)
         except subprocess.TimeoutExpired:
             issues.append("claude smoke test timed out (30s), please check network connection or login status")
         except OSError as exc:
@@ -460,6 +530,9 @@ class KimiCodeAdapter(StreamingAgentAdapter):
             issues.append(f"{self.kimi_cmd} command not found, please install Kimi Code CLI")
             return issues
 
+        if has_recent_preflight_pass(self.kimi_cmd):
+            return issues
+
         try:
             probe = subprocess.run(
                 self._build_cmd(prompt="respond with just ok"),
@@ -471,6 +544,8 @@ class KimiCodeAdapter(StreamingAgentAdapter):
                 detail = (probe.stderr or probe.stdout).strip().splitlines()
                 tail = detail[-1] if detail else "(no output)"
                 issues.append(f"kimi smoke test failed (returncode={probe.returncode}): {tail}")
+            else:
+                record_preflight_pass(self.kimi_cmd)
         except subprocess.TimeoutExpired:
             issues.append("kimi smoke test timed out (30s), please check network connection or login status")
         except OSError as exc:
@@ -608,7 +683,7 @@ class MockAdapter(AgentAdapter):
 def get_adapter(
     agent: str,
     *,
-    model: str,
+    model: str | None = None,
     permission_mode: str = "auto",
     claude_cmd: str = "claude",
     kimi_cmd: str = "kimi",
@@ -616,10 +691,18 @@ def get_adapter(
     token_tracker: TokenTracker | None = None,
     max_turns: int | None = None,
     max_budget_usd: float | None = None,
+    project_dir: Path | None = None,
 ) -> AgentAdapter:
+    """Resolve an agent key to an adapter.
+
+    ``claude`` and ``kimi`` keep their native stream-json adapters; every
+    other key resolves through the preset registry (see presets.py) to the
+    single ACP adapter. ``project_dir`` enables user presets from that
+    project's ``.owloop/agents.toml``.
+    """
     if agent == "claude":
         return ClaudeCodeAdapter(
-            model=model,
+            model=model or os.environ.get("CLAUDE_MODEL", "claude-sonnet-5"),
             permission_mode=permission_mode,
             claude_cmd=claude_cmd,
             idle_timeout=idle_timeout,
@@ -629,10 +712,21 @@ def get_adapter(
         )
     if agent == "kimi":
         return KimiCodeAdapter(
-            model=model,
+            model=model or "kimi-code/kimi-for-coding",
             permission_mode=permission_mode,
             kimi_cmd=kimi_cmd,
             idle_timeout=idle_timeout,
             token_tracker=token_tracker,
         )
-    raise ValueError(f"unknown agent type: {agent!r} (currently only supports 'claude', 'kimi')")
+
+    # Deferred import: acp.py imports from this module.
+    from owloop.acp import AcpAdapter
+    from owloop.presets import get_preset
+
+    preset = get_preset(agent, project_dir)
+    return AcpAdapter(
+        preset,
+        model=model,
+        idle_timeout=idle_timeout,
+        token_tracker=token_tracker,
+    )

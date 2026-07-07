@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from owloop import spec_queue
 from owloop.backpressure import load_backpressure
@@ -30,11 +31,19 @@ class GateResult:
     tampered: bool
     passed_count: int
     failed_count: int
+    failures: list[dict[str, Any]] = field(default_factory=list)
 
 
-def run_commands(cwd: Path, commands: list[str]) -> tuple[int, int]:
-    """Run shell commands from the harness (not the agent); count pass/fail."""
+def run_commands(
+    cwd: Path, commands: list[str]
+) -> tuple[int, int, list[dict[str, Any]]]:
+    """Run shell commands from the harness (not the agent).
+
+    Returns ``(passed, failed, failures)`` where each failure records the
+    command, its exit code, and an output tail for failure feedback.
+    """
     passed = failed = 0
+    failures: list[dict[str, Any]] = []
     for command in commands:
         result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
             command, shell=True, cwd=cwd, capture_output=True, text=True,
@@ -43,13 +52,20 @@ def run_commands(cwd: Path, commands: list[str]) -> tuple[int, int]:
             passed += 1
         else:
             failed += 1
-    return passed, failed
+            output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+            tail = "\n".join(output.splitlines()[-30:])[-2000:]
+            failures.append(
+                {"command": command, "returncode": result.returncode, "output": tail}
+            )
+    return passed, failed, failures
 
 
-def run_acceptance_criteria(cwd: Path, specs_dir: Path, spec_name: str | None) -> tuple[int, int]:
+def run_acceptance_criteria(
+    cwd: Path, specs_dir: Path, spec_name: str | None
+) -> tuple[int, int, list[dict[str, Any]]]:
     """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
     if not spec_name:
-        return 0, 0
+        return 0, 0, []
     commands = spec_queue.get_acceptance_criteria_commands(specs_dir / spec_name)
     return run_commands(cwd, commands)
 
@@ -78,9 +94,9 @@ def run_gate(
     if guarded_hash(cwd, specs_dir, spec_name) != guard_before:
         return GateResult(passed=False, tampered=True, passed_count=0, failed_count=0)
 
-    acc_passed, acc_failed = run_acceptance_criteria(cwd, specs_dir, spec_name)
+    acc_passed, acc_failed, acc_failures = run_acceptance_criteria(cwd, specs_dir, spec_name)
     bp_commands = [cmd.command for cmd in load_backpressure(cwd)]
-    bp_passed, bp_failed = run_commands(cwd, bp_commands)
+    bp_passed, bp_failed, bp_failures = run_commands(cwd, bp_commands)
 
     passed_count = acc_passed + bp_passed
     failed_count = acc_failed + bp_failed
@@ -89,4 +105,5 @@ def run_gate(
         tampered=False,
         passed_count=passed_count,
         failed_count=failed_count,
+        failures=acc_failures + bp_failures,
     )

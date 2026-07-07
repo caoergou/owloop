@@ -1,4 +1,9 @@
-"""Tests for the independent verifier agent integration."""
+"""Tests for the independent verifier agent integration.
+
+The LLM verifier runs *after* the deterministic verification gate
+(shell-first ordering): mechanically-broken work never pays for the extra
+model roundtrip, and only gate-surviving work gets the second opinion.
+"""
 
 import subprocess
 from pathlib import Path
@@ -16,119 +21,120 @@ def _git_init(repo: Path) -> None:
     subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
 
 
+def _spec(repo: Path, criterion: str = "true") -> None:
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "01-test.md").write_text(
+        f"# Spec\n\n## Acceptance Criteria\n- check: `{criterion}`\n",
+        encoding="utf-8",
+    )
+
+
+def _done() -> AgentResult:
+    return AgentResult(
+        stdout="done\n<promise>DONE</promise>",
+        returncode=0,
+        success=True,
+        has_completion_signal=True,
+        done_signal="<promise>DONE</promise>",
+    )
+
+
+def _verifier(state: str, payload: str = "") -> MockAdapter:
+    signal = f"<promise>{state}{':' + payload if payload else ''}</promise>"
+    return MockAdapter(
+        responses=[
+            AgentResult(
+                stdout=f"checked\n{signal}",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal=signal,
+                promise_state=state,
+                promise_payload=payload,
+            )
+        ]
+    )
+
+
 def _make_engine(repo: Path, adapter: MockAdapter, verifier: MockAdapter | None = None, **kwargs) -> OwloopEngine:
-    config = EngineConfig(project_dir=repo, worktree=False, verifier_adapter=verifier, **kwargs)
+    config = EngineConfig(
+        project_dir=repo, worktree=False, verifier_adapter=verifier, max_iterations=1, **kwargs
+    )
     return OwloopEngine(config=config, adapter=adapter)
 
 
-def test_verifier_pass_marks_iteration_success(tmp_path: Path) -> None:
+def test_verifier_pass_keeps_verified_success(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / ".owloop" / "specs").mkdir(parents=True)
-    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    _spec(repo)
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
-    executor = MockAdapter(
-        responses=[
-            AgentResult(
-                stdout="done\n<promise>DONE</promise>",
-                returncode=0,
-                success=True,
-                has_completion_signal=True,
-                done_signal="<promise>DONE</promise>",
-            )
-        ]
-    )
-    verifier = MockAdapter(
-        responses=[
-            AgentResult(
-                stdout="all checks pass\n<promise>PASS</promise>",
-                returncode=0,
-                success=True,
-                has_completion_signal=True,
-                done_signal="<promise>PASS</promise>",
-                promise_state="PASS",
-            )
-        ]
-    )
-    engine = _make_engine(repo, executor, verifier)
-    engine.log_dir.mkdir(parents=True, exist_ok=True)
-    engine.session_log = engine.log_dir / "session.log"
-    engine._write_prompt_file()
+    verifier = _verifier("PASS")
+    engine = _make_engine(repo, MockAdapter(responses=[_done()]), verifier)
+    monkeypatch.setattr(engine, "_push", lambda b: None)
 
-    result = engine.run_iteration(1)
+    summary = engine.run()
 
-    assert result.success
-    assert result.promise_state == "DONE"
+    assert summary.stopped_reason == "success"
+    assert len(verifier.calls) == 1  # consulted exactly once, after the gate
+    assert "**Status**: COMPLETE" in (repo / ".owloop" / "specs" / "01-test.md").read_text()
 
 
-def test_verifier_fail_marks_iteration_failed(tmp_path: Path) -> None:
+def test_verifier_fail_marks_iteration_failed(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / ".owloop" / "specs").mkdir(parents=True)
-    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    _spec(repo)
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
-    executor = MockAdapter(
-        responses=[
-            AgentResult(
-                stdout="done\n<promise>DONE</promise>",
-                returncode=0,
-                success=True,
-                has_completion_signal=True,
-                done_signal="<promise>DONE</promise>",
-            )
-        ]
-    )
-    verifier = MockAdapter(
-        responses=[
-            AgentResult(
-                stdout="test missing\n<promise>FAIL:test not found</promise>",
-                returncode=0,
-                success=True,
-                has_completion_signal=True,
-                done_signal="<promise>FAIL:test not found</promise>",
-                promise_state="FAIL",
-                promise_payload="test not found",
-            )
-        ]
-    )
-    engine = _make_engine(repo, executor, verifier)
-    engine.log_dir.mkdir(parents=True, exist_ok=True)
-    engine.session_log = engine.log_dir / "session.log"
-    engine._write_prompt_file()
+    verifier = _verifier("FAIL", "test not found")
+    engine = _make_engine(repo, MockAdapter(responses=[_done()]), verifier)
+    pushes: list[str] = []
+    monkeypatch.setattr(engine, "_push", lambda b: pushes.append(b))
+    events: list[str] = []
+    engine.on_event = lambda k, d: events.append(k)
 
-    result = engine.run_iteration(1)
+    summary = engine.run()
 
-    assert not result.success
-    assert result.promise_state == "VERIFY_FAIL"
-    assert "test not found" in result.promise_payload
+    assert "verification_failed" in events
+    assert pushes == []  # verifier FAIL means no commit, no push
+    assert "**Status**: COMPLETE" not in (repo / ".owloop" / "specs" / "01-test.md").read_text()
+    assert summary.stopped_reason == "max_iterations"
+    # The verifier's verdict feeds the next iteration's failure feedback.
+    assert "test not found" in (repo / ".owloop" / "last-failure.md").read_text()
 
 
-def test_no_verifier_keeps_existing_behavior(tmp_path: Path) -> None:
+def test_verifier_skipped_when_gate_fails(tmp_path: Path, monkeypatch) -> None:
+    """Shell-first ordering: a failing mechanical gate never spawns the verifier."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    (repo / ".owloop" / "specs").mkdir(parents=True)
-    (repo / ".owloop" / "specs" / "01-test.md").write_text("# spec", encoding="utf-8")
+    _spec(repo, criterion="false")  # gate fails deterministically
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
-    executor = MockAdapter(
-        responses=[
-            AgentResult(
-                stdout="done\n<promise>DONE</promise>",
-                returncode=0,
-                success=True,
-                has_completion_signal=True,
-                done_signal="<promise>DONE</promise>",
-            )
-        ]
-    )
-    engine = _make_engine(repo, executor)
-    engine.log_dir.mkdir(parents=True, exist_ok=True)
-    engine.session_log = engine.log_dir / "session.log"
-    engine._write_prompt_file()
+    verifier = _verifier("PASS")
+    engine = _make_engine(repo, MockAdapter(responses=[_done()]), verifier)
+    events: list[str] = []
+    engine.on_event = lambda k, d: events.append(k)
 
-    result = engine.run_iteration(1)
+    engine.run()
 
-    assert result.success
-    assert result.promise_state == "DONE"
+    assert "verification_gate_failed" in events
+    assert verifier.calls == []  # the expensive model roundtrip was never paid
+
+
+def test_no_verifier_keeps_existing_behavior(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    _spec(repo)
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    engine = _make_engine(repo, MockAdapter(responses=[_done()]))
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"

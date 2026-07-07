@@ -32,7 +32,7 @@ def test_get_adapter_returns_kimi_adapter() -> None:
 
 
 def test_get_adapter_unknown_agent_raises() -> None:
-    with pytest.raises(ValueError, match="unknown agent type"):
+    with pytest.raises(ValueError, match="unknown agent"):
         get_adapter("unknown", model="test")
 
 
@@ -317,3 +317,74 @@ def test_kimi_adapter_extracts_usage_or_falls_back_to_heuristic(tmp_path: Path) 
 
     assert fallback_adapter.token_tracker.has_explicit_usage is False
     assert fallback_result.tokens_used == 77
+
+
+# ── Preflight smoke-test cache ──
+
+
+def _fake_binary(tmp_path: Path) -> Path:
+    binary = tmp_path / "bin" / "fake-claude"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    return binary
+
+
+def test_preflight_cache_round_trip(tmp_path: Path, monkeypatch) -> None:
+    from owloop.adapters import has_recent_preflight_pass, record_preflight_pass
+
+    binary = _fake_binary(tmp_path)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("PATH", str(binary.parent), prepend=os.pathsep)
+
+    assert has_recent_preflight_pass("fake-claude") is False
+    record_preflight_pass("fake-claude")
+    assert has_recent_preflight_pass("fake-claude") is True
+
+
+def test_preflight_cache_invalidated_by_binary_change(tmp_path: Path, monkeypatch) -> None:
+    from owloop.adapters import has_recent_preflight_pass, record_preflight_pass
+
+    binary = _fake_binary(tmp_path)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("PATH", str(binary.parent), prepend=os.pathsep)
+
+    record_preflight_pass("fake-claude")
+    # Simulate a CLI upgrade: same path, different mtime.
+    os.utime(binary, (0, 0))
+    assert has_recent_preflight_pass("fake-claude") is False
+
+
+def test_preflight_cache_expires_after_ttl(tmp_path: Path, monkeypatch) -> None:
+    import owloop.adapters as adapters_mod
+    from owloop.adapters import has_recent_preflight_pass, record_preflight_pass
+
+    binary = _fake_binary(tmp_path)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("PATH", str(binary.parent), prepend=os.pathsep)
+
+    record_preflight_pass("fake-claude")
+    real_time = adapters_mod.time.time
+    monkeypatch.setattr(
+        adapters_mod.time,
+        "time",
+        lambda: real_time() + adapters_mod.PREFLIGHT_CACHE_TTL_SECONDS + 1,
+    )
+    assert has_recent_preflight_pass("fake-claude") is False
+
+
+def test_claude_preflight_skips_smoke_test_on_cached_pass(tmp_path: Path, monkeypatch) -> None:
+    import owloop.adapters as adapters_mod
+
+    binary = _fake_binary(tmp_path)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("PATH", str(binary.parent), prepend=os.pathsep)
+
+    adapters_mod.record_preflight_pass("fake-claude")
+
+    def _boom(*args, **kwargs):  # the live probe must not run on a cache hit
+        raise AssertionError("smoke test should have been skipped")
+
+    monkeypatch.setattr(adapters_mod.subprocess, "run", _boom)
+    adapter = ClaudeCodeAdapter(claude_cmd="fake-claude")
+    assert adapter.preflight() == []
