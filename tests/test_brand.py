@@ -81,9 +81,44 @@ def test_exit_hints_in_main_repo():
 
 def test_exit_hints_in_worktree():
     hints = exit_hints(
-        branch="feat/x", iterations=3, cwd="/repo/.worktrees/feat-x", main_repo_dir="/repo"
+        branch="feat/x",
+        iterations=3,
+        cwd="/repo/.worktrees/feat-x",
+        main_repo_dir="/repo",
+        stopped_reason="max_iterations",
     )
-    assert len(hints) == 3
+    assert len(hints) == 5
     assert "git log --oneline HEAD~3..HEAD" in hints[0]
-    assert "cd /repo && git merge feat/x" in hints[1]
-    assert "git worktree remove /repo/.worktrees/feat-x" in hints[2]
+    assert "cd /repo && git checkout main && git merge feat/x" in hints[1]
+    assert "git push origin main" in hints[2]
+    assert "git worktree remove /repo/.worktrees/feat-x && git branch -d feat/x" in hints[3]
+    assert "owloop run --resume" in hints[4]
+
+
+def test_exit_hints_in_worktree_success_omits_resume():
+    hints = exit_hints(
+        branch="feat/x",
+        iterations=3,
+        cwd="/repo/.worktrees/feat-x",
+        main_repo_dir="/repo",
+        stopped_reason="success",
+    )
+    assert "owloop run --resume" not in hints
+
+
+def test_exit_hints_with_report_path():
+    hints = exit_hints(
+        branch="feat/x",
+        iterations=3,
+        cwd="/repo/.worktrees/feat-x",
+        main_repo_dir="/repo",
+        report_path="report.md",
+    )
+    assert hints[0] == "Report:   report.md"
+
+
+def test_exit_hints_zero_iterations():
+    hints = exit_hints(
+        branch="feat/x", iterations=0, cwd="/repo/.worktrees/feat-x", main_repo_dir="/repo"
+    )
+    assert any("git log --oneline -1" in line for line in hints)

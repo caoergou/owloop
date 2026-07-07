@@ -49,6 +49,28 @@ def _done_factory():
     return MockAdapter(responses=[_done()])
 
 
+def _file_creating_factory():
+    """Return an adapter that touches a source file so the worker has a real commit."""
+    adapter = MockAdapter(responses=[_done()])
+    original_run = adapter.run
+
+    def _run(prompt: str, cwd: Path, *, on_line=None):
+        # Create a small source file so the worker branch has a real change
+        # to commit and merge back into the base branch.
+        if "01-a" in prompt:
+            src = cwd / "src" / "a" / "file.py"
+        elif "02-b" in prompt:
+            src = cwd / "src" / "b" / "file.py"
+        else:
+            src = cwd / "src" / "file.py"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text("# changed\n", encoding="utf-8")
+        return original_run(prompt, cwd, on_line=on_line)
+
+    adapter.run = _run  # type: ignore[method-assign]
+    return adapter
+
+
 def _is_complete(repo: Path, spec: str) -> bool:
     from owloop.spec_queue import is_root_spec_complete
 
@@ -77,15 +99,21 @@ def test_parallel_completes_disjoint_specs(tmp_path: Path) -> None:
 
 def test_parallel_merges_land_on_base_branch(tmp_path: Path) -> None:
     repo = _repo_with_specs(tmp_path, {"01-a.md": ["src/a/"], "02-b.md": ["src/b/"]})
-    orch = ParallelOrchestrator(ParallelConfig(project_dir=repo, workers=2), _done_factory)
+    orch = ParallelOrchestrator(
+        ParallelConfig(project_dir=repo, workers=2), _file_creating_factory
+    )
 
     orch.run()
 
     log = subprocess.run(
         ["git", "log", "--oneline"], cwd=repo, capture_output=True, text=True
     ).stdout
-    assert "owloop: complete 01-a.md" in log
-    assert "owloop: complete 02-b.md" in log
+    # Worker commits use the spec title from ``# Spec: <title>``.
+    assert "01-a.md" in log
+    assert "02-b.md" in log
+    # Merge commits land on the base branch.
+    assert "owloop: merge 01-a.md" in log
+    assert "owloop: merge 02-b.md" in log
     # Worktrees are cleaned up.
     assert subprocess.run(
         ["git", "worktree", "list"], cwd=repo, capture_output=True, text=True

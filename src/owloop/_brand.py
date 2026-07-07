@@ -6,6 +6,7 @@ state-aware messaging so every CLI/TUI/reporter surface stays consistent.
 
 from __future__ import annotations
 
+import subprocess
 from os import PathLike
 
 # ── palette ──
@@ -134,14 +135,67 @@ def wake_message() -> str:
     return f"{OLLIE_NAME} is waking up..."
 
 
-def exit_hints(branch: str, iterations: int, cwd: str | PathLike[str], main_repo_dir: str | PathLike[str]) -> list[str]:
-    hints = [f"Branch: {branch}"]
-    if str(cwd) != str(main_repo_dir):
-        hints = [
-            f"Review:  git log --oneline HEAD~{iterations}..HEAD",
-            f"Merge:   cd {main_repo_dir} && git merge {branch}",
-            f"Discard: git worktree remove {cwd}",
-        ]
+# Stopped reasons where the user can resume work rather than merge.
+_RESUME_REASONS = {
+    "interrupted",
+    "stalled",
+    "exhausted",
+    "blocked",
+    "decide",
+    "fix_loop_blocked",
+    "max_iterations",
+    "max_duration",
+    "max_tokens",
+}
+
+
+def _default_branch(main_repo_dir: str | PathLike[str]) -> str:
+    """Return the current branch of the main repo, falling back to ``main``."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(main_repo_dir), "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        branch = result.stdout.strip()
+        if result.returncode == 0 and branch:
+            return branch
+    except Exception:
+        pass
+    return "main"
+
+
+def exit_hints(
+    branch: str,
+    iterations: int,
+    cwd: str | PathLike[str],
+    main_repo_dir: str | PathLike[str],
+    stopped_reason: str = "",
+    report_path: str | None = None,
+) -> list[str]:
+    if str(cwd) == str(main_repo_dir):
+        return [f"Branch: {branch}"]
+
+    review_cmd = (
+        "git log --oneline -1"
+        if iterations <= 0
+        else f"git log --oneline HEAD~{iterations}..HEAD"
+    )
+
+    base_branch = _default_branch(main_repo_dir)
+
+    hints: list[str] = []
+    if report_path:
+        hints.append(f"Report:   {report_path}")
+    hints.extend([
+        f"Review:   {review_cmd}",
+        f"Merge:    cd {main_repo_dir} && git checkout {base_branch} && git merge {branch}",
+        f"Push:     git push origin {base_branch}",
+        f"Cleanup:  git worktree remove {cwd} && git branch -d {branch}",
+    ])
+    if stopped_reason.lower() in _RESUME_REASONS:
+        hints.append("Resume:   owloop run --resume")
     return hints
 
 

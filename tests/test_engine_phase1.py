@@ -46,6 +46,21 @@ def _done(**kw) -> AgentResult:
     )
 
 
+def _adapter_with_file(path: Path | str = "src/change.py", **kw) -> MockAdapter:
+    """Return a MockAdapter that creates a source file before returning DONE."""
+    adapter = MockAdapter(responses=[_done(**kw)])
+    original_run = adapter.run
+
+    def _run(prompt: str, cwd: Path, *, on_line=None):
+        target = cwd / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# changed\n", encoding="utf-8")
+        return original_run(prompt, cwd, on_line=on_line)
+
+    adapter.run = _run  # type: ignore[method-assign]
+    return adapter
+
+
 def _make(repo: Path, adapter: MockAdapter, **kwargs) -> OwloopEngine:
     return OwloopEngine(EngineConfig(project_dir=repo, worktree=False, **kwargs), adapter)
 
@@ -80,7 +95,7 @@ def test_gate_pass_commits_and_marks_complete(tmp_path: Path, monkeypatch) -> No
     _spec(repo / ".owloop" / "specs", "01-t.md", "true")  # criterion passes
     monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
 
-    engine = _make(repo, MockAdapter(responses=[_done()]), max_iterations=1)
+    engine = _make(repo, _adapter_with_file(), max_iterations=1)
     pushes: list[str] = []
     monkeypatch.setattr(engine, "_push", lambda b: pushes.append(b))
 
@@ -94,7 +109,8 @@ def test_gate_pass_commits_and_marks_complete(tmp_path: Path, monkeypatch) -> No
     last = subprocess.run(
         ["git", "log", "-1", "--pretty=%s"], cwd=repo, capture_output=True, text=True
     ).stdout.strip()
-    assert last == "owloop: complete 01-t.md"
+    # Commit messages use the spec title from ``# Spec: <title>``.
+    assert last == "01-t.md"
 
 
 def test_gate_fail_no_commit_no_push(tmp_path: Path, monkeypatch) -> None:

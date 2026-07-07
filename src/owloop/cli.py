@@ -1,26 +1,29 @@
 """owloop CLI — entry point for uvx owloop / owloop commands."""
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.table import Table
 from rich.text import Text
 
-from owloop import _brand
+from owloop import _brand, git_stats
 from owloop.adapters import DEFAULT_IDLE_TIMEOUT, get_adapter
 from owloop.backpressure import discover_and_save
-from owloop.engine import EngineConfig, OwloopEngine, RunSummary
-from owloop.paths import resolve_specs_dir
+from owloop.config import apply_config_defaults, load_run_config
+from owloop.engine import EngineConfig, OwloopEngine, RunSummary, TerminalState
+from owloop.paths import resolve_logs_dir, resolve_specs_dir
 from owloop.report import ReportGenerator
 from owloop.report_ai import AIReportInsightsGenerator
 from owloop.reporter import ConsoleReporter
@@ -198,6 +201,113 @@ def _cli_options() -> tuple[bool, bool, bool, bool]:
     return bool(obj.get("ascii")), bool(obj.get("no_color")), bool(obj.get("compact")), bool(obj.get("verbose"))
 
 
+def _run_config_path() -> Path:
+    """Return the persistent run configuration file path."""
+    return Path.cwd() / ".owloop" / "config.toml"
+
+
+def _load_and_apply_run_config(**cli_kwargs: Any) -> dict[str, Any]:
+    """Load ``.owloop/config.toml`` and merge its ``[run]`` defaults into CLI kwargs."""
+    config = load_run_config(_run_config_path())
+    return apply_config_defaults(cli_kwargs, config)
+
+
+def _default_report_path() -> Path:
+    """Return the default quick-report output path."""
+    return Path.cwd() / ".owloop" / "reports" / "owloop_report_latest.html"
+
+
+def _generate_quick_report(summary: RunSummary) -> Path | None:
+    """Generate a fast, no-AI HTML report and return its path, or None on failure."""
+    try:
+        report_path = _default_report_path()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        generator = ReportGenerator(summary.main_repo_dir)
+        generator.generate(report_path, insights=None, use_tailwind=False)
+        return report_path
+    except Exception:
+        return None
+
+
+def _format_spec_table(spec_paths: list[Path], verbose: bool = False) -> Table | list[Panel]:
+    """Return either a compact Table or full Panels for the generated specs."""
+    if verbose:
+        return [
+            Panel(
+                sp.read_text(encoding="utf-8"),
+                title=f"[bold]{sp.name}[/]",
+                border_style=_brand.AMBER,
+                padding=(1, 2),
+            )
+            for sp in spec_paths
+        ]
+
+    table = Table(
+        title="Generated specs",
+        border_style=_brand.AMBER,
+        show_lines=False,
+        padding=(0, 2),
+    )
+    table.add_column("File", style="bold")
+    table.add_column("Title")
+    table.add_column("Priority", justify="center")
+    table.add_column("Status", justify="center")
+
+    for sp in spec_paths:
+        content = sp.read_text(encoding="utf-8")
+        state = classify_spec(content)
+        status_text = {
+            "done": "[green]done[/]",
+            "in_progress": f"[{_brand.AMBER}]in progress[/]",
+            "pending": "[dim]pending[/]",
+        }[state]
+        priority = "—"
+        title: str | None = None
+        for line in content.splitlines():
+            if line.strip().startswith("## Priority:"):
+                priority = line.split(":", 1)[-1].strip()
+            if line.startswith("# Spec:"):
+                title = line.split(":", 1)[-1].strip()
+        table.add_row(sp.name, title or "—", priority, status_text)
+
+    return table
+
+
+def _read_latest_session(project_dir: Path) -> dict[str, Any] | None:
+    """Load the latest session descriptor if it exists."""
+    path = project_dir / ".owloop" / "logs" / "session_latest.json"
+    if not path.is_file():
+        return None
+    try:
+        import json
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _find_worktree_path(project_dir: Path, session: dict[str, Any] | None = None) -> Path | None:
+    """Return the worktree path from the session record or ``git worktree list``."""
+    if session and session.get("path"):
+        return Path(session["path"])
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=project_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            wt = Path(line.split(" ", 1)[1])
+            if wt != project_dir and wt.name.startswith("owloop-"):
+                return wt
+    return None
+
+
 class AgentStreamDisplay:
     """Live display for streaming agent output.
 
@@ -349,7 +459,7 @@ def _ensure_init(cwd: Path, console: Console, *, ascii: bool = False) -> None:
     (owloop_path / "logs").mkdir()
 
     gitignore = cwd / ".gitignore"
-    gitignore_entries = [".owloop/logs/", ".owloop/PROMPT_build.md"]
+    gitignore_entries = [".owloop/"]
     if gitignore.exists():
         existing = gitignore.read_text(encoding="utf-8")
         to_add = [e for e in gitignore_entries if e not in existing]
@@ -409,16 +519,12 @@ def _validate_agent(ctx: click.Context, param: click.Parameter, value: str) -> s
     return value
 
 
-def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Shared options for the run and go commands."""
+def _agent_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Shared non-model run options for run, go, and spec."""
     f = click.option(
         "--agent", default="claude", metavar="AGENT", callback=_validate_agent,
         help="Coding agent preset (see `owloop agents` for the full list).",
         show_default=True,
-    )(f)
-    f = click.option(
-        "--model", default=None, metavar="MODEL",
-        help="Model to use (defaults per agent; claude honors CLAUDE_MODEL).",
     )(f)
     f = click.option(
         "--verifier-model",
@@ -450,8 +556,98 @@ def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
     return f
 
 
+def _common_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Shared options for the run and go commands (includes --model default None)."""
+    f = click.option(
+        "--model", default=None, metavar="MODEL",
+        help="Model to use (defaults per agent; claude honors CLAUDE_MODEL).",
+    )(f)
+    return _agent_run_options(f)
+
+
+def _extra_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Additional run options forwarded by run, go, and spec."""
+    f = click.option(
+        "--max-iterations", "-n", type=int, default=0,
+        help="Maximum iterations (0 = unlimited).", show_default=True,
+    )(f)
+    f = click.option(
+        "--resume",
+        is_flag=True,
+        default=False,
+        help="Resume the most recent owloop session (reuse its worktree and branch).",
+    )(f)
+    f = click.option(
+        "--dry-run", "--one-shot", "dry_run",
+        is_flag=True,
+        default=False,
+        help="Run exactly one iteration, print a pass/fail report, and skip push "
+        "(no committed changes are left behind). Use to validate specs without "
+        "burning a full overnight run.",
+    )(f)
+    f = click.option(
+        "--no-tui", "--plain", "no_tui",
+        is_flag=True,
+        default=False,
+        help="Bypass the full-screen TUI and print plain console output, even in a TTY.",
+    )(f)
+    f = click.option(
+        "--max-tokens-per-iteration", type=MaxTokensParamType(), default=0,
+        help="Kill a single iteration early if it exceeds N tokens (0 = unlimited; "
+        "supports k/w/m shorthand).", show_default=True,
+    )(f)
+    f = click.option(
+        "--max-turns-per-iteration", type=int, default=0,
+        help="Forward --max-turns N to `claude -p` so a single iteration is bounded "
+        "at the source (0 = unlimited; ignored on CLIs without the flag).",
+        show_default=True,
+    )(f)
+    f = click.option(
+        "--max-budget-usd", type=float, default=0.0,
+        help="Forward a per-iteration USD budget cap to the CLI when supported "
+        "(0 = unlimited).", show_default=True,
+    )(f)
+    f = click.option(
+        "--keep-retrying", is_flag=True, default=False,
+        help="Legacy behavior: warn and back off on repeated failures instead of "
+        "hard-stopping with a `stalled` terminal state.",
+    )(f)
+    f = click.option(
+        "--rollback/--no-rollback", default=True, show_default=True,
+        help="Reset the worktree to the last good commit after a failed iteration "
+        "(a discarded-diff patch is saved under .owloop/logs/).",
+    )(f)
+    f = click.option(
+        "--notify-webhook", default=None, metavar="URL",
+        help="POST a JSON completion notification to this webhook when the run stops "
+        "on an attention-worthy state (or set OWLOOP_NOTIFY_WEBHOOK).",
+    )(f)
+    f = click.option(
+        "--notify-desktop", is_flag=True, default=False,
+        help="Fire a native desktop notification when the run stops.",
+    )(f)
+    f = click.option(
+        "--converge", "converge_sweeps", type=int, default=0, metavar="N",
+        help="After the spec queue empties, run up to N audit sweeps that append gap "
+        "specs until the codebase converges on the goal (0 = disabled).",
+        show_default=True,
+    )(f)
+    f = click.option(
+        "--workers", type=int, default=1, metavar="N",
+        help="Run up to N file-disjoint specs concurrently, each in its own worktree "
+        "(1 = sequential). Specs need a `## Files` scope to be scheduled in parallel.",
+        show_default=True,
+    )(f)
+    return f
+
+
 @main.command()
 @click.argument("goal")
+@click.option(
+    "--verbose", "-v", is_flag=True, default=False,
+    help="Show the full spec panel instead of the compact table.",
+)
+@_extra_run_options
 @_common_run_options
 def go(
     goal: str,
@@ -463,6 +659,20 @@ def go(
     max_duration: int,
     max_tokens: int,
     worktree: bool,
+    max_iterations: int,
+    resume: bool,
+    dry_run: bool,
+    no_tui: bool,
+    max_tokens_per_iteration: int,
+    max_turns_per_iteration: int,
+    max_budget_usd: float,
+    keep_retrying: bool,
+    rollback: bool,
+    notify_webhook: str | None,
+    notify_desktop: bool,
+    converge_sweeps: int,
+    workers: int,
+    verbose: bool,
 ) -> None:
     """One command: init → generate spec(s) → review → start the loop.
 
@@ -470,7 +680,8 @@ def go(
     Example:
         owloop go "refactor error handling in the API layer"
     """
-    ascii, no_color, compact, verbose = _cli_options()
+    ascii, no_color, compact, cli_verbose = _cli_options()
+    verbose = verbose or cli_verbose
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
@@ -511,29 +722,43 @@ def go(
     for sp in spec_paths:
         console.print(f"  [{_brand.CYAN}]{sp.name}[/]")
     console.print()
-    for sp in spec_paths:
-        console.print(Panel(
-            sp.read_text(encoding="utf-8"),
-            title=f"[bold]{sp.name}[/]",
-            border_style=_brand.AMBER,
-            padding=(1, 2),
-        ))
 
-    if sys.stdin.isatty():
-        start = Confirm.ask("\nStart the loop now?", default=True, console=console)
+    display = _format_spec_table(spec_paths, verbose=verbose)
+    if isinstance(display, Table):
+        console.print(display)
     else:
-        console.print("\n[dim]Non-interactive: run[/] [bold]owloop run[/] [dim]to start.[/]")
-        start = False
+        for panel in display:
+            console.print(panel)
 
-    if start:
-        console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
-        _run_engine(
-            0, worktree, model, agent,
-            idle_timeout, max_duration, max_tokens,
-            ascii=ascii, no_color=no_color, compact=compact,
-            verifier_model=verifier_model,
-            subagents=subagents,
-        )
+    run_kwargs = _load_and_apply_run_config(
+        max_iterations=max_iterations,
+        worktree=worktree,
+        model=model,
+        agent=agent,
+        idle_timeout=idle_timeout,
+        max_duration=max_duration,
+        max_tokens=max_tokens,
+        ascii=ascii,
+        no_color=no_color,
+        compact=compact,
+        verifier_model=verifier_model,
+        subagents=subagents,
+        resume=resume,
+        no_tui=no_tui,
+        dry_run=dry_run,
+        max_tokens_per_iteration=max_tokens_per_iteration,
+        max_turns_per_iteration=max_turns_per_iteration,
+        max_budget_usd=max_budget_usd,
+        keep_retrying=keep_retrying,
+        rollback=rollback,
+        notify_webhook=notify_webhook,
+        notify_desktop=notify_desktop,
+        converge_sweeps=converge_sweeps,
+        workers=workers,
+    )
+
+    console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
+    _run_engine(**run_kwargs)
 
 
 @main.command()
@@ -577,7 +802,7 @@ def init(example: bool) -> None:
         created.append(".owloop/logs/")
 
     gitignore = cwd / ".gitignore"
-    gitignore_entries = [".owloop/logs/", ".owloop/PROMPT_build.md"]
+    gitignore_entries = [".owloop/"]
     if gitignore.exists():
         existing = gitignore.read_text(encoding="utf-8")
         to_add = [e for e in gitignore_entries if e not in existing]
@@ -633,8 +858,8 @@ def init(example: bool) -> None:
 @main.command()
 @click.argument("goal")
 @click.option(
-    "--model", default=DEFAULT_MODEL,
-    help="Claude model to use (or set CLAUDE_MODEL).", show_default=True,
+    "--model", default=None,
+    help="Claude model to use (or set CLAUDE_MODEL).",
 )
 @click.option(
     "--max-rounds", type=int, default=3,
@@ -644,14 +869,47 @@ def init(example: bool) -> None:
     "--yes", "-y", is_flag=True, default=False,
     help="Approve the generated spec and start the loop immediately.",
 )
-def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
+@click.option(
+    "--verbose", "-v", is_flag=True, default=False,
+    help="Show the full spec panel instead of the compact table.",
+)
+@_extra_run_options
+@_agent_run_options
+def spec(
+    goal: str,
+    model: str,
+    max_rounds: int,
+    yes: bool,
+    agent: str,
+    verifier_model: str | None,
+    subagents: bool,
+    idle_timeout: float,
+    max_duration: int,
+    max_tokens: int,
+    worktree: bool,
+    max_iterations: int,
+    resume: bool,
+    dry_run: bool,
+    no_tui: bool,
+    max_tokens_per_iteration: int,
+    max_turns_per_iteration: int,
+    max_budget_usd: float,
+    keep_retrying: bool,
+    rollback: bool,
+    notify_webhook: str | None,
+    notify_desktop: bool,
+    converge_sweeps: int,
+    workers: int,
+    verbose: bool,
+) -> None:
     """Turn a vague goal into a concrete spec via agent clarification.
 
     Claude scans the codebase, calibrates baselines, and drafts a complete
     constraint-oriented spec. The spec is shown for approval before the loop
     starts unless --yes is passed.
     """
-    ascii, no_color, compact, verbose = _cli_options()
+    ascii, no_color, compact, cli_verbose = _cli_options()
+    verbose = verbose or cli_verbose
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
 
@@ -665,7 +923,7 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
         "claude",
         model=model,
         claude_cmd=os.environ.get("CLAUDE_CMD", "claude"),
-        idle_timeout=DEFAULT_IDLE_TIMEOUT,
+        idle_timeout=idle_timeout,
     )
     generator = SpecGenerator(project_dir, adapter)
     stream = AgentStreamDisplay(console, verbose=verbose)
@@ -684,33 +942,56 @@ def spec(goal: str, model: str, max_rounds: int, yes: bool) -> None:
     for sp in spec_paths:
         console.print(f"  [{_brand.CYAN}]{sp}[/]")
     console.print()
-    for sp in spec_paths:
-        console.print(Panel(
-            sp.read_text(encoding="utf-8"),
-            title=f"[bold]{sp.name}[/]",
-            border_style=_brand.AMBER,
-            padding=(1, 2),
-        ))
+
+    display = _format_spec_table(spec_paths, verbose=verbose)
+    if isinstance(display, Table):
+        console.print(display)
+    else:
+        for panel in display:
+            console.print(panel)
+
+    run_kwargs = _load_and_apply_run_config(
+        max_iterations=max_iterations,
+        worktree=worktree,
+        model=model,
+        agent=agent,
+        idle_timeout=idle_timeout,
+        max_duration=max_duration,
+        max_tokens=max_tokens,
+        ascii=ascii,
+        no_color=no_color,
+        compact=compact,
+        verifier_model=verifier_model,
+        subagents=subagents,
+        resume=resume,
+        no_tui=no_tui,
+        dry_run=dry_run,
+        max_tokens_per_iteration=max_tokens_per_iteration,
+        max_turns_per_iteration=max_turns_per_iteration,
+        max_budget_usd=max_budget_usd,
+        keep_retrying=keep_retrying,
+        rollback=rollback,
+        notify_webhook=notify_webhook,
+        notify_desktop=notify_desktop,
+        converge_sweeps=converge_sweeps,
+        workers=workers,
+    )
 
     start_loop = yes
     if not yes:
         if sys.stdin.isatty():
-            console.print("\n[bold]Start the loop now?[/] [y/N] ", end="")
+            console.print("\n[bold]Start the loop now?[/] [Y/n] ", end="")
             try:
-                reply = input().strip().lower() or "n"
+                reply = input().strip().lower() or "y"
             except EOFError:
-                reply = "n"
+                reply = "y"
             start_loop = reply.startswith("y")
         else:
             console.print("\n[dim]Non-interactive mode: review the spec and run[/] [bold]owloop run[/]")
 
     if start_loop:
         console.print(f"\n[{_brand.AMBER}]Starting autonomous loop...[/]")
-        _run_engine(
-            max_iterations=0, worktree=True, model=model, agent="claude",
-            idle_timeout=DEFAULT_IDLE_TIMEOUT, max_duration=0, max_tokens=0,
-            ascii=ascii, no_color=no_color, compact=compact,
-        )
+        _run_engine(**run_kwargs)
     else:
         console.print("\n[dim]Review the spec, then run[/] [bold]owloop run[/]")
     console.print()
@@ -767,19 +1048,25 @@ def agents() -> None:
     )
 
 
-# Terminal states that mean "the loop did not finish its work" — surfaced as a
-# non-zero exit so unattended callers (CI, cron, wrappers) can detect it. An
-# exhausted budget is explicitly NOT a success.
-STOPPED_REASON_EXIT_1 = {
-    "preflight_failed",
-    "dirty_workspace_declined",
-    "max_iterations",
-    "max_duration",
-    "max_tokens",
-    "stalled",
-    "fix_loop_blocked",
-    "tampered",
+# Three-tier exit codes for unattended callers (CI, cron, wrappers).
+#   0 = finished successfully
+#   1 = hard failure (engine/agent broke, spec tampered, preflight failed)
+#   2 = needs human attention (blocked, decide, stalled, exhausted, interrupted)
+_EXIT_CODE_MAP = {
+    TerminalState.SUCCESS: 0,
+    TerminalState.CLEAN_NO_OP: 0,
+    TerminalState.BLOCKED: 2,
+    TerminalState.DECIDE: 2,
+    TerminalState.STALLED: 2,
+    TerminalState.EXHAUSTED: 2,
+    TerminalState.TAMPERED: 1,
+    TerminalState.INTERRUPTED: 2,
+    TerminalState.FAILED: 1,
 }
+
+
+def _exit_code_for_summary(summary: RunSummary) -> int:
+    return _EXIT_CODE_MAP.get(cast(TerminalState, summary.state), 1)
 
 
 def _run_engine(
@@ -799,6 +1086,60 @@ def _run_engine(
     converge_sweeps: int = 0,
     workers: int = 1,
 ) -> None:
+    # Merge persistent config defaults before constructing the engine.
+    kwargs = _load_and_apply_run_config(
+        max_iterations=max_iterations,
+        worktree=worktree,
+        model=model,
+        agent=agent,
+        idle_timeout=idle_timeout,
+        max_duration=max_duration,
+        max_tokens=max_tokens,
+        ascii=ascii,
+        no_color=no_color,
+        compact=compact,
+        verifier_model=verifier_model,
+        subagents=subagents,
+        session_id=session_id,
+        resume=resume,
+        no_tui=no_tui,
+        dry_run=dry_run,
+        max_tokens_per_iteration=max_tokens_per_iteration,
+        max_turns_per_iteration=max_turns_per_iteration,
+        max_budget_usd=max_budget_usd,
+        keep_retrying=keep_retrying,
+        rollback=rollback,
+        notify_webhook=notify_webhook,
+        notify_desktop=notify_desktop,
+        converge_sweeps=converge_sweeps,
+        workers=workers,
+    )
+    max_iterations = kwargs["max_iterations"]
+    worktree = kwargs["worktree"]
+    model = kwargs["model"]
+    agent = kwargs["agent"]
+    idle_timeout = kwargs["idle_timeout"]
+    max_duration = kwargs["max_duration"]
+    max_tokens = kwargs["max_tokens"]
+    ascii = kwargs["ascii"]
+    no_color = kwargs["no_color"]
+    compact = kwargs["compact"]
+    verifier_model = kwargs["verifier_model"]
+    subagents = kwargs["subagents"]
+    session_id = kwargs["session_id"]
+    resume = kwargs["resume"]
+    no_tui = kwargs["no_tui"]
+    dry_run = kwargs["dry_run"]
+    max_tokens_per_iteration = kwargs["max_tokens_per_iteration"]
+    max_turns_per_iteration = kwargs["max_turns_per_iteration"]
+    max_budget_usd = kwargs["max_budget_usd"]
+    keep_retrying = kwargs["keep_retrying"]
+    rollback = kwargs["rollback"]
+    notify_webhook = kwargs["notify_webhook"]
+    notify_desktop = kwargs["notify_desktop"]
+    converge_sweeps = kwargs["converge_sweeps"]
+    workers = kwargs["workers"]
+
     resolved_webhook = notify_webhook or os.environ.get("OWLOOP_NOTIFY_WEBHOOK") or None
     if workers > 1:
         _run_parallel(
@@ -846,26 +1187,10 @@ def _run_engine(
             project_dir=Path.cwd(),
         )
 
+    report_path: Path | None = None
+
     if not no_tui and sys.stdout.isatty():
         tui = OwloopTUI(ascii=ascii, no_color=no_color, compact=compact)
-
-        def _confirm_dirty() -> bool:
-            # TUI 已在 setup_worktree() 触发的事件里暂停了 Live 渲染，
-            # 这里直接用 rich 的 Confirm 在普通终端上提问即可。
-            tui.console.print(
-                f"[{_brand.AMBER}]⚠[/] Workspace has uncommitted changes that won't appear in the worktree."
-            )
-            return Confirm.ask("Continue anyway?", default=False, console=tui.console)
-
-        def _confirm_worktree() -> bool:
-            return Confirm.ask(
-                "Create an isolated worktree to protect your main repository?",
-                default=True,
-                console=tui.console,
-            )
-
-        config.confirm_dirty = _confirm_dirty
-        config.confirm_worktree = _confirm_worktree
 
         try:
             with tui:
@@ -875,7 +1200,9 @@ def _run_engine(
             console = Console(no_color=no_color)
             console.print("\n[dim]owloop stopped.[/]")
             raise SystemExit(0) from None
-        tui.print_exit_summary(summary)
+        if summary.iterations > 0 and not config.dry_run:
+            report_path = _generate_quick_report(summary)
+        tui.print_exit_summary(summary, report_path=str(report_path) if report_path else None)
         if config.dry_run:
             _print_dry_run_report(tui.console, summary)
     else:
@@ -884,22 +1211,6 @@ def _run_engine(
         console.print(_banner_text(ascii=ascii, no_color=no_color))
         console.print(f"[{_brand.AMBER}]Starting autonomous loop...[/]")
 
-        def _confirm_dirty_plain() -> bool:
-            console.print(
-                f"[{_brand.AMBER}]⚠[/] Workspace has uncommitted changes that won't appear in the worktree."
-            )
-            return Confirm.ask("Continue anyway?", default=False, console=console)
-
-        def _confirm_worktree_plain() -> bool:
-            return Confirm.ask(
-                "Create an isolated worktree to protect your main repository?",
-                default=True,
-                console=console,
-            )
-
-        config.confirm_dirty = _confirm_dirty_plain
-        config.confirm_worktree = _confirm_worktree_plain
-
         reporter = ConsoleReporter(console, ascii=ascii)
         engine = OwloopEngine(config, adapter, on_event=reporter.on_event)
         try:
@@ -907,12 +1218,18 @@ def _run_engine(
         except KeyboardInterrupt:
             console.print("\n[dim]owloop stopped.[/]")
             raise SystemExit(0) from None
-        reporter.print_summary(summary)
+        if summary.iterations > 0 and not config.dry_run:
+            report_path = _generate_quick_report(summary)
+        reporter.print_summary(summary, report_path=str(report_path) if report_path else None)
         if config.dry_run:
             _print_dry_run_report(console, summary)
+        if report_path:
+            console.print(f"Report: {report_path}")
 
-    if summary.stopped_reason in STOPPED_REASON_EXIT_1:
-        raise SystemExit(1)
+    exit_code = _exit_code_for_summary(summary)
+    if exit_code:
+        raise SystemExit(exit_code)
+
 
 
 def _run_parallel(
@@ -952,8 +1269,9 @@ def _run_parallel(
         console.print("\n[dim]owloop stopped.[/]")
         raise SystemExit(0) from None
     reporter.print_summary(summary)
-    if summary.stopped_reason in STOPPED_REASON_EXIT_1:
-        raise SystemExit(1)
+    exit_code = _exit_code_for_summary(summary)
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
@@ -1159,6 +1477,236 @@ def status() -> None:
     console.print()
     console.print(table)
     console.print()
+
+    # Runtime section
+    session = _read_latest_session(Path.cwd())
+    if session:
+        from rich.table import Table as RuntimeTable
+
+        runtime = RuntimeTable(
+            title="Runtime",
+            border_style=_brand.AMBER,
+            show_lines=False,
+            padding=(0, 2),
+        )
+        runtime.add_column("Key", style="bold")
+        runtime.add_column("Value")
+
+        session_id = session.get("session_id", "—")
+        branch = session.get("branch", "—")
+        session_status = session.get("status", "—")
+        stopped_reason = session.get("stopped_reason", session.get("status", "—"))
+        wt_path = _find_worktree_path(Path.cwd(), session) or Path("—")
+        resumable = session_status in ("running",) or stopped_reason in {
+            "interrupted", "stalled", "exhausted", "max_iterations_reached",
+            "max_duration_reached", "max_tokens_reached", "idle_timeout",
+        }
+        runtime.add_row("Session", str(session_id))
+        runtime.add_row("Branch", str(branch))
+        runtime.add_row("Worktree", str(wt_path))
+        runtime.add_row("Stopped reason", str(stopped_reason))
+        runtime.add_row("Resumable", "yes" if resumable else "no")
+        runtime.add_row("Iterations", str(session.get("iterations", "—")))
+        runtime.add_row("Tokens used", str(session.get("tokens_used", "—")))
+        console.print(runtime)
+        console.print()
+
+
+@main.command()
+@click.option(
+    "--auto",
+    is_flag=True,
+    default=False,
+    help="Automatically merge, push, and clean up the owloop session.",
+)
+def finish(auto: bool) -> None:
+    """Show the latest owloop session and optionally merge/push/cleanup."""
+    ascii, no_color, _compact, _verbose = _cli_options()
+    console = Console(no_color=no_color)
+    project_dir = Path.cwd()
+
+    session = _read_latest_session(project_dir)
+    if not session:
+        console.print("[red]Error:[/] No latest session found. Run [bold]owloop run[/] first.")
+        raise SystemExit(1)
+
+    session_id = session.get("session_id", "—")
+    branch = session.get("branch", "—")
+    wt_path = _find_worktree_path(project_dir, session)
+    stopped_reason = session.get("stopped_reason", session.get("status", "—"))
+    iterations = session.get("iterations", 0)
+
+    console.print()
+    console.print(_banner_text(ascii=ascii, no_color=no_color))
+
+    table = Table(
+        title="Latest owloop session",
+        border_style=_brand.AMBER,
+        show_lines=False,
+        padding=(0, 2),
+    )
+    table.add_column("Key", style="bold")
+    table.add_column("Value")
+    table.add_row("Session", str(session_id))
+    table.add_row("Branch", str(branch))
+    table.add_row("Worktree", str(wt_path) if wt_path else "—")
+    table.add_row("Stopped reason", str(stopped_reason))
+    table.add_row("Iterations", str(iterations))
+    console.print(table)
+    console.print()
+
+    # Diff summary
+    cwd = wt_path if wt_path and wt_path.is_dir() and branch.startswith("owloop/") else project_dir
+    commits = git_stats.get_recent_commits(cwd, iterations)
+    total_files, total_ins, total_del = git_stats.total_diff_stats(commits)
+    console.print(
+        f"Diff: {total_files} files · [green]+{total_ins}[/] · [red]-{total_del}[/]"
+    )
+    for commit in commits:
+        console.print(f"  [cyan]{commit.hash}[/] {commit.message}")
+    console.print()
+
+    report_path = _default_report_path()
+    if report_path.exists():
+        console.print(f"Report: {report_path}")
+    else:
+        console.print("Report: not generated")
+    console.print()
+
+    # Base branch detection
+    base_branch = "main"
+    for candidate in ("main", "master"):
+        result = subprocess.run(
+            ["git", "show-ref", "--verify", f"refs/heads/{candidate}"],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            base_branch = candidate
+            break
+
+    console.print(f"[{_brand.AMBER}]Next steps:[/]")
+    console.print(f"  review:  git -C {project_dir} log --oneline {base_branch}..{branch}")
+    console.print(f"  merge:   git -C {project_dir} checkout {base_branch} && git merge {branch}")
+    console.print(f"  push:    git -C {project_dir} push origin {base_branch}")
+    if wt_path:
+        console.print(f"  cleanup: git -C {project_dir} worktree remove {wt_path} && git -C {project_dir} branch -d {branch}")
+    console.print("  resume:  owloop run --resume")
+    console.print()
+
+    if not auto:
+        return
+
+    # Auto mode: merge, push, remove worktree, delete branch. Stop on first failure.
+    console.print(f"[{_brand.AMBER}]Auto-finishing session...[/]")
+
+    def _git_step(desc: str, cwd: Path, *args: str) -> bool:
+        console.print(f"  {desc} ...", end=" ")
+        result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+        if result.returncode != 0:
+            console.print(f"[red]failed[/]\n{result.stderr.strip()}")
+            return False
+        console.print(f"[{_brand.GREEN}]ok[/]")
+        return True
+
+    # Idempotent merge: skip if already merged.
+    merge_check = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", branch, base_branch],
+        cwd=project_dir,
+        capture_output=True,
+    )
+    already_merged = merge_check.returncode == 0
+
+    if not already_merged:
+        if not _git_step(f"checkout {base_branch}", project_dir, "checkout", base_branch):
+            raise SystemExit(1)
+        if not _git_step(f"merge {branch}", project_dir, "merge", "--no-ff", branch, "-m", f"owloop: merge {branch}"):
+            raise SystemExit(1)
+    else:
+        console.print(f"  [dim]{branch} already merged into {base_branch}[/]")
+
+    if not _git_step("push", project_dir, "push", "origin", base_branch):
+        raise SystemExit(1)
+
+    if wt_path and wt_path.exists():
+        # Remove worktree if it exists.
+        subprocess.run(["git", "worktree", "remove", "--force", str(wt_path)], cwd=project_dir, capture_output=True)
+        if wt_path.exists():
+            shutil.rmtree(wt_path, ignore_errors=True)
+
+    # Delete branch if it still exists.
+    branch_exists = subprocess.run(
+        ["git", "show-ref", "--verify", f"refs/heads/{branch.split('/', 1)[1]}"],
+        cwd=project_dir,
+        capture_output=True,
+    ).returncode == 0
+    if branch_exists:
+        short_branch = branch.split("/", 1)[1]
+        if not _git_step(f"delete branch {short_branch}", project_dir, "branch", "-d", short_branch):
+            raise SystemExit(1)
+
+    console.print(f"[{_brand.GREEN}]✓ Session finished.[/]")
+    console.print()
+
+
+@main.command()
+@click.option("--iter", "iter_n", type=int, default=None, help="Show the log for iteration N.")
+@click.option("--events", is_flag=True, default=False, help="Show the last 50 events from events.jsonl.")
+@click.option("--patch", is_flag=True, default=False, help="Show the latest discarded patch.")
+def logs(iter_n: int | None, events: bool, patch: bool) -> None:
+    """Inspect owloop log files."""
+    ascii, no_color, _compact, _verbose = _cli_options()
+    console = Console(no_color=no_color)
+    logs_dir = resolve_logs_dir(Path.cwd())
+
+    if not logs_dir.exists():
+        console.print("[red]Error:[/] No logs directory. Run [bold]owloop run[/] first.")
+        raise SystemExit(1)
+
+    if patch:
+        patches = sorted(logs_dir.glob("iter_*_discarded.patch"))
+        if not patches:
+            console.print("[dim]No discarded patches found.[/]")
+            raise SystemExit(0)
+        latest = patches[-1]
+        console.print(latest.read_text(encoding="utf-8"))
+        raise SystemExit(0)
+
+    if events:
+        events_path = logs_dir / "events.jsonl"
+        if not events_path.is_file():
+            console.print("[red]Error:[/] events.jsonl not found.")
+            raise SystemExit(1)
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+        for line in lines[-50:]:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+                ts = record.get("ts", "—")
+                kind = record.get("kind", "—")
+                data = record.get("data", {})
+                console.print(f"[{ts}] {kind}: {data}")
+            except json.JSONDecodeError:
+                console.print(line)
+        raise SystemExit(0)
+
+    if iter_n is not None:
+        candidates = [p for p in logs_dir.glob("iter_*.log") if str(iter_n) in p.name]
+        if not candidates:
+            console.print(f"[red]Error:[/] No log found for iteration {iter_n}.")
+            raise SystemExit(1)
+        target = sorted(candidates)[-1]
+        console.print(target.read_text(encoding="utf-8"))
+        raise SystemExit(0)
+
+    # Default: latest iteration log
+    log_files = sorted(logs_dir.glob("iter_*.log"))
+    if not log_files:
+        console.print("[dim]No iteration logs found.[/]")
+        raise SystemExit(0)
+    latest = log_files[-1]
+    console.print(latest.read_text(encoding="utf-8"))
 
 
 @main.command()
@@ -1374,9 +1922,12 @@ def spec_from_issue(
     dry_run: bool,
 ) -> None:
     """Generate a spec draft from a GitHub issue."""
-    _ascii, no_color, _compact, _verbose = _cli_options()
+    ascii, no_color, _compact, _verbose = _cli_options()
     console = Console(no_color=no_color)
     project_dir = Path.cwd()
+
+    _ensure_init(project_dir, console, ascii=ascii)
+
     converter = IssueToSpecConverter(project_dir)
 
     try:
@@ -1406,6 +1957,24 @@ def spec_from_issue(
     console.print()
     console.print(f"[{_brand.GREEN}]✓ Spec generated:[/] {spec_path}")
     console.print()
+
+    if sys.stdin.isatty() and not dry_run:
+        console.print("\n[bold]Run owloop check on this spec?[/] [y/N] ", end="")
+        try:
+            reply = input().strip().lower() or "n"
+        except EOFError:
+            reply = "n"
+        if reply.startswith("y"):
+            subprocess.run([sys.argv[0], "check"], cwd=project_dir)
+            return
+
+        console.print("\n[bold]Start owloop run now?[/] [y/N] ", end="")
+        try:
+            reply = input().strip().lower() or "n"
+        except EOFError:
+            reply = "n"
+        if reply.startswith("y"):
+            subprocess.run([sys.argv[0], "run"], cwd=project_dir)
 
 
 if __name__ == "__main__":
