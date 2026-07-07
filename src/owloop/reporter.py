@@ -131,6 +131,11 @@ class ConsoleReporter:
                 f"[{_brand.RED}]{self._mark('fail')} verification gate failed "
                 f"({data.get('failed', 0)} of {data.get('passed', 0) + data.get('failed', 0)} checks)[/]"
             )
+        elif kind == "soft_failure":
+            c.print(
+                f"[{_brand.AMBER}]{self._mark('warn')} soft failure: functional checks passed but a "
+                f"meta-check failed — work is preserved for review ({data.get('spec')})[/]"
+            )
         elif kind == "iteration_rolled_back":
             c.print(f"[{_brand.CYAN}]{self._mark('info')} rolled back to {data.get('to_commit')} (failed iteration discarded)[/]")
         elif kind == "iteration_exhausted":

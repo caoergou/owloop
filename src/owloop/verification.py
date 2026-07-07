@@ -32,6 +32,10 @@ class GateResult:
     passed_count: int
     failed_count: int
     failures: list[dict[str, Any]] = field(default_factory=list)
+    # True when functional checks pass but a structural/meta check (e.g. grep)
+    # failed. The engine should surface the diff for human review rather than
+    # blindly rolling back work that may be correct.
+    soft_failure: bool = False
 
 
 def run_commands(
@@ -67,13 +71,18 @@ def _tail_output(result: subprocess.CompletedProcess[str]) -> str:
 
 def run_acceptance_criteria(
     cwd: Path, specs_dir: Path, spec_name: str | None
-) -> tuple[int, int, list[dict[str, Any]]]:
-    """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
+) -> tuple[int, int, list[dict[str, Any]], int, int]:
+    """Run a spec's Acceptance Criteria shell commands; count passes vs failures.
+
+    Returns ``(passed, failed, failures, code_failed, meta_failed)`` where
+    ``code_failed`` counts functional checks (tests, lints) and ``meta_failed``
+    counts structural checks such as ``grep ... → no output``.
+    """
     if not spec_name:
-        return 0, 0, []
+        return 0, 0, [], 0, 0
 
     criteria = spec_queue.get_acceptance_criteria_commands(specs_dir / spec_name)
-    passed = failed = 0
+    passed = failed = code_failed = meta_failed = 0
     failures: list[dict[str, Any]] = []
     for criterion in criteria:
         result = subprocess.run(  # noqa: S602
@@ -83,13 +92,19 @@ def run_acceptance_criteria(
             # grep-style tools exit 1 when they find no matches; the expectation
             # is about empty stdout, not the exit code.
             ok = result.stdout.strip() == "" and result.returncode in (0, 1)
+            is_meta = True
         else:
             ok = result.returncode == 0
+            is_meta = False
 
         if ok:
             passed += 1
         else:
             failed += 1
+            if is_meta:
+                meta_failed += 1
+            else:
+                code_failed += 1
             failures.append(
                 {
                     "command": criterion.command,
@@ -97,7 +112,7 @@ def run_acceptance_criteria(
                     "output": _tail_output(result),
                 }
             )
-    return passed, failed, failures
+    return passed, failed, failures, code_failed, meta_failed
 
 
 def _restore_exclusions(cwd: Path, specs_dir: Path, spec_name: str | None) -> None:
@@ -153,7 +168,9 @@ def run_gate(
     if guarded_hash(cwd, specs_dir, spec_name) != guard_before:
         return GateResult(passed=False, tampered=True, passed_count=0, failed_count=0)
 
-    acc_passed, acc_failed, acc_failures = run_acceptance_criteria(cwd, specs_dir, spec_name)
+    acc_passed, acc_failed, acc_failures, acc_code_failed, acc_meta_failed = run_acceptance_criteria(
+        cwd, specs_dir, spec_name
+    )
     _restore_exclusions(cwd, specs_dir, spec_name)
 
     bp_commands = [cmd.command for cmd in load_backpressure(cwd)]
@@ -162,10 +179,15 @@ def run_gate(
 
     passed_count = acc_passed + bp_passed
     failed_count = acc_failed + bp_failed
+    # Soft failure: functional checks (code + backpressure) pass, but a
+    # structural/meta check failed. Surface for human review instead of rolling
+    # back potentially-correct work.
+    soft_failure = failed_count > 0 and acc_code_failed == 0 and bp_failed == 0
     return GateResult(
         passed=failed_count == 0,
         tampered=False,
         passed_count=passed_count,
         failed_count=failed_count,
         failures=acc_failures + bp_failures,
+        soft_failure=soft_failure,
     )

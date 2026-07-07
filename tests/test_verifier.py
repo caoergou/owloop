@@ -157,13 +157,15 @@ def test_run_acceptance_criteria_treats_grep_no_match_as_pass(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    passed, failed, failures = verification.run_acceptance_criteria(
+    passed, failed, failures, code_failed, meta_failed = verification.run_acceptance_criteria(
         tmp_path, specs, "01-test.md"
     )
 
     assert passed == 1
     assert failed == 0
     assert failures == []
+    assert code_failed == 0
+    assert meta_failed == 0
 
 
 def test_run_acceptance_criteria_no_output_fails_on_nonempty_stdout(tmp_path: Path) -> None:
@@ -178,13 +180,15 @@ def test_run_acceptance_criteria_no_output_fails_on_nonempty_stdout(tmp_path: Pa
         encoding="utf-8",
     )
 
-    passed, failed, failures = verification.run_acceptance_criteria(
+    passed, failed, failures, code_failed, meta_failed = verification.run_acceptance_criteria(
         tmp_path, specs, "01-test.md"
     )
 
     assert passed == 0
     assert failed == 1
     assert len(failures) == 1
+    assert code_failed == 0
+    assert meta_failed == 1
 
 
 def test_run_gate_restores_excluded_tracked_files(tmp_path: Path) -> None:

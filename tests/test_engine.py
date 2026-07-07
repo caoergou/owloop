@@ -852,6 +852,60 @@ def test_no_push_commits_but_skips_remote_push(tmp_path: Path, monkeypatch) -> N
     assert (repo / "agent_change.txt").is_file()
 
 
+def test_soft_failure_preserves_work_when_meta_check_fails(tmp_path: Path, monkeypatch) -> None:
+    """A functional pass + meta-check fail should stop for review without rollback."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "marker.txt").write_text("removed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add marker"], cwd=repo, check=True, capture_output=True)
+
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n"
+        "## Acceptance Criteria\n"
+        "- `true`\n"
+        "- `grep removed marker.txt` → no output\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    original_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    adapter = _FileWritingAdapter(
+        repo,
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ],
+    )
+    engine = _make_engine(repo, adapter)
+
+    soft_events: list[dict] = []
+    engine.on_event = lambda k, d: soft_events.append(d) if k == "soft_failure" else None
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "soft_failure"
+    assert summary.terminal_state == "soft_failure"
+    assert "**Status**: COMPLETE" not in (repo / ".owloop" / "specs" / "01-test.md").read_text()
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert head_after == original_head  # no rollback
+    assert (repo / "agent_change.txt").is_file()
+    assert len(soft_events) == 1
+    assert "grep removed marker.txt" in soft_events[0]["commands"]
+
+
 class _InterruptingAdapter(MockAdapter):
     """Adapter that completes one iteration, then simulates Ctrl+C on the next."""
 

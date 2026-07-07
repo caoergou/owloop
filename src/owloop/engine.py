@@ -116,6 +116,7 @@ class TerminalState(str, Enum):
     TAMPERED = "tampered"
     INTERRUPTED = "interrupted"
     FAILED = "failed"
+    SOFT_FAILURE = "soft_failure"
 
     def __str__(self) -> str:  # so f-strings / json render the value, not "TerminalState.SUCCESS"
         return self.value
@@ -143,6 +144,7 @@ class StopReason(str, Enum):
     INTERRUPTED = "interrupted"
     PREFLIGHT_FAILED = "preflight_failed"
     DIRTY_WORKSPACE_DECLINED = "dirty_workspace_declined"
+    SOFT_FAILURE = "soft_failure"
 
     def __str__(self) -> str:
         return self.value
@@ -182,6 +184,7 @@ _STOPPED_REASON_TO_STATE = {
     StopReason.INTERRUPTED: TerminalState.INTERRUPTED,
     StopReason.PREFLIGHT_FAILED: TerminalState.FAILED,
     StopReason.DIRTY_WORKSPACE_DECLINED: TerminalState.FAILED,
+    StopReason.SOFT_FAILURE: TerminalState.SOFT_FAILURE,
 }
 
 
@@ -1084,7 +1087,7 @@ class OwloopEngine:
 
     def _run_verification_gate(
         self, iteration: int, spec_name: str | None, guard_before: str
-    ) -> tuple[bool, bool, list[dict[str, Any]]]:
+    ) -> verification.GateResult:
         """Deterministically verify an iteration outside the agent's control.
 
         Delegates to the shared gate in ``verification.py`` (the single
@@ -1099,13 +1102,21 @@ class OwloopEngine:
 
         if result.tampered:
             self._emit("spec_tampered", iteration=iteration, spec=spec_name)
-            return False, True, []
+            return verification.GateResult(passed=False, tampered=True, passed_count=0, failed_count=0)
 
         if result.passed:
             self._emit(
                 "verification_gate_passed",
                 iteration=iteration,
                 passed=result.passed_count,
+            )
+        elif result.soft_failure:
+            self._emit(
+                "verification_gate_soft_failure",
+                iteration=iteration,
+                passed=result.passed_count,
+                failed=result.failed_count,
+                commands=[f["command"] for f in result.failures],
             )
         else:
             self._emit(
@@ -1115,7 +1126,7 @@ class OwloopEngine:
                 failed=result.failed_count,
                 commands=[f["command"] for f in result.failures],
             )
-        return result.passed, False, result.failures
+        return result
 
     def _head(self) -> str:
         return str(self._run_git("rev-parse", "HEAD").stdout).strip()
@@ -1545,7 +1556,7 @@ class OwloopEngine:
 
                 if self.config.dry_run:
                     self._append_run_note(iteration, result.success, result.summary)
-                    acceptance_passed, acceptance_failed, _ = verification.run_acceptance_criteria(
+                    acceptance_passed, acceptance_failed, _, _, _ = verification.run_acceptance_criteria(
                         self.cwd, self.specs_dir, active_spec
                     )
                     current_head = self._head()
@@ -1582,23 +1593,26 @@ class OwloopEngine:
                     break
 
                 # ── Deterministic verification gate (engine-owned) ──
-                gate_passed = False
-                tampered = False
-                gate_failures: list[dict[str, Any]] = []
+                gate_result = verification.GateResult(passed=False, tampered=False, passed_count=0, failed_count=0)
                 if result.promise_state == "DONE":
-                    gate_passed, tampered, gate_failures = self._run_verification_gate(
+                    gate_result = self._run_verification_gate(
                         iteration, active_spec, guard_before
                     )
                     # Shell-first ordering: the expensive LLM verifier runs only
                     # on work that already survived the mechanical gate.
                     if (
-                        gate_passed
+                        gate_result.passed
                         and self.verifier_adapter is not None
                         and not self.config.use_subagents
                     ):
-                        gate_passed = self._apply_llm_verifier(iteration, result)
+                        gate_result = verification.GateResult(
+                            passed=self._apply_llm_verifier(iteration, result),
+                            tampered=False,
+                            passed_count=gate_result.passed_count,
+                            failed_count=gate_result.failed_count,
+                        )
 
-                if gate_passed:
+                if gate_result.passed:
                     # Verified success: only now does the engine commit, mark the
                     # spec complete, and push — never the agent.
                     consecutive_failures = 0
@@ -1656,8 +1670,22 @@ class OwloopEngine:
                     # iteration is minutes of work; waiting here buys nothing.
                     continue
 
+                # ── Soft failure: functional checks pass, meta-check fails ──
+                if gate_result.soft_failure:
+                    self._append_run_note(iteration, False, result.summary)
+                    diff = self._run_git("diff", last_good, "--", ".", ":!.owloop")
+                    self._emit(
+                        "soft_failure",
+                        iteration=iteration,
+                        spec=active_spec,
+                        diff=diff.stdout or "",
+                        commands=[f["command"] for f in gate_result.failures],
+                    )
+                    stopped_reason = StopReason.SOFT_FAILURE
+                    break
+
                 # ── Failure: classify, record feedback, roll back, stop on a stall ──
-                if tampered:
+                if gate_result.tampered:
                     failure_reason = FailureReason.TAMPERED
                 elif result.timed_out:
                     failure_reason = FailureReason.TIMEOUT
@@ -1676,7 +1704,7 @@ class OwloopEngine:
                 self._append_run_note(iteration, False, result.summary)
                 # Written before rollback; .owloop/ is excluded from the reset,
                 # so the next iteration's prompt starts from this diagnosis.
-                self._write_failure_feedback(iteration, failure_reason, result, gate_failures)
+                self._write_failure_feedback(iteration, failure_reason, result, gate_result.failures)
                 self._rollback_iteration(iteration, last_good)
 
                 consecutive_failures += 1

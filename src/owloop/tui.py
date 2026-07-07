@@ -343,6 +343,12 @@ class OwloopTUI:
             s.current_action = "Maximum run time reached"
             self._log(f"⏱ reached maximum run time ({data['minutes']} min), stopping loop")
             self._flash("⏱ time up", f"bold {AMBER}")
+        elif kind == "soft_failure":
+            s.done = True
+            s.phase = "stuck"
+            s.current_action = f"Soft failure on {data.get('spec')} — review preserved diff"
+            self._log(f"⚠ soft failure on {data.get('spec')}: meta-check failed; work preserved for review")
+            self._flash("⚠ soft failure — review diff", f"bold {AMBER}")
         elif kind == "push_retry":
             self._log(f"push failed, creating remote branch {data['branch']}...")
         elif kind == "push_skipped":
