@@ -92,7 +92,7 @@ def test_run_dry_run_flag_forwards_to_engine_runner():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--dry-run"])
             assert result.exit_code == 0, result.output
             mock_engine.assert_called_once()
@@ -106,7 +106,7 @@ def test_run_one_shot_alias_forwards_dry_run():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--one-shot"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -119,7 +119,7 @@ def test_run_without_dry_run_flag_defaults_false():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -132,7 +132,7 @@ def test_run_no_tui_flag_forwards_to_engine_runner():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--no-tui"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -145,7 +145,7 @@ def test_run_plain_alias_forwards_no_tui():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--plain"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -158,7 +158,7 @@ def test_run_without_no_tui_flag_defaults_false():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -178,7 +178,7 @@ def test_run_parses_max_tokens_per_iteration():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--max-tokens-per-iteration", "10k"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -191,7 +191,7 @@ def test_run_without_max_tokens_per_iteration_defaults_zero():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -216,10 +216,10 @@ def test_run_engine_no_tui_bypasses_tui_and_uses_console_reporter():
     fake_engine.run.return_value = summary
 
     with (
-        patch("owloop.cli.get_adapter"),
-        patch("owloop.cli.OwloopEngine", return_value=fake_engine) as mock_engine_cls,
-        patch("owloop.cli.OwloopTUI") as mock_tui_cls,
-        patch("owloop.cli.ConsoleReporter") as mock_reporter_cls,
+        patch("owloop.commands.run.get_adapter"),
+        patch("owloop.commands.run.OwloopEngine", return_value=fake_engine) as mock_engine_cls,
+        patch("owloop.commands.run.OwloopTUI") as mock_tui_cls,
+        patch("owloop.commands.run.ConsoleReporter") as mock_reporter_cls,
         patch("sys.stdout.isatty", return_value=True),
     ):
         _run_engine(0, True, "claude-model", "claude", no_tui=True)
@@ -393,9 +393,9 @@ def test_go_forwards_options_to_engine_runner():
 
         with (
             patch.object(_NamedTextIOWrapper, "isatty", return_value=True),
-            patch("owloop.cli._run_engine") as mock_engine,
-            patch("owloop.cli.SpecGenerator") as mock_gen,
-            patch("owloop.cli.get_adapter") as mock_adapter,
+            patch("owloop.commands.go._run_engine") as mock_engine,
+            patch("owloop.commands.go.SpecGenerator") as mock_gen,
+            patch("owloop.commands.go.get_adapter") as mock_adapter,
         ):
             mock_gen.return_value.generate.return_value = []
             mock_adapter.return_value = MagicMock()

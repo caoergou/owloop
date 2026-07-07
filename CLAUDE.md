@@ -14,9 +14,14 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 
 | Path | Purpose |
 |---|---|
-| `src/owloop/cli.py` | Python CLI (`init`, `run`, `go`, `spec`, `check`, `status`, `finish`, `logs`, `report`, `agents`, `discover`, `spec-from-issue`, `version`), rich console output |
+| `src/owloop/cli.py` | Thin CLI entry point — defines the click `main` group and wires commands |
+| `src/owloop/commands/` | One module per subcommand (`run`, `go`, `spec`, `check`, `status`, `finish`, `logs`, `report`, `agents`, `discover`, `spec-from-issue`, `version`, `init`) |
+| `src/owloop/cli_options.py` | Shared click options/decorators (`--model`, `--max-tokens`, etc.) |
+| `src/owloop/cli_display.py` | Banner, progress bar, spec table, `AgentStreamDisplay`, and other console helpers |
+| `src/owloop/cli_config.py` | Persistent config path and default merging for `.owloop/config.toml` |
+| `src/owloop/sessions.py` | Latest session discovery and worktree path lookup |
 | `src/owloop/engine.py` | Python loop engine — spawns agent per iteration, manages worktree, drives spec queue |
-| `src/owloop/config.py` | Persistent `.owloop/config.toml` `[run]` loader and CLI-default merging |
+| `src/owloop/config.py` | Persistent `.owloop/config.toml` `[run]` loader and validation |
 | `src/owloop/verification.py` | The shared deterministic gate (acceptance criteria + backpressure via `subprocess`, tamper hash) used by both engine and parallel orchestrator |
 | `src/owloop/parallel.py` | File-disjoint parallel workers (`owloop run --workers N`): per-worker worktrees, shared gate, merge-back |
 | `src/owloop/notifications.py` | Best-effort completion notifications (webhook/desktop) when a run stops |

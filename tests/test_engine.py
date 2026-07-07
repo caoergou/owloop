@@ -943,7 +943,7 @@ def test_gate_failure_writes_failure_feedback(tmp_path: Path, monkeypatch) -> No
     specs = repo / ".owloop" / "specs"
     specs.mkdir(parents=True)
     (specs / "01-test.md").write_text(
-        "# Spec\n\n## Acceptance Criteria\n- check: `echo broken-thing >&2; exit 3`\n",
+        """# Spec\n\n## Acceptance Criteria\n- check: `python -c "import sys; sys.stderr.write('broken-thing'); sys.exit(3)"`\n""",
         encoding="utf-8",
     )
     monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
@@ -964,7 +964,10 @@ def test_gate_failure_writes_failure_feedback(tmp_path: Path, monkeypatch) -> No
 
     feedback = (repo / ".owloop" / "last-failure.md").read_text(encoding="utf-8")
     assert "verification_failed" in feedback
-    assert "echo broken-thing >&2; exit 3" in feedback  # the failing command
+    assert (
+        "python -c \"import sys; sys.stderr.write('broken-thing'); sys.exit(3)\""
+        in feedback
+    )  # the failing command
     assert "(exit 3)" in feedback  # its exit code
     assert "broken-thing" in feedback  # its output tail
 
