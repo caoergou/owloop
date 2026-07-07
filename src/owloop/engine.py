@@ -19,7 +19,6 @@ so the engine itself never shells out to `claude` directly.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import re
 import shutil
@@ -34,9 +33,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from owloop import notifications, spec_queue
+from owloop import notifications, spec_queue, verification
 from owloop.adapters import DEFAULT_IDLE_TIMEOUT, AgentAdapter, AgentResult
-from owloop.backpressure import load_backpressure
 from owloop.learnings import (
     append_learning,
     extract_learnings,
@@ -1021,97 +1019,46 @@ class OwloopEngine:
                 self._emit("push_retry", branch=branch)
                 self._run_git("push", "-u", "origin", branch)
 
-    def _run_commands(self, commands: list[str]) -> tuple[int, int, list[dict[str, Any]]]:
-        """Run shell commands from the engine (not the agent).
 
-        Returns ``(passed, failed, failures)`` where each failure records the
-        command, its exit code, and an output tail — the raw material for the
-        failure-feedback file that primes the next iteration's retry.
-        """
-        passed = 0
-        failures: list[dict[str, Any]] = []
-        for command in commands:
-            result = subprocess.run(  # noqa: S602 - spec-authored commands, same trust model as the agent's own execution
-                command, shell=True, cwd=self.cwd, capture_output=True, text=True,
-            )
-            if result.returncode == 0:
-                passed += 1
-            else:
-                output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
-                tail = "\n".join(output.splitlines()[-30:])[-2000:]
-                failures.append(
-                    {"command": command, "returncode": result.returncode, "output": tail}
-                )
-        return passed, len(failures), failures
-
-    def _run_acceptance_criteria(
-        self, spec_name: str | None
-    ) -> tuple[int, int, list[dict[str, Any]]]:
-        """Run a spec's Acceptance Criteria shell commands; count passes vs failures."""
-        if not spec_name:
-            return 0, 0, []
-        commands = spec_queue.get_acceptance_criteria_commands(self.specs_dir / spec_name)
-        return self._run_commands(commands)
 
     def _guarded_hash(self, spec_name: str | None) -> str:
-        """Hash the spec sections + backpressure file the agent must not edit.
-
-        The engine snapshots this before an iteration and re-checks it after,
-        so an agent that rewrites its own success conditions (acceptance
-        criteria, verification section, or the project's backpressure
-        commands) is caught regardless of whether the commands then "pass".
-        """
-        h = hashlib.sha256()
-        if spec_name:
-            section = spec_queue.get_acceptance_criteria_section(self.specs_dir / spec_name)
-            h.update(section.encode("utf-8"))
-        backpressure = resolve_owloop_dir(self.cwd) / "backpressure.json"
-        if backpressure.is_file():
-            h.update(backpressure.read_bytes())
-        return h.hexdigest()
+        """Hash the spec sections + backpressure file the agent must not edit."""
+        return verification.guarded_hash(self.cwd, self.specs_dir, spec_name)
 
     def _run_verification_gate(
         self, iteration: int, spec_name: str | None, guard_before: str
     ) -> tuple[bool, bool, list[dict[str, Any]]]:
         """Deterministically verify an iteration outside the agent's control.
 
-        Returns ``(passed, tampered, failures)``. The engine — never the agent
-        — runs the spec's acceptance-criteria commands and the project's
-        backpressure commands via ``subprocess`` and lets exit codes decide.
-        A tampered guard region fails the gate immediately with a distinct
-        ``spec_tampered`` event, regardless of command results. ``failures``
-        carries per-command details for the next iteration's failure feedback.
+        Delegates to the shared gate in ``verification.py`` (the single
+        definition of "verified" used by both the sequential engine and the
+        parallel orchestrator) and emits the gate events. ``failures`` carries
+        per-command details for the next iteration's failure feedback. A
+        tampered guard region fails the iteration with a distinct
+        ``spec_tampered`` event.
         """
         self._emit("verification_gate_start", iteration=iteration, spec=spec_name)
+        result = verification.run_gate(self.cwd, self.specs_dir, spec_name, guard_before)
 
-        if self._guarded_hash(spec_name) != guard_before:
+        if result.tampered:
             self._emit("spec_tampered", iteration=iteration, spec=spec_name)
             return False, True, []
 
-        acc_passed, acc_failed, acc_failures = self._run_acceptance_criteria(spec_name)
-        bp_commands = [cmd.command for cmd in load_backpressure(self.cwd)]
-        bp_passed, bp_failed, bp_failures = self._run_commands(bp_commands)
-
-        passed_count = acc_passed + bp_passed
-        failed_count = acc_failed + bp_failed
-        failures = acc_failures + bp_failures
-        gate_ok = failed_count == 0
-
-        if gate_ok:
+        if result.passed:
             self._emit(
                 "verification_gate_passed",
                 iteration=iteration,
-                passed=passed_count,
+                passed=result.passed_count,
             )
         else:
             self._emit(
                 "verification_gate_failed",
                 iteration=iteration,
-                passed=passed_count,
-                failed=failed_count,
-                commands=[f["command"] for f in failures],
+                passed=result.passed_count,
+                failed=result.failed_count,
+                commands=[f["command"] for f in result.failures],
             )
-        return gate_ok, False, failures
+        return result.passed, False, result.failures
 
     def _head(self) -> str:
         return str(self._run_git("rev-parse", "HEAD").stdout).strip()
@@ -1541,8 +1488,8 @@ class OwloopEngine:
 
                 if self.config.dry_run:
                     self._append_run_note(iteration, result.success, result.summary)
-                    acceptance_passed, acceptance_failed, _ = self._run_acceptance_criteria(
-                        active_spec
+                    acceptance_passed, acceptance_failed, _ = verification.run_acceptance_criteria(
+                        self.cwd, self.specs_dir, active_spec
                     )
                     current_head = self._head()
                     if current_head and current_head != dry_run_original_head:

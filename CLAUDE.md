@@ -16,6 +16,9 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 |---|---|
 | `src/owloop/cli.py` | Python CLI (`init` / `run` / `plan` / `status` / `version` subcommands), rich console output |
 | `src/owloop/engine.py` | Python loop engine — spawns agent per iteration, manages worktree, drives spec queue |
+| `src/owloop/verification.py` | The shared deterministic gate (acceptance criteria + backpressure via `subprocess`, tamper hash) used by both engine and parallel orchestrator |
+| `src/owloop/parallel.py` | File-disjoint parallel workers (`owloop run --workers N`): per-worker worktrees, shared gate, merge-back |
+| `src/owloop/notifications.py` | Best-effort completion notifications (webhook/desktop) when a run stops |
 | `src/owloop/adapters.py` | Agent adapter abstraction (`ClaudeCodeAdapter`, `KimiCodeAdapter`, `MockAdapter`) |
 | `src/owloop/presets.py` | Agent preset registry — per-tool launch commands/env as data (user presets via `.owloop/agents.toml`) |
 | `src/owloop/acp.py` | `AcpAdapter` — one Agent Client Protocol client covering all non-native agents |
@@ -63,3 +66,4 @@ owloop is a spec-driven autonomous coding loop for Claude Code — "Your code ev
 - **Named terminal states, never infinite retry** — runs stop with a `TerminalState` (`success` / `blocked` / `decide` / `stalled` / `exhausted` / `tampered`). A stall (N consecutive failures or the same error N times) hard-stops with `stalled`; `--keep-retrying` restores the old warn-and-back-off behavior. `exhausted` (hit an iteration/duration/token budget) must never be rendered or exit-coded as success.
 - **Don't stop silently** — an unattended run that halts at 2 a.m. must be able to reach the operator. `owloop run --notify-webhook URL` / `--notify-desktop` (or `OWLOOP_NOTIFY_WEBHOOK`) fire a best-effort completion notification (`notifications.py`, zero deps); a failed notification never changes the run outcome.
 - **Empty queue ≠ goal met** — `owloop run --converge N` runs up to N post-queue audit sweeps that compare the codebase against the specs' collective intent and append *linted* gap specs until it converges (#36). The spec-generation clarify gate records unanswered questions as a `## Assumptions` section when non-interactive.
+- **Parallelism is file-disjoint, not lock-coordinated** — `owloop run --workers N` schedules specs whose declared `## Files` scopes don't overlap (`spec_queue.get_parallel_batch`), runs each in its own worktree via `parallel.py`, verifies with the *same* shared gate (`verification.run_gate`), and merges the passed branches back — disjoint scopes mean those merges never conflict. A spec with no `## Files` scope runs alone (correctness over parallelism). Never add lock coordination; invest in decomposition instead. The single verification gate lives in `verification.py` so the engine and the orchestrator grade work identically.
