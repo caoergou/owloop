@@ -28,7 +28,7 @@ from pathlib import Path
 
 from owloop import notifications, spec_queue, verification
 from owloop.adapters import AgentAdapter
-from owloop.engine import RunSummary, StopReason, classify_terminal_state
+from owloop.engine import RunSummary, StopReason, classify_terminal_state, spec_commit_subject
 from owloop.paths import resolve_owloop_dir, resolve_specs_dir
 from owloop.promise import parse_promise_signal
 
@@ -151,7 +151,7 @@ class ParallelOrchestrator:
         if source.is_dir():
             shutil.copytree(source, wt_path / ".owloop", dirs_exist_ok=True)
 
-        self._emit("worker_start", spec=spec_name, worker=index, branch=branch)
+        self._emit("worker_start", spec_name=spec_name, worker_id=index, branch=branch)
 
         wt_specs = resolve_specs_dir(wt_path)
         guard_before = verification.guarded_hash(wt_path, wt_specs, spec_name)
@@ -167,17 +167,17 @@ class ParallelOrchestrator:
         state = parsed[0] if parsed else ""
 
         if state != "DONE":
-            self._emit("worker_no_done", spec=spec_name, worker=index)
+            self._emit("worker_no_done", spec_name=spec_name, worker_id=index)
             return WorkerResult(spec_name, False, branch, wt_path, tokens_used=tokens,
                                 reason="no_done_signal")
 
         gate = verification.run_gate(wt_path, wt_specs, spec_name, guard_before)
         if gate.tampered:
-            self._emit("spec_tampered", spec=spec_name, worker=index)
+            self._emit("spec_tampered", spec_name=spec_name, worker_id=index)
             return WorkerResult(spec_name, False, branch, wt_path, tampered=True,
                                 tokens_used=tokens, reason="tampered")
         if not gate.passed:
-            self._emit("verification_gate_failed", spec=spec_name, worker=index,
+            self._emit("verification_gate_failed", spec_name=spec_name, worker_id=index,
                        failed=gate.failed_count)
             return WorkerResult(spec_name, False, branch, wt_path, tokens_used=tokens,
                                 reason="verification_failed")
@@ -185,10 +185,11 @@ class ParallelOrchestrator:
         # Verified: mark complete + commit inside the worker's worktree.
         spec_queue.mark_spec_complete(wt_specs / spec_name)
         self._git("add", "-A", cwd=wt_path)
-        self._git("reset", "--quiet", "--", ".owloop/run-notes.md", ".owloop/logs",
-                  ".owloop/PROMPT_build.md", cwd=wt_path)
-        self._git("commit", "-m", f"owloop: complete {spec_name}", cwd=wt_path)
-        self._emit("verification_gate_passed", spec=spec_name, worker=index,
+        # Unstage all owloop-internal metadata so it never enters project history.
+        self._git("reset", "--quiet", "--", ".owloop/", cwd=wt_path)
+        subject = spec_commit_subject(spec_name, wt_specs / spec_name)
+        self._git("commit", "-m", subject, cwd=wt_path)
+        self._emit("verification_gate_passed", spec_name=spec_name, worker_id=index,
                    passed=gate.passed_count)
         return WorkerResult(spec_name, True, branch, wt_path, tokens_used=tokens)
 
@@ -281,11 +282,15 @@ class ParallelOrchestrator:
             merged = self._git("merge", "--no-ff", "-m",
                                f"owloop: merge {r.spec_name}", r.branch)
             if merged.returncode == 0:
-                self._emit("worker_merged", spec=r.spec_name, branch=r.branch)
+                # The worker branch intentionally does not include .owloop/
+                # metadata, so mark the spec complete in the base repo so the
+                # queue sees progress and we don't loop forever.
+                spec_queue.mark_spec_complete(self.specs_dir / r.spec_name)
+                self._emit("worker_merged", spec_name=r.spec_name, branch=r.branch)
             else:
                 # Should not happen for disjoint scopes; abort and surface it.
                 self._git("merge", "--abort")
-                self._emit("worker_merge_conflict", spec=r.spec_name, branch=r.branch)
+                self._emit("worker_merge_conflict", spec_name=r.spec_name, branch=r.branch)
 
     def _summary(
         self, stopped_reason: StopReason, *, rounds: int, branch: str,

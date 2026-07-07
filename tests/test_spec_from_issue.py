@@ -37,7 +37,8 @@ TEMPLATE_CONTENT = (
 
 def _write_template(project_dir: Path) -> None:
     """Write a minimal spec template for testing."""
-    template_path = project_dir / "templates" / "spec-template.md"
+    from owloop.paths import resolve_templates_dir
+    template_path = resolve_templates_dir(project_dir) / "spec-template.md"
     template_path.parent.mkdir(parents=True, exist_ok=True)
     template_path.write_text(TEMPLATE_CONTENT, encoding="utf-8")
 
@@ -280,7 +281,10 @@ def test_cli_spec_from_issue_dry_run(monkeypatch: pytest.MonkeyPatch):
     )
 
     with runner.isolated_filesystem() as fs:
-        _write_template(Path(fs))
+        project_dir = Path(fs)
+        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
+        (project_dir / ".owloop").mkdir(parents=True)
+        _write_template(project_dir)
         result = runner.invoke(main, ["spec-from-issue", "--dry-run", "42", "--repo", "acme/corp"])
 
     assert result.exit_code == 0, result.output
@@ -306,16 +310,20 @@ def test_cli_spec_from_issue_writes_spec(monkeypatch: pytest.MonkeyPatch):
 
     with runner.isolated_filesystem() as fs:
         project_dir = Path(fs)
+        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
+        (project_dir / ".owloop").mkdir(parents=True)
         _write_template(project_dir)
         result = runner.invoke(main, ["spec-from-issue", "42", "--repo", "acme/corp"])
         assert result.exit_code == 0, result.output
         assert "Spec generated" in result.output
-        assert (project_dir / "specs" / "001-add-dark-mode.md").exists()
+        assert (project_dir / ".owloop" / "specs" / "001-add-dark-mode.md").exists()
 
 
 def test_cli_spec_from_issue_missing_repo():
     runner = CliRunner()
-    with runner.isolated_filesystem():
+    with runner.isolated_filesystem() as fs:
+        project_dir = Path(fs)
+        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
         result = runner.invoke(main, ["spec-from-issue", "42"])
     assert result.exit_code == 1
     assert "Could not determine" in result.output
@@ -338,7 +346,9 @@ def test_cli_spec_from_issue_missing_template(monkeypatch: pytest.MonkeyPatch):
         IssueToSpecConverter, "from_github", staticmethod(lambda issue, repo=None: fake_from_github(issue, repo))
     )
 
-    with runner.isolated_filesystem():
+    with runner.isolated_filesystem() as fs:
+        project_dir = Path(fs)
+        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True)
         result = runner.invoke(main, ["spec-from-issue", "42", "--repo", "acme/corp"])
 
     assert result.exit_code == 1
