@@ -1694,9 +1694,28 @@ class OwloopEngine:
             dry_run_report=dry_run_report,
         )
         self._write_summary(summary)
+        self._generate_report()
         self._notify(summary)
         self._close_append_handles()
         return summary
+
+    def _generate_report(self) -> None:
+        """Generate a static HTML report inside the worktree (best-effort)."""
+        try:
+            from owloop.report import ReportGenerator
+            from owloop.report_ai import ReportInsights
+
+            report_path = self.cwd / ".owloop" / "reports" / "owloop_report_latest.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            generator = ReportGenerator(self.cwd)
+            generator.generate(
+                output_path=report_path,
+                insights=ReportInsights(),
+                use_tailwind=False,
+            )
+        except Exception:
+            # Report generation must never change the run outcome.
+            pass
 
     def _notify(self, summary: RunSummary) -> None:
         """Fire completion notifications for the finished run (best-effort)."""
