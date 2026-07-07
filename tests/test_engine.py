@@ -531,6 +531,46 @@ def test_resolve_worktree_session_resume_falls_back_to_latest_branch(tmp_path: P
     assert branch == "owloop/20260706-xyz789"
 
 
+def test_resolve_worktree_session_includes_spec_slug(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "04-extract-issue-service.md").write_text("# Spec\n", encoding="utf-8")
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert branch.startswith("owloop/")
+    assert "extract-issue-service" in branch
+    assert session_id in branch
+    assert "extract-issue-service" in str(path)
+
+
+def test_resolve_worktree_session_slugifies_title(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "02-Hello World_Refactor.md").write_text("# Spec\n", encoding="utf-8")
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert "hello-world-refactor" in branch
+
+
+def test_session_id_from_branch_supports_legacy_and_slug_formats() -> None:
+    from owloop.engine import OwloopEngine
+
+    assert OwloopEngine._session_id_from_branch("owloop/20260706-abc123") == "abc123"
+    assert OwloopEngine._session_id_from_branch("owloop/20260706-extract-issue-service-abc123") == "abc123"
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 

@@ -723,6 +723,38 @@ class OwloopEngine:
         branches = [b for b in result.stdout.splitlines() if b.strip()]
         return branches[0] if branches else None
 
+    @staticmethod
+    def _slugify(text: str) -> str:
+        """Turn arbitrary text into a git-safe branch slug."""
+        slug = text.lower()
+        slug = re.sub(r"[^a-z0-9]+", "-", slug)
+        slug = slug.strip("-")
+        slug = re.sub(r"-+", "-", slug)
+        return slug[:40]
+
+    _MAX_SLUG_LEN = 40
+
+    def _spec_slug(self) -> str:
+        """Derive a short slug from the active spec or fall back to 'run'."""
+        spec = spec_queue.get_next_ready_spec(self.specs_dir)
+        if spec is None:
+            return "run"
+        # Strip leading numeric prefix (e.g. "01-extract-issue-service").
+        stem = re.sub(r"^\d+-", "", spec.stem)
+        slug = self._slugify(stem)
+        return slug or "run"
+
+    @staticmethod
+    def _session_id_from_branch(branch: str) -> str:
+        """Extract the trailing session id from an owloop branch name.
+
+        Supports both legacy ``owloop/<date>-<session_id>`` and sluggified
+        ``owloop/<date>-<slug>-<session_id>`` formats.
+        """
+        rest = branch.split("/", 1)[1]
+        # The session id is the last '-'-delimited token.
+        return rest.rsplit("-", 1)[-1]
+
     def _resolve_worktree_session(self) -> tuple[str, str, Path]:
         """Pick or resume a session id and derive branch/worktree path.
 
@@ -739,8 +771,8 @@ class OwloopEngine:
                     raise RuntimeError(
                         "--resume requested but no previous owloop session found."
                     )
-                # Branch format: owloop/<date>-<session_id>
-                session_id = branch.split("/", 1)[1].split("-", 1)[1]
+                # Branch format: owloop/<date>-<slug>-<session_id>
+                session_id = self._session_id_from_branch(branch)
                 wt_path = wt_base / f"owloop-{branch.split('/', 1)[1]}"
             else:
                 session_id = session["session_id"]
@@ -752,14 +784,15 @@ class OwloopEngine:
         # Reuse the id ``_init_session`` already resolved (if any) so this run
         # has a single consistent session id, instead of minting a second one.
         session_id = self.session_id or self.config.session_id or uuid.uuid4().hex[:8]
-        branch = f"owloop/{wt_date}-{session_id}"
-        wt_path = wt_base / f"owloop-{wt_date}-{session_id}"
+        slug = self._spec_slug()
+        branch = f"owloop/{wt_date}-{slug}-{session_id}"
+        wt_path = wt_base / f"owloop-{wt_date}-{slug}-{session_id}"
 
         # Guard against an extremely unlikely collision.
         while self._branch_exists(branch):
             session_id = uuid.uuid4().hex[:8]
-            branch = f"owloop/{wt_date}-{session_id}"
-            wt_path = wt_base / f"owloop-{wt_date}-{session_id}"
+            branch = f"owloop/{wt_date}-{slug}-{session_id}"
+            wt_path = wt_base / f"owloop-{wt_date}-{slug}-{session_id}"
 
         self._save_session(session_id, branch, wt_path)
         self.session_id = session_id
