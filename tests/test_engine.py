@@ -1027,3 +1027,40 @@ def test_trim_run_notes_keeps_only_newest_entries() -> None:
     # Under the cap (or unstructured content), nothing is touched.
     assert trim_run_notes("free-form note", max_entries=3) == "free-form note"
     assert trim_run_notes(notes, max_entries=20) == notes
+
+
+def test_is_dirty_ignores_owloop_directory(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# test", encoding="utf-8")
+
+    assert not engine._is_dirty()
+
+
+def test_is_dirty_detects_other_untracked_files(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / "untracked.txt").write_text("hi", encoding="utf-8")
+
+    assert engine._is_dirty()
+
+
+def test_is_dirty_detects_modified_tracked_file(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / "README.md").write_text("modified", encoding="utf-8")
+
+    assert engine._is_dirty()

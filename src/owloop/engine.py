@@ -504,8 +504,29 @@ class OwloopEngine:
     def _is_git_repo(self) -> bool:
         return self._run_git("rev-parse", "--is-inside-work-tree").returncode == 0
 
+    _OWLOOP_OWNED_PREFIXES = (".owloop",)
+
+    def _is_path_owned(self, path: str) -> bool:
+        """Return True if a path belongs to owloop's own state directories."""
+        for prefix in self._OWLOOP_OWNED_PREFIXES:
+            if path == prefix or path.startswith(prefix + "/"):
+                return True
+        return False
+
     def _is_dirty(self) -> bool:
-        return bool(self._run_git("status", "--porcelain").stdout.strip())
+        result = self._run_git("status", "--porcelain")
+        for line in result.stdout.splitlines():
+            # Porcelain format: "XY path" or "XY orig -> dest".
+            path_part = line[3:].strip()
+            # If this is a rename, check both sides.
+            if " -> " in path_part:
+                source, _, dest = path_part.partition(" -> ")
+                if self._is_path_owned(source) and self._is_path_owned(dest):
+                    continue
+            elif self._is_path_owned(path_part):
+                continue
+            return True
+        return False
 
     def _resolve_main_repo_dir(self) -> Path:
         if not self._is_git_repo():
