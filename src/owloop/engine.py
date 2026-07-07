@@ -321,6 +321,9 @@ class EngineConfig:
     # When True, run exactly one iteration, skip push, revert any commit the
     # iteration made, and produce a DryRunReport instead of looping.
     dry_run: bool = False
+    # When True, commit and mark specs complete locally but never push. Useful
+    # for review-before-push workflows or CI dry runs that want real commits.
+    no_push: bool = False
     # Completion notifications: fire a webhook and/or desktop notification when
     # the run stops on an attention-worthy terminal state. None/False = off.
     notify_webhook: str | None = None
@@ -1611,7 +1614,10 @@ class OwloopEngine:
                     self._append_run_note(iteration, True, note_summary)
                     self._mark_spec_complete(active_spec)
                     self._commit_iteration(iteration, active_spec)
-                    self._push(branch)
+                    if self.config.no_push:
+                        self._emit("push_skipped", branch=branch)
+                    else:
+                        self._push(branch)
                     spec_status = self._spec_status()
                     self._emit(
                         "iteration_end",

@@ -146,6 +146,8 @@ class ConsoleReporter:
             c.print(f"[{_brand.AMBER}]{self._mark('clock')} token budget reached ({data['tokens']:,} / {data['limit']:,}), stopping loop[/]")
         elif kind == "push_retry":
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} push failed, creating remote branch {data['branch']}...[/]")
+        elif kind == "push_skipped":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} push skipped (--no-push); commits remain on {data['branch']}[/]")
         elif kind == "interrupted":
             c.print("\n[dim]owloop stopped[/]")
 

@@ -345,6 +345,8 @@ class OwloopTUI:
             self._flash("⏱ time up", f"bold {AMBER}")
         elif kind == "push_retry":
             self._log(f"push failed, creating remote branch {data['branch']}...")
+        elif kind == "push_skipped":
+            self._log(f"push skipped (--no-push); commits remain on {data['branch']}")
         elif kind == "iteration_end":
             if "specs" in data:
                 s.specs = data["specs"]

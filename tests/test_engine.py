@@ -793,6 +793,65 @@ def test_dry_run_reverts_commit_and_skips_push(tmp_path: Path, monkeypatch) -> N
     assert summary.dry_run_report.acceptance_passed == 1
 
 
+class _FileWritingAdapter(MockAdapter):
+    """Adapter that writes a file but leaves committing to the engine."""
+
+    def __init__(self, repo: Path, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._repo = repo
+
+    def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+        (self._repo / "agent_change.txt").write_text("changed", encoding="utf-8")
+        return super().run(prompt, cwd, on_line=on_line)
+
+
+def test_no_push_commits_but_skips_remote_push(tmp_path: Path, monkeypatch) -> None:
+    """--no-push should still commit and complete the spec, but never call _push."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n## Acceptance Criteria\n- `true`\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    original_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    adapter = _FileWritingAdapter(
+        repo,
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ],
+    )
+    engine = _make_engine(repo, adapter, no_push=True)
+
+    push_calls: list[str] = []
+    monkeypatch.setattr(engine, "_push", lambda branch: push_calls.append(branch))
+    skipped: list[str] = []
+    engine.on_event = lambda k, d: skipped.append(k) if k == "push_skipped" else None
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"
+    assert push_calls == []
+    assert "push_skipped" in skipped
+    assert "**Status**: COMPLETE" in (repo / ".owloop" / "specs" / "01-test.md").read_text()
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert head_after != original_head
+    assert (repo / "agent_change.txt").is_file()
+
+
 class _InterruptingAdapter(MockAdapter):
     """Adapter that completes one iteration, then simulates Ctrl+C on the next."""
 
