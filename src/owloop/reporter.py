@@ -131,6 +131,11 @@ class ConsoleReporter:
                 f"[{_brand.RED}]{self._mark('fail')} verification gate failed "
                 f"({data.get('failed', 0)} of {data.get('passed', 0) + data.get('failed', 0)} checks)[/]"
             )
+        elif kind == "soft_failure":
+            c.print(
+                f"[{_brand.AMBER}]{self._mark('warn')} soft failure: functional checks passed but a "
+                f"meta-check failed — work is preserved for review ({data.get('spec')})[/]"
+            )
         elif kind == "iteration_rolled_back":
             c.print(f"[{_brand.CYAN}]{self._mark('info')} rolled back to {data.get('to_commit')} (failed iteration discarded)[/]")
         elif kind == "iteration_exhausted":
@@ -146,6 +151,8 @@ class ConsoleReporter:
             c.print(f"[{_brand.AMBER}]{self._mark('clock')} token budget reached ({data['tokens']:,} / {data['limit']:,}), stopping loop[/]")
         elif kind == "push_retry":
             c.print(f"[{_brand.AMBER}]{self._mark('warn')} push failed, creating remote branch {data['branch']}...[/]")
+        elif kind == "push_skipped":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} push skipped (--no-push); commits remain on {data['branch']}[/]")
         elif kind == "interrupted":
             c.print("\n[dim]owloop stopped[/]")
         elif kind == "parallel_session_info":

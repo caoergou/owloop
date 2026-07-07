@@ -8,6 +8,7 @@ model roundtrip, and only gate-surviving work gets the second opinion.
 import subprocess
 from pathlib import Path
 
+from owloop import verification
 from owloop.adapters import AgentResult, MockAdapter
 from owloop.engine import EngineConfig, OwloopEngine
 
@@ -138,3 +139,92 @@ def test_no_verifier_keeps_existing_behavior(tmp_path: Path, monkeypatch) -> Non
     summary = engine.run()
 
     assert summary.stopped_reason == "success"
+
+
+# ── deterministic gate: no-output expectations ──
+
+
+def test_run_acceptance_criteria_treats_grep_no_match_as_pass(tmp_path: Path) -> None:
+    """A `→ no output` criterion must pass when grep finds nothing (exit 1)."""
+    specs = tmp_path / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    spec = specs / "01-test.md"
+    target = tmp_path / "api.py"
+    target.write_text("def keep(): pass\n", encoding="utf-8")
+    spec.write_text(
+        "# Spec\n\n## Acceptance Criteria\n"
+        f"- `grep removed {target.name}` → no output\n",
+        encoding="utf-8",
+    )
+
+    passed, failed, failures, code_failed, meta_failed = verification.run_acceptance_criteria(
+        tmp_path, specs, "01-test.md"
+    )
+
+    assert passed == 1
+    assert failed == 0
+    assert failures == []
+    assert code_failed == 0
+    assert meta_failed == 0
+
+
+def test_run_acceptance_criteria_no_output_fails_on_nonempty_stdout(tmp_path: Path) -> None:
+    specs = tmp_path / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    spec = specs / "01-test.md"
+    target = tmp_path / "api.py"
+    target.write_text("def removed(): pass\n", encoding="utf-8")
+    spec.write_text(
+        "# Spec\n\n## Acceptance Criteria\n"
+        f"- `grep removed {target.name}` → no output\n",
+        encoding="utf-8",
+    )
+
+    passed, failed, failures, code_failed, meta_failed = verification.run_acceptance_criteria(
+        tmp_path, specs, "01-test.md"
+    )
+
+    assert passed == 0
+    assert failed == 1
+    assert len(failures) == 1
+    assert code_failed == 0
+    assert meta_failed == 1
+
+
+def test_run_gate_restores_excluded_tracked_files(tmp_path: Path) -> None:
+    """Acceptance-criteria commands must not leave mutations in spec-excluded files."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo, check=True, capture_output=True,
+    )
+
+    (repo / "uv.lock").write_text("original\n", encoding="utf-8")
+    (repo / "README.md").write_text("# test", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    spec = specs / "01-test.md"
+    spec.write_text(
+        "# Spec\n\n"
+        "## Acceptance Criteria\n"
+        "- `echo changed > uv.lock`\n\n"
+        "## Exclusions\n"
+        "- `uv.lock`\n",
+        encoding="utf-8",
+    )
+
+    guard_before = verification.guarded_hash(repo, specs, "01-test.md")
+    result = verification.run_gate(repo, specs, "01-test.md", guard_before)
+
+    assert result.tampered is False
+    assert result.passed is True
+    assert (repo / "uv.lock").read_text(encoding="utf-8") == "original\n"

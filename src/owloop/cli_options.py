@@ -99,7 +99,9 @@ def _agent_run_options(f: Callable[..., Any]) -> Callable[..., Any]:
         "--subagents",
         is_flag=True,
         default=False,
-        help="Split large iterations into Orient/Implement/Verify subagent phases.",
+        help="Split large iterations into Orient/Implement/Verify subagent phases. "
+        "Small/scoped specs (≤3 files by default) still run as a single agent "
+        "to save tokens.",
     )(f)
     f = click.option(
         "--idle-timeout", type=float, default=DEFAULT_IDLE_TIMEOUT,

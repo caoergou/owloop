@@ -44,7 +44,7 @@ def _run_engine(
     ascii: bool = False, no_color: bool = False, compact: bool = False,
     verifier_model: str | None = None, subagents: bool = False,
     session_id: str | None = None, resume: bool = False,
-    no_tui: bool = False, dry_run: bool = False,
+    no_tui: bool = False, dry_run: bool = False, no_push: bool = False,
     max_tokens_per_iteration: int = 0,
     max_turns_per_iteration: int = 0,
     max_budget_usd: float = 0.0,
@@ -73,6 +73,7 @@ def _run_engine(
         resume=resume,
         no_tui=no_tui,
         dry_run=dry_run,
+        no_push=no_push,
         max_tokens_per_iteration=max_tokens_per_iteration,
         max_turns_per_iteration=max_turns_per_iteration,
         max_budget_usd=max_budget_usd,
@@ -99,6 +100,7 @@ def _run_engine(
     resume = kwargs["resume"]
     no_tui = kwargs["no_tui"]
     dry_run = kwargs["dry_run"]
+    no_push = kwargs["no_push"]
     max_tokens_per_iteration = kwargs["max_tokens_per_iteration"]
     max_turns_per_iteration = kwargs["max_turns_per_iteration"]
     max_budget_usd = kwargs["max_budget_usd"]
@@ -129,6 +131,7 @@ def _run_engine(
         session_id=session_id,
         resume=resume,
         dry_run=dry_run,
+        no_push=no_push,
         keep_retrying=keep_retrying,
         rollback=rollback,
         notify_webhook=resolved_webhook,
@@ -277,11 +280,12 @@ def _print_dry_run_report(console: Console, summary: RunSummary) -> None:
 
 
 def run_cmd(
-    max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
-    max_turns_per_iteration: int, max_budget_usd: float, keep_retrying: bool, rollback: bool,
-    notify_webhook: str | None, notify_desktop: bool, converge_sweeps: int, workers: int,
-    worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
-    idle_timeout: float, max_duration: int, max_tokens: int,
+    max_iterations: int, resume: bool, dry_run: bool, no_push: bool, no_tui: bool,
+    max_tokens_per_iteration: int, max_turns_per_iteration: int, max_budget_usd: float,
+    keep_retrying: bool, rollback: bool, notify_webhook: str | None, notify_desktop: bool,
+    converge_sweeps: int, workers: int, worktree: bool, model: str, agent: str,
+    verifier_model: str | None, subagents: bool, idle_timeout: float, max_duration: int,
+    max_tokens: int,
 ) -> None:
     """Start the autonomous coding loop."""
     ascii, no_color, compact, verbose = _cli_options()
@@ -301,6 +305,7 @@ def run_cmd(
         resume=resume,
         no_tui=no_tui,
         dry_run=dry_run,
+        no_push=no_push,
         max_tokens_per_iteration=max_tokens_per_iteration,
         max_turns_per_iteration=max_turns_per_iteration,
         max_budget_usd=max_budget_usd,

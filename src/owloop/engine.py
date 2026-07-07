@@ -115,6 +115,7 @@ class TerminalState(str, Enum):
     TAMPERED = "tampered"
     INTERRUPTED = "interrupted"
     FAILED = "failed"
+    SOFT_FAILURE = "soft_failure"
 
     def __str__(self) -> str:  # so f-strings / json render the value, not "TerminalState.SUCCESS"
         return self.value
@@ -142,6 +143,7 @@ class StopReason(str, Enum):
     INTERRUPTED = "interrupted"
     PREFLIGHT_FAILED = "preflight_failed"
     DIRTY_WORKSPACE_DECLINED = "dirty_workspace_declined"
+    SOFT_FAILURE = "soft_failure"
 
     def __str__(self) -> str:
         return self.value
@@ -181,6 +183,7 @@ _STOPPED_REASON_TO_STATE = {
     StopReason.INTERRUPTED: TerminalState.INTERRUPTED,
     StopReason.PREFLIGHT_FAILED: TerminalState.FAILED,
     StopReason.DIRTY_WORKSPACE_DECLINED: TerminalState.FAILED,
+    StopReason.SOFT_FAILURE: TerminalState.SOFT_FAILURE,
 }
 
 
@@ -349,6 +352,9 @@ class EngineConfig:
     # When True, run exactly one iteration, skip push, revert any commit the
     # iteration made, and produce a DryRunReport instead of looping.
     dry_run: bool = False
+    # When True, commit and mark specs complete locally but never push. Useful
+    # for review-before-push workflows or CI dry runs that want real commits.
+    no_push: bool = False
     # Completion notifications: fire a webhook and/or desktop notification when
     # the run stops on an attention-worthy terminal state. None/False = off.
     notify_webhook: str | None = None
@@ -532,8 +538,29 @@ class OwloopEngine:
     def _is_git_repo(self) -> bool:
         return self._run_git("rev-parse", "--is-inside-work-tree").returncode == 0
 
+    _OWLOOP_OWNED_PREFIXES = (".owloop",)
+
+    def _is_path_owned(self, path: str) -> bool:
+        """Return True if a path belongs to owloop's own state directories."""
+        for prefix in self._OWLOOP_OWNED_PREFIXES:
+            if path == prefix or path.startswith(prefix + "/"):
+                return True
+        return False
+
     def _is_dirty(self) -> bool:
-        return bool(self._run_git("status", "--porcelain").stdout.strip())
+        result = self._run_git("status", "--porcelain")
+        for line in result.stdout.splitlines():
+            # Porcelain format: "XY path" or "XY orig -> dest".
+            path_part = line[3:].strip()
+            # If this is a rename, check both sides.
+            if " -> " in path_part:
+                source, _, dest = path_part.partition(" -> ")
+                if self._is_path_owned(source) and self._is_path_owned(dest):
+                    continue
+            elif self._is_path_owned(path_part):
+                continue
+            return True
+        return False
 
     def _resolve_main_repo_dir(self) -> Path:
         if not self._is_git_repo():
@@ -1045,7 +1072,7 @@ class OwloopEngine:
 
     def _run_verification_gate(
         self, iteration: int, spec_name: str | None, guard_before: str
-    ) -> tuple[bool, bool, list[dict[str, Any]]]:
+    ) -> verification.GateResult:
         """Deterministically verify an iteration outside the agent's control.
 
         Delegates to the shared gate in ``verification.py`` (the single
@@ -1060,13 +1087,21 @@ class OwloopEngine:
 
         if result.tampered:
             self._emit("spec_tampered", iteration=iteration, spec=spec_name)
-            return False, True, []
+            return verification.GateResult(passed=False, tampered=True, passed_count=0, failed_count=0)
 
         if result.passed:
             self._emit(
                 "verification_gate_passed",
                 iteration=iteration,
                 passed=result.passed_count,
+            )
+        elif result.soft_failure:
+            self._emit(
+                "verification_gate_soft_failure",
+                iteration=iteration,
+                passed=result.passed_count,
+                failed=result.failed_count,
+                commands=[f["command"] for f in result.failures],
             )
         else:
             self._emit(
@@ -1076,7 +1111,7 @@ class OwloopEngine:
                 failed=result.failed_count,
                 commands=[f["command"] for f in result.failures],
             )
-        return result.passed, False, result.failures
+        return result
 
     def _head(self) -> str:
         return str(self._run_git("rev-parse", "HEAD").stdout).strip()
@@ -1144,6 +1179,23 @@ class OwloopEngine:
             patch=str(patch_path) if diff.stdout.strip() else None,
         )
 
+    def _should_use_subagents(self, target_spec: str | None) -> bool:
+        """Skip expensive subagent orchestration for small/scoped specs.
+
+        Subagents are great for cross-file refactors, but for a single-file or
+        tightly-scoped change they burn tokens on coordination overhead. When
+        the spec declares a `## Files` scope that is at or below the threshold,
+        run a single agent iteration instead.
+        """
+        if not self.config.use_subagents:
+            return False
+        if not target_spec:
+            return True
+        scope = spec_queue.get_spec_file_scope(self.specs_dir / target_spec)
+        if not scope:
+            return True
+        return len(scope) > self.config.subagent_file_threshold
+
     def run_iteration(self, iteration: int, target_spec: str | None = None) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
         prompt_file = owloop_dir / "PROMPT_build.md"
@@ -1173,7 +1225,7 @@ class OwloopEngine:
                         raise IterationTokenLimitExceededError(iteration_tokens)
 
             try:
-                if self.config.use_subagents:
+                if self._should_use_subagents(target_spec):
                     orchestrator = SubagentOrchestrator(
                         self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
                     )
@@ -1494,7 +1546,7 @@ class OwloopEngine:
 
                 if self.config.dry_run:
                     self._append_run_note(iteration, result.success, result.summary)
-                    acceptance_passed, acceptance_failed, _ = verification.run_acceptance_criteria(
+                    acceptance_passed, acceptance_failed, _, _, _ = verification.run_acceptance_criteria(
                         self.cwd, self.specs_dir, active_spec
                     )
                     current_head = self._head()
@@ -1531,23 +1583,26 @@ class OwloopEngine:
                     break
 
                 # ── Deterministic verification gate (engine-owned) ──
-                gate_passed = False
-                tampered = False
-                gate_failures: list[dict[str, Any]] = []
+                gate_result = verification.GateResult(passed=False, tampered=False, passed_count=0, failed_count=0)
                 if result.promise_state == "DONE":
-                    gate_passed, tampered, gate_failures = self._run_verification_gate(
+                    gate_result = self._run_verification_gate(
                         iteration, active_spec, guard_before
                     )
                     # Shell-first ordering: the expensive LLM verifier runs only
                     # on work that already survived the mechanical gate.
                     if (
-                        gate_passed
+                        gate_result.passed
                         and self.verifier_adapter is not None
                         and not self.config.use_subagents
                     ):
-                        gate_passed = self._apply_llm_verifier(iteration, result)
+                        gate_result = verification.GateResult(
+                            passed=self._apply_llm_verifier(iteration, result),
+                            tampered=False,
+                            passed_count=gate_result.passed_count,
+                            failed_count=gate_result.failed_count,
+                        )
 
-                if gate_passed:
+                if gate_result.passed:
                     # Verified success: only now does the engine commit, mark the
                     # spec complete, and push — never the agent.
                     consecutive_failures = 0
@@ -1563,7 +1618,10 @@ class OwloopEngine:
                     self._append_run_note(iteration, True, note_summary)
                     self._mark_spec_complete(active_spec)
                     self._commit_iteration(iteration, active_spec)
-                    self._push(branch)
+                    if self.config.no_push:
+                        self._emit("push_skipped", branch=branch)
+                    else:
+                        self._push(branch)
                     spec_status = self._spec_status()
                     self._emit(
                         "iteration_end",
@@ -1602,8 +1660,22 @@ class OwloopEngine:
                     # iteration is minutes of work; waiting here buys nothing.
                     continue
 
+                # ── Soft failure: functional checks pass, meta-check fails ──
+                if gate_result.soft_failure:
+                    self._append_run_note(iteration, False, result.summary)
+                    diff = self._run_git("diff", last_good, "--", ".", ":!.owloop")
+                    self._emit(
+                        "soft_failure",
+                        iteration=iteration,
+                        spec=active_spec,
+                        diff=diff.stdout or "",
+                        commands=[f["command"] for f in gate_result.failures],
+                    )
+                    stopped_reason = StopReason.SOFT_FAILURE
+                    break
+
                 # ── Failure: classify, record feedback, roll back, stop on a stall ──
-                if tampered:
+                if gate_result.tampered:
                     failure_reason = FailureReason.TAMPERED
                 elif result.timed_out:
                     failure_reason = FailureReason.TIMEOUT
@@ -1622,7 +1694,7 @@ class OwloopEngine:
                 self._append_run_note(iteration, False, result.summary)
                 # Written before rollback; .owloop/ is excluded from the reset,
                 # so the next iteration's prompt starts from this diagnosis.
-                self._write_failure_feedback(iteration, failure_reason, result, gate_failures)
+                self._write_failure_feedback(iteration, failure_reason, result, gate_result.failures)
                 self._rollback_iteration(iteration, last_good)
 
                 consecutive_failures += 1
@@ -1700,9 +1772,28 @@ class OwloopEngine:
             dry_run_report=dry_run_report,
         )
         self._write_summary(summary)
+        self._generate_report()
         self._notify(summary)
         self._close_append_handles()
         return summary
+
+    def _generate_report(self) -> None:
+        """Generate a static HTML report inside the worktree (best-effort)."""
+        try:
+            from owloop.report import ReportGenerator
+            from owloop.report_ai import ReportInsights
+
+            report_path = self.cwd / ".owloop" / "reports" / "owloop_report_latest.html"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            generator = ReportGenerator(self.cwd)
+            generator.generate(
+                output_path=report_path,
+                insights=ReportInsights(),
+                use_tailwind=False,
+            )
+        except Exception:
+            # Report generation must never change the run outcome.
+            pass
 
     def _notify(self, summary: RunSummary) -> None:
         """Fire completion notifications for the finished run (best-effort)."""

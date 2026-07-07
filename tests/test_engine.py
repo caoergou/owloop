@@ -531,6 +531,43 @@ def test_resolve_worktree_session_resume_falls_back_to_latest_branch(tmp_path: P
     assert branch == "owloop/20260706-xyz789"
 
 
+def test_resolve_worktree_session_includes_spec_slug(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "04-extract-issue-service.md").write_text(
+        "# Spec: extract issue service\n", encoding="utf-8"
+    )
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert branch.startswith("owloop/")
+    assert "extract-issue-service" in branch
+    assert session_id in branch
+    assert "extract-issue-service" in str(path)
+
+
+def test_resolve_worktree_session_slugifies_title(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    (specs / "02-Hello World_Refactor.md").write_text(
+        "# Spec: Hello World Refactor\n", encoding="utf-8"
+    )
+
+    session_id, branch, path = engine._resolve_worktree_session()
+
+    assert "hello-world-refactor" in branch
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -753,6 +790,119 @@ def test_dry_run_reverts_commit_and_skips_push(tmp_path: Path, monkeypatch) -> N
     assert summary.dry_run_report.acceptance_passed == 1
 
 
+class _FileWritingAdapter(MockAdapter):
+    """Adapter that writes a file but leaves committing to the engine."""
+
+    def __init__(self, repo: Path, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._repo = repo
+
+    def run(self, prompt: str, cwd: Path, *, on_line=None) -> AgentResult:
+        (self._repo / "agent_change.txt").write_text("changed", encoding="utf-8")
+        return super().run(prompt, cwd, on_line=on_line)
+
+
+def test_no_push_commits_but_skips_remote_push(tmp_path: Path, monkeypatch) -> None:
+    """--no-push should still commit and complete the spec, but never call _push."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n## Acceptance Criteria\n- `true`\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    original_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    adapter = _FileWritingAdapter(
+        repo,
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ],
+    )
+    engine = _make_engine(repo, adapter, no_push=True)
+
+    push_calls: list[str] = []
+    monkeypatch.setattr(engine, "_push", lambda branch: push_calls.append(branch))
+    skipped: list[str] = []
+    engine.on_event = lambda k, d: skipped.append(k) if k == "push_skipped" else None
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"
+    assert push_calls == []
+    assert "push_skipped" in skipped
+    assert "**Status**: COMPLETE" in (repo / ".owloop" / "specs" / "01-test.md").read_text()
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert head_after != original_head
+    assert (repo / "agent_change.txt").is_file()
+
+
+def test_soft_failure_preserves_work_when_meta_check_fails(tmp_path: Path, monkeypatch) -> None:
+    """A functional pass + meta-check fail should stop for review without rollback."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "marker.txt").write_text("removed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add marker"], cwd=repo, check=True, capture_output=True)
+
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text(
+        "# spec\n\n"
+        "## Acceptance Criteria\n"
+        "- `true`\n"
+        "- `grep removed marker.txt` → no output\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    original_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    adapter = _FileWritingAdapter(
+        repo,
+        responses=[
+            AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+        ],
+    )
+    engine = _make_engine(repo, adapter)
+
+    soft_events: list[dict] = []
+    engine.on_event = lambda k, d: soft_events.append(d) if k == "soft_failure" else None
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "soft_failure"
+    assert summary.terminal_state == "soft_failure"
+    assert "**Status**: COMPLETE" not in (repo / ".owloop" / "specs" / "01-test.md").read_text()
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert head_after == original_head  # no rollback
+    assert (repo / "agent_change.txt").is_file()
+    assert len(soft_events) == 1
+    assert "grep removed marker.txt" in soft_events[0]["commands"]
+
+
 class _InterruptingAdapter(MockAdapter):
     """Adapter that completes one iteration, then simulates Ctrl+C on the next."""
 
@@ -760,6 +910,113 @@ class _InterruptingAdapter(MockAdapter):
         if self.calls:
             raise KeyboardInterrupt
         return super().run(prompt, cwd, on_line=on_line)
+
+
+def _make_repo_with_spec(tmp_path: Path, files_scope: list[str]) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    (repo / "README.md").write_text("# test", encoding="utf-8")
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    scope_lines = "\n".join(f"- `{f}`" for f in files_scope)
+    (specs / "01-test.md").write_text(
+        f"# spec\n\n## Files\n{scope_lines}\n\n## Acceptance Criteria\n- `true`\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
+    return repo
+
+
+def test_subagents_skipped_for_small_scoped_spec(tmp_path: Path, monkeypatch) -> None:
+    """Small/scoped specs should not pay the subagent orchestration token cost."""
+    repo = _make_repo_with_spec(tmp_path, ["src/small.py"])
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    subagent_calls: list[tuple[str, ...]] = []
+
+    class _FakeOrchestrator:
+        def __init__(self, adapter, verifier, cwd, on_line=None) -> None:
+            subagent_calls.append((str(adapter), str(verifier), str(cwd)))
+
+        def run(self) -> AgentResult:
+            return AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+
+    monkeypatch.setattr("owloop.engine.SubagentOrchestrator", _FakeOrchestrator)
+
+    engine = _make_engine(
+        repo,
+        MockAdapter(
+            responses=[
+                AgentResult(
+                    stdout="ok\n<promise>DONE</promise>",
+                    returncode=0,
+                    success=True,
+                    has_completion_signal=True,
+                    done_signal="<promise>DONE</promise>",
+                )
+            ]
+        ),
+        use_subagents=True,
+    )
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"
+    assert subagent_calls == []
+
+
+def test_subagents_used_for_large_scoped_spec(tmp_path: Path, monkeypatch) -> None:
+    """Specs touching many files still get the full subagent orchestration."""
+    repo = _make_repo_with_spec(
+        tmp_path, [f"src/file{i}.py" for i in range(5)]
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    subagent_calls: list[tuple[str, ...]] = []
+
+    class _FakeOrchestrator:
+        def __init__(self, adapter, verifier, cwd, on_line=None) -> None:
+            subagent_calls.append((str(adapter), str(verifier), str(cwd)))
+
+        def run(self) -> AgentResult:
+            return AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+
+    monkeypatch.setattr("owloop.engine.SubagentOrchestrator", _FakeOrchestrator)
+
+    engine = _make_engine(
+        repo,
+        MockAdapter(responses=[]),
+        use_subagents=True,
+    )
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"
+    assert len(subagent_calls) == 1
 
 
 def test_session_state_persisted_on_interrupt(tmp_path: Path) -> None:
@@ -1030,3 +1287,40 @@ def test_trim_run_notes_keeps_only_newest_entries() -> None:
     # Under the cap (or unstructured content), nothing is touched.
     assert trim_run_notes("free-form note", max_entries=3) == "free-form note"
     assert trim_run_notes(notes, max_entries=20) == notes
+
+
+def test_is_dirty_ignores_owloop_directory(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / ".owloop" / "specs").mkdir(parents=True)
+    (repo / ".owloop" / "specs" / "01-test.md").write_text("# test", encoding="utf-8")
+
+    assert not engine._is_dirty()
+
+
+def test_is_dirty_detects_other_untracked_files(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / "untracked.txt").write_text("hi", encoding="utf-8")
+
+    assert engine._is_dirty()
+
+
+def test_is_dirty_detects_modified_tracked_file(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    adapter = MockAdapter()
+    engine = _make_engine(repo, adapter)
+
+    (repo / "README.md").write_text("modified", encoding="utf-8")
+
+    assert engine._is_dirty()

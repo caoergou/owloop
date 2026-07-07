@@ -32,11 +32,12 @@ _RUN_CONFIG_TYPES: dict[str, type[Any] | tuple[type[Any], ...]] = {
     "notify_webhook": str,
     "no_tui": bool,
     "dry_run": bool,
+    "no_push": bool,
 }
 
 # Boolean CLI flags default to False; config turns them on.
 _BOOL_FLAG_KEYS: frozenset[str] = frozenset(
-    {"notify_desktop", "rollback", "keep_retrying", "no_tui", "dry_run"}
+    {"notify_desktop", "rollback", "keep_retrying", "no_tui", "dry_run", "no_push"}
 )
 
 # Numeric CLI options use 0 as the "not set" sentinel.

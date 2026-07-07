@@ -251,6 +251,13 @@ def agents() -> None:
     "burning a full overnight run.",
 )
 @click.option(
+    "--no-push",
+    is_flag=True,
+    default=False,
+    help="Commit completed specs locally but do not push. Useful for "
+    "review-before-push workflows or CI jobs that should leave commits on disk.",
+)
+@click.option(
     "--no-tui", "--plain", "no_tui",
     is_flag=True,
     default=False,
@@ -304,16 +311,18 @@ def agents() -> None:
     show_default=True,
 )
 @_common_run_options
-def run(max_iterations: int, resume: bool, dry_run: bool, no_tui: bool, max_tokens_per_iteration: int,
-        max_turns_per_iteration: int, max_budget_usd: float, keep_retrying: bool, rollback: bool,
-        notify_webhook: str | None, notify_desktop: bool, converge_sweeps: int, workers: int,
-        worktree: bool, model: str, agent: str, verifier_model: str | None, subagents: bool,
-        idle_timeout: float, max_duration: int, max_tokens: int) -> None:
+def run(max_iterations: int, resume: bool, dry_run: bool, no_push: bool, no_tui: bool,
+        max_tokens_per_iteration: int, max_turns_per_iteration: int, max_budget_usd: float,
+        keep_retrying: bool, rollback: bool, notify_webhook: str | None, notify_desktop: bool,
+        converge_sweeps: int, workers: int, worktree: bool, model: str, agent: str,
+        verifier_model: str | None, subagents: bool, idle_timeout: float, max_duration: int,
+        max_tokens: int) -> None:
     """Start the autonomous coding loop."""
     run_cmd(
         max_iterations=max_iterations,
         resume=resume,
         dry_run=dry_run,
+        no_push=no_push,
         no_tui=no_tui,
         max_tokens_per_iteration=max_tokens_per_iteration,
         max_turns_per_iteration=max_turns_per_iteration,

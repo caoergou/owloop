@@ -52,6 +52,24 @@ class ReportGenerator:
         if self.summary_path.exists():
             with self.summary_path.open(encoding="utf-8") as f:
                 return json.load(f)  # type: ignore[no-any-return]
+        # The engine writes the detailed summary inside the worktree; the main
+        # repo only gets a lightweight session file. Fall back to it so reports
+        # generated from the main repo still show branch/iterations/status.
+        session_path = self.summary_path.with_name("session_latest.json")
+        if session_path.exists():
+            with session_path.open(encoding="utf-8") as f:
+                session = json.load(f)  # type: ignore[no-any-return]
+            status = session.get("status", "unknown")
+            # The session file uses "completed" as a generic completion flag;
+            # the classifier expects the granular stopped_reason "success".
+            stopped_reason = "success" if status == "completed" else status
+            return {
+                "iterations": session.get("iterations", 0),
+                "branch": session.get("branch", "unknown"),
+                "tokens_used": session.get("tokens_used", 0),
+                "estimated_cost_usd": 0,
+                "stopped_reason": stopped_reason,
+            }
         return {}
 
     def _load_events(self) -> list[dict[str, Any]]:
