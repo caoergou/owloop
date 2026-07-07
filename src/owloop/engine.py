@@ -1196,6 +1196,23 @@ class OwloopEngine:
             patch=str(patch_path) if diff.stdout.strip() else None,
         )
 
+    def _should_use_subagents(self, target_spec: str | None) -> bool:
+        """Skip expensive subagent orchestration for small/scoped specs.
+
+        Subagents are great for cross-file refactors, but for a single-file or
+        tightly-scoped change they burn tokens on coordination overhead. When
+        the spec declares a `## Files` scope that is at or below the threshold,
+        run a single agent iteration instead.
+        """
+        if not self.config.use_subagents:
+            return False
+        if not target_spec:
+            return True
+        scope = spec_queue.get_spec_file_scope(self.specs_dir / target_spec)
+        if not scope:
+            return True
+        return len(scope) > self.config.subagent_file_threshold
+
     def run_iteration(self, iteration: int, target_spec: str | None = None) -> IterationResult:
         owloop_dir = resolve_owloop_dir(self.cwd)
         prompt_file = owloop_dir / "PROMPT_build.md"
@@ -1225,7 +1242,7 @@ class OwloopEngine:
                         raise IterationTokenLimitExceededError(iteration_tokens)
 
             try:
-                if self.config.use_subagents:
+                if self._should_use_subagents(target_spec):
                     orchestrator = SubagentOrchestrator(
                         self.adapter, self.verifier_adapter, self.cwd, on_line=_on_line
                     )

@@ -915,6 +915,113 @@ class _InterruptingAdapter(MockAdapter):
         return super().run(prompt, cwd, on_line=on_line)
 
 
+def _make_repo_with_spec(tmp_path: Path, files_scope: list[str]) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    (repo / "README.md").write_text("# test", encoding="utf-8")
+    specs = repo / ".owloop" / "specs"
+    specs.mkdir(parents=True)
+    scope_lines = "\n".join(f"- `{f}`" for f in files_scope)
+    (specs / "01-test.md").write_text(
+        f"# spec\n\n## Files\n{scope_lines}\n\n## Acceptance Criteria\n- `true`\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
+    return repo
+
+
+def test_subagents_skipped_for_small_scoped_spec(tmp_path: Path, monkeypatch) -> None:
+    """Small/scoped specs should not pay the subagent orchestration token cost."""
+    repo = _make_repo_with_spec(tmp_path, ["src/small.py"])
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    subagent_calls: list[tuple[str, ...]] = []
+
+    class _FakeOrchestrator:
+        def __init__(self, adapter, verifier, cwd, on_line=None) -> None:
+            subagent_calls.append((str(adapter), str(verifier), str(cwd)))
+
+        def run(self) -> AgentResult:
+            return AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+
+    monkeypatch.setattr("owloop.engine.SubagentOrchestrator", _FakeOrchestrator)
+
+    engine = _make_engine(
+        repo,
+        MockAdapter(
+            responses=[
+                AgentResult(
+                    stdout="ok\n<promise>DONE</promise>",
+                    returncode=0,
+                    success=True,
+                    has_completion_signal=True,
+                    done_signal="<promise>DONE</promise>",
+                )
+            ]
+        ),
+        use_subagents=True,
+    )
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"
+    assert subagent_calls == []
+
+
+def test_subagents_used_for_large_scoped_spec(tmp_path: Path, monkeypatch) -> None:
+    """Specs touching many files still get the full subagent orchestration."""
+    repo = _make_repo_with_spec(
+        tmp_path, [f"src/file{i}.py" for i in range(5)]
+    )
+    monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
+
+    subagent_calls: list[tuple[str, ...]] = []
+
+    class _FakeOrchestrator:
+        def __init__(self, adapter, verifier, cwd, on_line=None) -> None:
+            subagent_calls.append((str(adapter), str(verifier), str(cwd)))
+
+        def run(self) -> AgentResult:
+            return AgentResult(
+                stdout="ok\n<promise>DONE</promise>",
+                returncode=0,
+                success=True,
+                has_completion_signal=True,
+                done_signal="<promise>DONE</promise>",
+            )
+
+    monkeypatch.setattr("owloop.engine.SubagentOrchestrator", _FakeOrchestrator)
+
+    engine = _make_engine(
+        repo,
+        MockAdapter(responses=[]),
+        use_subagents=True,
+    )
+    monkeypatch.setattr(engine, "_push", lambda b: None)
+
+    summary = engine.run()
+
+    assert summary.stopped_reason == "success"
+    assert len(subagent_calls) == 1
+
+
 def test_session_state_persisted_on_interrupt(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
