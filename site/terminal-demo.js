@@ -8,6 +8,7 @@
   var copyBtn = document.querySelector(".copy-btn");
   var replayBtn = document.getElementById("terminal-replay");
   var termBody = output ? output.closest(".terminal-body") : null;
+  var terminalWrap = document.querySelector(".hero-terminal-wrap");
 
   if (!output || !inputLine || !typed) return;
 
@@ -42,6 +43,14 @@
   function hideReportPreview() {
     var el = document.getElementById("report-browser");
     if (el) { el.classList.remove("open"); el.style.display = "none"; }
+  }
+
+  function isTerminalVisible() {
+    var el = terminalWrap || document.querySelector(".terminal");
+    if (!el) return true;
+    var rect = el.getBoundingClientRect();
+    return rect.top < window.innerHeight && rect.bottom > 0 &&
+           rect.left < window.innerWidth && rect.right > 0;
   }
 
   function setStatus(color, text) {
@@ -112,27 +121,27 @@
   // ── Rich-style TUI rendered as HTML panels ──
 
   var TUI_FRAMES = [
-    { moon: "🌒", elapsed: "0:42", iter: "#1", branch: "owloop/refactor-errors", tokens: "2,140 / 200,000", specsDone: "0/3 done", progress: 0, current: "001-refactor-error-handling.md", status: "Working on spec", statusStyle: "amber",
+    { moon: "🌒", elapsed: "0:42", iter: "#1", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "2,140 / 200,000", specsDone: "0/3 done", progress: 0, current: "001-refactor-error-handling.md", status: "Working on spec", statusStyle: "amber",
       specs: [["active","001-refactor-error-handling.md"],["pending","002-add-type-annotations.md"],["pending","003-unify-error-codes.md"]],
       action: "Reading the spec and codebase", detail: "Scanning backend/app/api/ for ValidationError patterns" },
-    { moon: "🌒", elapsed: "1:15", iter: "#1", branch: "owloop/refactor-errors", tokens: "3,480 / 200,000", specsDone: "0/3 done", progress: 8, current: "001-refactor-error-handling.md", status: "Running acceptance criteria", statusStyle: "amber",
+    { moon: "🌒", elapsed: "1:15", iter: "#1", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "3,480 / 200,000", specsDone: "0/3 done", progress: 8, current: "001-refactor-error-handling.md", status: "Running acceptance criteria", statusStyle: "amber",
       specs: [["active","001-refactor-error-handling.md"],["pending","002-add-type-annotations.md"],["pending","003-unify-error-codes.md"]],
       action: "Running acceptance criteria", detail: 'grep -c "except ValidationError" backend/app/api/*.py → 3 (≤5 ✓)' },
-    { moon: "🌓", elapsed: "1:23", iter: "#1", branch: "owloop/refactor-errors", tokens: "4,120 / 200,000", specsDone: "0/3 done", progress: 15, current: "001-refactor-error-handling.md", status: "✓ done signal detected", statusStyle: "green",
+    { moon: "🌓", elapsed: "1:23", iter: "#1", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "4,120 / 200,000", specsDone: "0/3 done", progress: 15, current: "001-refactor-error-handling.md", status: "✓ done signal detected", statusStyle: "green",
       specs: [["active","001-refactor-error-handling.md"],["pending","002-add-type-annotations.md"],["pending","003-unify-error-codes.md"]],
       action: "Committing changes", detail: "🌙 Loop closed on iteration 1" },
-    { moon: "🌓", elapsed: "1:58", iter: "#2", branch: "owloop/refactor-errors", tokens: "6,820 / 200,000", specsDone: "1/3 done", progress: 33, current: "002-add-type-annotations.md", status: "Working on spec", statusStyle: "amber",
+    { moon: "🌓", elapsed: "1:58", iter: "#2", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "6,820 / 200,000", specsDone: "1/3 done", progress: 33, current: "002-add-type-annotations.md", status: "Working on spec", statusStyle: "amber",
       specs: [["done","001-refactor-error-handling.md"],["active","002-add-type-annotations.md"],["pending","003-unify-error-codes.md"]],
       action: "Running verification commands", detail: "uv run pyright src/ --outputjson → 0 errors" },
-    { moon: "🌔", elapsed: "2:12", iter: "#2", branch: "owloop/refactor-errors", tokens: "8,240 / 200,000", specsDone: "1/3 done", progress: 42, current: "002-add-type-annotations.md", status: "✓ done signal detected", statusStyle: "green",
+    { moon: "🌔", elapsed: "2:12", iter: "#2", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "8,240 / 200,000", specsDone: "1/3 done", progress: 42, current: "002-add-type-annotations.md", status: "✓ done signal detected", statusStyle: "green",
       specs: [["done","001-refactor-error-handling.md"],["active","002-add-type-annotations.md"],["pending","003-unify-error-codes.md"]],
       action: "Committing changes", detail: "🌙 Loop closed on iteration 2" },
-    { moon: "🌔", elapsed: "2:47", iter: "#3", branch: "owloop/refactor-errors", tokens: "10,540 / 200,000", specsDone: "2/3 done", progress: 66, current: "003-unify-error-codes.md", status: "Working on spec", statusStyle: "amber",
+    { moon: "🌔", elapsed: "2:47", iter: "#3", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "10,540 / 200,000", specsDone: "2/3 done", progress: 66, current: "003-unify-error-codes.md", status: "Working on spec", statusStyle: "amber",
       specs: [["done","001-refactor-error-handling.md"],["done","002-add-type-annotations.md"],["active","003-unify-error-codes.md"]],
       action: "Running acceptance criteria", detail: "uv run pytest tests/ -q --tb=short → 148 passed" },
-    { moon: "🌕", elapsed: "3:05", iter: "#3", branch: "owloop/refactor-errors", tokens: "12,380 / 200,000", specsDone: "3/3 done", progress: 100, current: "—", status: "🌅 All specs complete", statusStyle: "green",
+    { moon: "🌕", elapsed: "3:05", iter: "#3", branch: "owloop/20250707-refactor-errors-a1b2c3d4", tokens: "12,380 / 200,000", specsDone: "3/3 done", progress: 100, current: "—", status: "🌅 All specs complete", statusStyle: "green",
       specs: [["done","001-refactor-error-handling.md"],["done","002-add-type-annotations.md"],["done","003-unify-error-codes.md"]],
-      action: "3 commits pushed to owloop/refactor-errors", detail: "" },
+      action: "3 commits pushed to owloop/20250707-refactor-errors-a1b2c3d4", detail: "" },
   ];
 
   function specIcon(state) {
@@ -196,6 +205,7 @@
   }
 
   function showReportPreview() {
+    if (!isTerminalVisible()) return;
     var container = document.getElementById("report-browser");
     if (!container) {
       container = document.createElement("div");
@@ -218,7 +228,7 @@
         '</div>' +
 
         '<div class="rpt-cards">' +
-          '<div class="rpt-card"><div class="rpt-card-val">owloop/refactor-errors</div><div class="rpt-card-label">Branch</div></div>' +
+          '<div class="rpt-card"><div class="rpt-card-val">owloop/20250707-refactor-errors-a1b2c3d4</div><div class="rpt-card-label">Branch</div></div>' +
           '<div class="rpt-card"><div class="rpt-card-val">3</div><div class="rpt-card-label">Iterations</div></div>' +
           '<div class="rpt-card"><div class="rpt-card-val rpt-green">Completed</div><div class="rpt-card-label">Status</div></div>' +
           '<div class="rpt-card"><div class="rpt-card-val">8 files · <span class="rpt-green">+328</span> · <span class="rpt-red">-108</span></div><div class="rpt-card-label">Total diff</div></div>' +
@@ -385,7 +395,7 @@
 
       await printLines([
         ["Ollie is waking up...", "dim"],
-        ["→ worktree: .worktrees/owloop-refactor-errors", "dim"],
+        ["→ worktree: ../flask-api-owloop-wt/owloop-20250707-refactor-errors-a1b2c3d4", "dim"],
         ["→ model: claude-sonnet-5    budget: 200k tokens", "dim"],
         ["→ specs: 3 queued", "dim"],
       ], LINE_PAUSE * 0.5);

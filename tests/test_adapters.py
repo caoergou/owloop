@@ -325,8 +325,12 @@ def test_kimi_adapter_extracts_usage_or_falls_back_to_heuristic(tmp_path: Path) 
 def _fake_binary(tmp_path: Path) -> Path:
     binary = tmp_path / "bin" / "fake-claude"
     binary.parent.mkdir(parents=True, exist_ok=True)
-    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    binary.chmod(0o755)
+    if sys.platform == "win32":
+        binary = binary.with_suffix(".cmd")
+        binary.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+    else:
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
     return binary
 
 

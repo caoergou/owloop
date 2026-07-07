@@ -23,7 +23,6 @@ import json
 import re
 import shutil
 import subprocess
-import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -195,6 +194,35 @@ def classify_terminal_state(stopped_reason: str) -> TerminalState:
     except ValueError:
         return TerminalState.FAILED
     return _STOPPED_REASON_TO_STATE.get(reason, TerminalState.FAILED)
+
+
+_SPEC_TITLE_RE = re.compile(r"^#\s*Spec:\s*(.+)$", re.MULTILINE)
+
+
+def _extract_spec_title(spec_path: Path | None) -> str | None:
+    """Return the ``# Spec: <title>`` line from a spec file, if present."""
+    if spec_path is None or not spec_path.is_file():
+        return None
+    try:
+        text = spec_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _SPEC_TITLE_RE.search(text)
+    return match.group(1).strip() if match else None
+
+
+def spec_commit_subject(spec_name: str | None, spec_path: Path | None, iteration: int = 0) -> str:
+    """Build a work-centric commit subject for an iteration.
+
+    Uses the spec's ``# Spec: <title>`` when available, otherwise falls back
+    to a tool-centric message for backward compatibility.
+    """
+    title = _extract_spec_title(spec_path) if spec_path else None
+    if title:
+        return title
+    if spec_name:
+        return f"owloop: complete {spec_name}"
+    return f"owloop: iteration {iteration}"
 
 
 _ERROR_HASH_RE = re.compile(r"\d+")
@@ -656,8 +684,8 @@ class OwloopEngine:
 
         Runs before ``setup_worktree`` so session identity and budget
         carry-over apply whether or not worktree isolation is enabled.
-        Never raises — ``_resolve_worktree_session`` remains the place that
-        surfaces a "nothing to resume" error when worktree isolation is on.
+        When ``resume`` is True but no previous session exists, raises a clear
+        error instead of silently starting a fresh session.
         """
         if not self.config.resume:
             self.session_id = self.config.session_id or uuid.uuid4().hex[:8]
@@ -678,10 +706,10 @@ class OwloopEngine:
             self.resumed_from_session = self.session_id
             return
 
-        # Nothing to resume: fall back to a fresh session id so the run still
-        # has one. If worktree isolation is enabled, setup_worktree() will
-        # raise its own "no previous session found" error shortly after this.
-        self.session_id = self.config.session_id or uuid.uuid4().hex[:8]
+        raise RuntimeError(
+            "--resume requested but no previous owloop session found. "
+            "Run `owloop run` without --resume to start a new session."
+        )
 
     def _persist_session_progress(
         self, *, status: str, iterations: int, current_spec: str | None
@@ -729,37 +757,27 @@ class OwloopEngine:
         branches = [b for b in result.stdout.splitlines() if b.strip()]
         return branches[0] if branches else None
 
-    @staticmethod
-    def _slugify(text: str) -> str:
-        """Turn arbitrary text into a git-safe branch slug."""
-        slug = text.lower()
-        slug = re.sub(r"[^a-z0-9]+", "-", slug)
-        slug = slug.strip("-")
-        slug = re.sub(r"-+", "-", slug)
-        return slug[:40]
+    def _session_slug(self) -> str:
+        """Derive a short URL-safe slug from the first incomplete spec title.
 
-    _MAX_SLUG_LEN = 40
-
-    def _spec_slug(self) -> str:
-        """Derive a short slug from the active spec or fall back to 'run'."""
-        spec = spec_queue.get_next_ready_spec(self.specs_dir)
-        if spec is None:
-            return "run"
-        # Strip leading numeric prefix (e.g. "01-extract-issue-service").
-        stem = re.sub(r"^\d+-", "", spec.stem)
-        slug = self._slugify(stem)
-        return slug or "run"
-
-    @staticmethod
-    def _session_id_from_branch(branch: str) -> str:
-        """Extract the trailing session id from an owloop branch name.
-
-        Supports both legacy ``owloop/<date>-<session_id>`` and sluggified
-        ``owloop/<date>-<slug>-<session_id>`` formats.
+        Falls back to an empty slug when no specs are readable. The slug is
+        sanitized to ``[a-z0-9-]`` and capped at ~30 characters so branch and
+        worktree paths stay readable and filesystem-safe.
         """
-        rest = branch.split("/", 1)[1]
-        # The session id is the last '-'-delimited token.
-        return rest.rsplit("-", 1)[-1]
+        specs = spec_queue.get_root_specs(self.specs_dir)
+        incomplete = spec_queue.get_incomplete_root_specs(self.specs_dir)
+        target = incomplete[0] if incomplete else (specs[0] if specs else None)
+        title = _extract_spec_title(target) if target else None
+        if not title:
+            return ""
+
+        slug = title.lower()
+        # Drop common stop words and file extension noise.
+        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+        slug = re.sub(r"-+", "-", slug)
+        if len(slug) > 30:
+            slug = slug[:30].rsplit("-", 1)[0]
+        return slug
 
     def _resolve_worktree_session(self) -> tuple[str, str, Path]:
         """Pick or resume a session id and derive branch/worktree path.
@@ -777,8 +795,8 @@ class OwloopEngine:
                     raise RuntimeError(
                         "--resume requested but no previous owloop session found."
                     )
-                # Branch format: owloop/<date>-<slug>-<session_id>
-                session_id = self._session_id_from_branch(branch)
+                # Branch format: owloop/<date>-<session_id> or owloop/<date>-<slug>-<session_id>
+                session_id = branch.split("/", 1)[1].rsplit("-", 1)[1]
                 wt_path = wt_base / f"owloop-{branch.split('/', 1)[1]}"
             else:
                 session_id = session["session_id"]
@@ -790,15 +808,16 @@ class OwloopEngine:
         # Reuse the id ``_init_session`` already resolved (if any) so this run
         # has a single consistent session id, instead of minting a second one.
         session_id = self.session_id or self.config.session_id or uuid.uuid4().hex[:8]
-        slug = self._spec_slug()
-        branch = f"owloop/{wt_date}-{slug}-{session_id}"
-        wt_path = wt_base / f"owloop-{wt_date}-{slug}-{session_id}"
+        slug = self._session_slug()
+        slug_part = f"{slug}-" if slug else ""
+        branch = f"owloop/{wt_date}-{slug_part}{session_id}"
+        wt_path = wt_base / f"owloop-{wt_date}-{slug_part}{session_id}"
 
         # Guard against an extremely unlikely collision.
         while self._branch_exists(branch):
             session_id = uuid.uuid4().hex[:8]
-            branch = f"owloop/{wt_date}-{slug}-{session_id}"
-            wt_path = wt_base / f"owloop-{wt_date}-{slug}-{session_id}"
+            branch = f"owloop/{wt_date}-{slug_part}{session_id}"
+            wt_path = wt_base / f"owloop-{wt_date}-{slug_part}{session_id}"
 
         self._save_session(session_id, branch, wt_path)
         self.session_id = session_id
@@ -807,8 +826,9 @@ class OwloopEngine:
     def setup_worktree(self) -> bool:
         """Create/enter an isolated git worktree unless disabled or already inside one.
 
-        Returns False if the run should abort entirely (user declined to
-        continue against a dirty main-repo workspace).
+        Worktree isolation is a core safety feature, so it is created silently
+        when enabled. A dirty main-repo workspace is harmless because the
+        worktree already isolates it; we warn and continue instead of blocking.
         """
         if not self.config.worktree:
             self._emit("worktree_skipped", reason="disabled")
@@ -824,42 +844,7 @@ class OwloopEngine:
 
         if self._is_dirty():
             self._emit("dirty_workspace_warning")
-            if self.config.confirm_dirty is not None:
-                if not self.config.confirm_dirty():
-                    self._emit("dirty_workspace_declined")
-                    return False
-            elif sys.stdin.isatty():
-                try:
-                    reply = input("> ").strip().lower() or "n"
-                except EOFError:
-                    reply = "n"
-                if not reply.startswith("y"):
-                    self._emit("dirty_workspace_declined")
-                    return False
-            else:
-                self._emit("dirty_workspace_noninteractive_continue")
-
-        if self.config.confirm_worktree is not None:
-            self._emit("worktree_prompt")
-            if not self.config.confirm_worktree():
-                self._emit("worktree_declined")
-                return True
-        elif sys.stdin.isatty():
-            self._emit("worktree_prompt")
-            try:
-                reply = input("> ").strip() or "Y"
-            except EOFError:
-                reply = "Y"
-
-            if not reply.lower().startswith("y"):
-                self._emit("worktree_declined")
-                return True
-        else:
-            # Headless/CI/agent invocation: there's no one to answer the prompt, and
-            # skipping isolation here is the one outcome that defeats the whole point
-            # of an *unattended* loop. Default to creating the worktree rather than
-            # falling through to the (possibly dirty) main repo.
-            self._emit("worktree_auto_created", reason="non_interactive")
+            self._emit("dirty_workspace_noninteractive_continue")
 
         session_id, wt_branch, wt_path = self._resolve_worktree_session()
         self.session_id = session_id
@@ -1134,17 +1119,15 @@ class OwloopEngine:
     def _commit_iteration(self, iteration: int, spec_name: str | None) -> bool:
         """Stage and commit the verified work. Engine-owned, gate-gated.
 
-        Loop metadata (``.owloop/run-notes.md``) is unstaged before commit so
-        it can never enter project history even on repos that predate the
-        ``.gitignore`` entry.
+        All of ``.owloop/`` is unstaged before commit so loop metadata never
+        enters project history, even on repos that predate the ``.gitignore``
+        entry. Working-tree changes (e.g. **Status**: COMPLETE markers) are
+        preserved.
         """
         self._run_git("add", "-A")
-        self._run_git(
-            "reset", "--quiet", "--",
-            ".owloop/run-notes.md", ".owloop/logs", ".owloop/PROMPT_build.md",
-            ".owloop/last-failure.md",
-        )
-        subject = f"owloop: complete {spec_name}" if spec_name else f"owloop: iteration {iteration}"
+        self._run_git("reset", "--quiet", "--", ".owloop/")
+        spec_path = self.specs_dir / spec_name if spec_name else None
+        subject = spec_commit_subject(spec_name, spec_path, iteration)
         committed = self._run_git("commit", "-m", subject)
         if committed.returncode == 0:
             self._emit("iteration_committed", iteration=iteration, spec=spec_name, subject=subject)
@@ -1478,17 +1461,7 @@ class OwloopEngine:
             )
 
         self._init_session()
-
-        if not self.setup_worktree():
-            return RunSummary(
-                iterations=0,
-                branch=self._current_branch(),
-                cwd=self.cwd,
-                main_repo_dir=self.main_repo_dir,
-                stopped_reason=StopReason.DIRTY_WORKSPACE_DECLINED,
-                session_id=self.session_id or "",
-                resumed_from_session=self.resumed_from_session,
-            )
+        self.setup_worktree()
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.session_log = self.log_dir / f"owloop_build_session_{_file_timestamp()}.log"

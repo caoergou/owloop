@@ -29,6 +29,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from owloop import git_stats
 from owloop._brand import (
     AMBER,
     BRAND_BAR,
@@ -358,6 +359,52 @@ class OwloopTUI:
                 s.specs = data["specs"]
             s.phase = "working"
             s.current_action = "Preparing next iteration"
+        elif kind == "stalled":
+            s.phase = "stuck"
+            self._log(f"stalled: {data.get('reason', '')} ({data.get('failure_reason', '')})")
+        elif kind in ("tampered", "spec_tampered"):
+            s.phase = "error"
+            self._log("spec tampering detected (acceptance criteria / backpressure changed mid-iteration)")
+        elif kind == "verification_gate_passed":
+            self._log(f"verification gate passed ({data.get('passed', 0)} checks)")
+        elif kind == "verification_gate_failed":
+            s.phase = "stuck"
+            self._log(f"verification gate failed ({data.get('failed', 0)} of {data.get('passed', 0) + data.get('failed', 0)} checks)")
+        elif kind == "iteration_rolled_back":
+            self._log(f"rolled back to {data.get('to_commit')}")
+        elif kind == "iteration_exhausted":
+            self._log("iteration hit its native turn/token limit")
+        elif kind == "failure_feedback_written":
+            self._log("failure feedback written")
+        elif kind == "converge_sweep_start":
+            self._log(f"convergence sweep {data.get('sweep', data.get('n', 1))} starting")
+        elif kind == "converge_gap_specs":
+            self._log(f"found {data.get('count', 0)} gap spec(s)")
+        elif kind == "converged":
+            s.phase = "complete"
+            self._log(f"converged after {data.get('sweeps', 1)} sweep(s)")
+        elif kind == "parallel_session_info":
+            self._log(f"parallel session: {data.get('workers', 0)} workers")
+        elif kind == "worker_start":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            self._log(f"worker {worker} started{f' on {spec}' if spec else ''}")
+        elif kind == "round_start":
+            self._log(f"parallel round {data.get('round', '?')} started")
+        elif kind == "round_end":
+            self._log(f"parallel round {data.get('round', '?')} ended")
+        elif kind == "worker_merged":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            self._log(f"worker {worker} merged{f' ({spec})' if spec else ''}")
+        elif kind == "worker_merge_conflict":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            self._log(f"worker {worker} merge conflict{f' ({spec})' if spec else ''}")
+        elif kind == "worker_no_done":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            self._log(f"worker {worker} finished without done signal{f' ({spec})' if spec else ''}")
         elif kind == "interrupted":
             s.phase = "error"
             self._log("stopped (Ctrl+C)")
@@ -621,7 +668,7 @@ class OwloopTUI:
 
     FAILED_REASONS = {"preflight_failed", "dirty_workspace_declined"}
 
-    def print_exit_summary(self, summary: RunSummary) -> None:
+    def print_exit_summary(self, summary: RunSummary, report_path: str | None = None) -> None:
         s = self.state
         failed = summary.stopped_reason in self.FAILED_REASONS
 
@@ -637,6 +684,9 @@ class OwloopTUI:
         elapsed = time.monotonic() - s.start_time
         owl = Text("\n".join(OWL_SLEEP), style=f"dim {AMBER}", justify="center")
 
+        commits = git_stats.get_recent_commits(summary.cwd, summary.iterations)
+        total_files, total_ins, total_del = git_stats.total_diff_stats(commits)
+
         facts = Table.grid(padding=(0, 2))
         facts.add_column(style=f"dim {GRAY}", justify="right")
         facts.add_column(style=MOON_WHITE)
@@ -650,6 +700,7 @@ class OwloopTUI:
             facts.add_row("Blocker", summary.blocker)
         if summary.decision_question:
             facts.add_row("Decision", summary.decision_question)
+        facts.add_row("Diff", f"{total_files} files · +{total_ins} · -{total_del}")
         if summary.tokens_used:
             facts.add_row("Tokens", f"{summary.tokens_used:,}")
         if summary.estimated_cost_usd:
@@ -658,20 +709,38 @@ class OwloopTUI:
 
         hints_lines = [
             Text(line, style=f"dim {GRAY}")
-            for line in exit_hints(summary.branch, summary.iterations, summary.cwd, summary.main_repo_dir)
+            for line in exit_hints(
+                summary.branch,
+                summary.iterations,
+                summary.cwd,
+                summary.main_repo_dir,
+                stopped_reason=summary.stopped_reason,
+                report_path=report_path,
+            )
         ]
 
-        # `exhausted`/`stalled` are not successes — the headline and border must
-        # not read as a clean "complete".
-        if summary.state == TerminalState.EXHAUSTED:
-            headline = Text("⚠ owloop stopped — budget exhausted, work not finished", style=f"bold {RED}")
+        # Classify terminal states so the headline/border match the outcome.
+        if summary.state in (TerminalState.FAILED, TerminalState.TAMPERED, TerminalState.EXHAUSTED, TerminalState.STALLED):
             border = RED
-        elif summary.state == TerminalState.STALLED:
-            headline = Text("⚠ owloop stalled — no progress", style=f"bold {RED}")
-            border = RED
-        else:
-            headline = Text("🌅 owloop complete", style=f"bold {AMBER}")
+            if summary.state == TerminalState.FAILED:
+                headline = Text("✗ owloop failed", style=f"bold {RED}")
+            elif summary.state == TerminalState.TAMPERED:
+                headline = Text("⚠ owloop stopped — spec tampering detected", style=f"bold {RED}")
+            elif summary.state == TerminalState.EXHAUSTED:
+                headline = Text("⚠ owloop stopped — budget exhausted, work not finished", style=f"bold {RED}")
+            else:
+                headline = Text("⚠ owloop stalled — no progress", style=f"bold {RED}")
+        elif summary.state in (TerminalState.BLOCKED, TerminalState.DECIDE, TerminalState.INTERRUPTED):
             border = AMBER
+            if summary.state == TerminalState.BLOCKED:
+                headline = Text("⚠ owloop blocked — external blocker", style=f"bold {AMBER}")
+            elif summary.state == TerminalState.DECIDE:
+                headline = Text("⚠ owloop paused — decision needed", style=f"bold {AMBER}")
+            else:
+                headline = Text("⚠ owloop interrupted — resume with --resume", style=f"bold {AMBER}")
+        else:
+            border = AMBER
+            headline = Text("🌅 owloop complete", style=f"bold {AMBER}")
 
         body = Group(
             owl,

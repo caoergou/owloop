@@ -539,7 +539,9 @@ def test_resolve_worktree_session_includes_spec_slug(tmp_path: Path) -> None:
 
     specs = repo / ".owloop" / "specs"
     specs.mkdir(parents=True)
-    (specs / "04-extract-issue-service.md").write_text("# Spec\n", encoding="utf-8")
+    (specs / "04-extract-issue-service.md").write_text(
+        "# Spec: extract issue service\n", encoding="utf-8"
+    )
 
     session_id, branch, path = engine._resolve_worktree_session()
 
@@ -557,18 +559,13 @@ def test_resolve_worktree_session_slugifies_title(tmp_path: Path) -> None:
 
     specs = repo / ".owloop" / "specs"
     specs.mkdir(parents=True)
-    (specs / "02-Hello World_Refactor.md").write_text("# Spec\n", encoding="utf-8")
+    (specs / "02-Hello World_Refactor.md").write_text(
+        "# Spec: Hello World Refactor\n", encoding="utf-8"
+    )
 
     session_id, branch, path = engine._resolve_worktree_session()
 
     assert "hello-world-refactor" in branch
-
-
-def test_session_id_from_branch_supports_legacy_and_slug_formats() -> None:
-    from owloop.engine import OwloopEngine
-
-    assert OwloopEngine._session_id_from_branch("owloop/20260706-abc123") == "abc123"
-    assert OwloopEngine._session_id_from_branch("owloop/20260706-extract-issue-service-abc123") == "abc123"
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -1203,7 +1200,7 @@ def test_gate_failure_writes_failure_feedback(tmp_path: Path, monkeypatch) -> No
     specs = repo / ".owloop" / "specs"
     specs.mkdir(parents=True)
     (specs / "01-test.md").write_text(
-        "# Spec\n\n## Acceptance Criteria\n- check: `echo broken-thing >&2; exit 3`\n",
+        """# Spec\n\n## Acceptance Criteria\n- check: `python -c "import sys; sys.stderr.write('broken-thing'); sys.exit(3)"`\n""",
         encoding="utf-8",
     )
     monkeypatch.setattr("owloop.engine.time.sleep", lambda _: None)
@@ -1224,7 +1221,10 @@ def test_gate_failure_writes_failure_feedback(tmp_path: Path, monkeypatch) -> No
 
     feedback = (repo / ".owloop" / "last-failure.md").read_text(encoding="utf-8")
     assert "verification_failed" in feedback
-    assert "echo broken-thing >&2; exit 3" in feedback  # the failing command
+    assert (
+        "python -c \"import sys; sys.stderr.write('broken-thing'); sys.exit(3)\""
+        in feedback
+    )  # the failing command
     assert "(exit 3)" in feedback  # its exit code
     assert "broken-thing" in feedback  # its output tail
 

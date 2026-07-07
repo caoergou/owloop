@@ -186,7 +186,7 @@
               </div>
             </div>
             <div class="terminal-statusbar">
-              <span>owloop v0.2.1</span>
+              <span>owloop v0.5.0</span>
               <span>model: claude-sonnet-5</span>
               <span>budget: 200k tokens</span>
               <button class="replay-btn" id="terminal-replay" type="button" title="Replay demo">↻ Replay</button>
@@ -297,6 +297,18 @@
             <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <h3>Token budget cap</h3>
             <p>Set <code>--max-tokens</code> and <code>--max-duration</code>. The loop stops before your wallet does.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h3>Persistent defaults</h3>
+            <p>Store your favorite flags in <code>.owloop/config.toml</code> under <code>[run]</code>. Stop typing the same model and budget every time.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-glow"></div>
+            <div class="feature-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h3>Resume & finish</h3>
+            <p><code>owloop run --resume</code> picks up where it stopped. <code>owloop finish</code> merges, pushes, and cleans up the worktree when you're ready.</p>
           </article>
         </div>
 

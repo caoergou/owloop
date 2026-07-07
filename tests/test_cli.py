@@ -92,7 +92,7 @@ def test_run_dry_run_flag_forwards_to_engine_runner():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--dry-run"])
             assert result.exit_code == 0, result.output
             mock_engine.assert_called_once()
@@ -106,7 +106,7 @@ def test_run_one_shot_alias_forwards_dry_run():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--one-shot"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -119,7 +119,7 @@ def test_run_without_dry_run_flag_defaults_false():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -132,7 +132,7 @@ def test_run_no_tui_flag_forwards_to_engine_runner():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--no-tui"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -145,7 +145,7 @@ def test_run_plain_alias_forwards_no_tui():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--plain"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -158,7 +158,7 @@ def test_run_without_no_tui_flag_defaults_false():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -178,7 +178,7 @@ def test_run_parses_max_tokens_per_iteration():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run", "--max-tokens-per-iteration", "10k"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -191,7 +191,7 @@ def test_run_without_max_tokens_per_iteration_defaults_zero():
     runner = CliRunner()
     with runner.isolated_filesystem():
         _init_repo_with_spec()
-        with patch("owloop.cli._run_engine") as mock_engine:
+        with patch("owloop.commands.run._run_engine") as mock_engine:
             result = runner.invoke(main, ["run"])
             assert result.exit_code == 0, result.output
             _args, kwargs = mock_engine.call_args
@@ -210,16 +210,16 @@ def test_run_engine_no_tui_bypasses_tui_and_uses_console_reporter():
         branch="main",
         cwd=Path("."),
         main_repo_dir=Path("."),
-        stopped_reason="max_iterations_reached",
+        stopped_reason="success",
     )
     fake_engine = MagicMock()
     fake_engine.run.return_value = summary
 
     with (
-        patch("owloop.cli.get_adapter"),
-        patch("owloop.cli.OwloopEngine", return_value=fake_engine) as mock_engine_cls,
-        patch("owloop.cli.OwloopTUI") as mock_tui_cls,
-        patch("owloop.cli.ConsoleReporter") as mock_reporter_cls,
+        patch("owloop.commands.run.get_adapter"),
+        patch("owloop.commands.run.OwloopEngine", return_value=fake_engine) as mock_engine_cls,
+        patch("owloop.commands.run.OwloopTUI") as mock_tui_cls,
+        patch("owloop.commands.run.ConsoleReporter") as mock_reporter_cls,
         patch("sys.stdout.isatty", return_value=True),
     ):
         _run_engine(0, True, "claude-model", "claude", no_tui=True)
@@ -227,41 +227,6 @@ def test_run_engine_no_tui_bypasses_tui_and_uses_console_reporter():
     mock_tui_cls.assert_not_called()
     mock_reporter_cls.assert_called_once()
     mock_engine_cls.assert_called_once()
-
-
-def test_run_engine_no_tui_preserves_confirm_prompts():
-    from pathlib import Path
-    from unittest.mock import MagicMock, patch
-
-    from owloop.cli import _run_engine
-    from owloop.engine import RunSummary
-
-    captured_config = {}
-
-    def _fake_engine_ctor(config, adapter, on_event=None):
-        captured_config["config"] = config
-        engine = MagicMock()
-        engine.run.return_value = RunSummary(
-            iterations=0, branch="main", cwd=Path("."), main_repo_dir=Path("."),
-            stopped_reason="max_iterations_reached",
-        )
-        return engine
-
-    with (
-        patch("owloop.cli.get_adapter"),
-        patch("owloop.cli.OwloopEngine", side_effect=_fake_engine_ctor),
-        patch("owloop.cli.ConsoleReporter"),
-        patch("sys.stdout.isatty", return_value=True),
-        patch("owloop.cli.Confirm.ask", return_value=True) as mock_confirm,
-    ):
-        _run_engine(0, True, "claude-model", "claude", no_tui=True)
-
-        config = captured_config["config"]
-        assert config.confirm_dirty is not None
-        assert config.confirm_worktree is not None
-        assert config.confirm_dirty() is True
-        assert config.confirm_worktree() is True
-        assert mock_confirm.call_count == 2
 
 
 def test_print_dry_run_report_shows_pass_fail_counts():
@@ -399,6 +364,21 @@ def test_go_help_exposes_run_options():
         "--max-tokens",
         "--worktree",
         "--no-worktree",
+        "--resume",
+        "--rollback",
+        "--no-rollback",
+        "--notify-webhook",
+        "--notify-desktop",
+        "--converge",
+        "--workers",
+        "--max-tokens-per-iteration",
+        "--max-turns-per-iteration",
+        "--max-budget-usd",
+        "--keep-retrying",
+        "--dry-run",
+        "--one-shot",
+        "--no-tui",
+        "--plain",
     ):
         assert option in result.output, f"{option} should appear in owloop go --help"
 
@@ -413,10 +393,9 @@ def test_go_forwards_options_to_engine_runner():
 
         with (
             patch.object(_NamedTextIOWrapper, "isatty", return_value=True),
-            patch("owloop.cli._run_engine") as mock_engine,
-            patch("owloop.cli.Confirm.ask", return_value=True),
-            patch("owloop.cli.SpecGenerator") as mock_gen,
-            patch("owloop.cli.get_adapter") as mock_adapter,
+            patch("owloop.commands.go._run_engine") as mock_engine,
+            patch("owloop.commands.go.SpecGenerator") as mock_gen,
+            patch("owloop.commands.go.get_adapter") as mock_adapter,
         ):
             mock_gen.return_value.generate.return_value = []
             mock_adapter.return_value = MagicMock()
@@ -434,13 +413,14 @@ def test_go_forwards_options_to_engine_runner():
             assert result.exit_code == 0, result.output
             mock_engine.assert_called_once()
             args, kwargs = mock_engine.call_args
-            assert args[0] == 0
-            assert args[1] is False
-            assert args[2] == "test-model"
-            assert args[3] == "kimi"
-            assert args[4] == 120.0
-            assert args[5] == 30
-            assert args[6] == 10000
+            assert args == ()
+            assert kwargs.get("max_iterations") == 0
+            assert kwargs.get("worktree") is False
+            assert kwargs.get("model") == "test-model"
+            assert kwargs.get("agent") == "kimi"
+            assert kwargs.get("idle_timeout") == 120.0
+            assert kwargs.get("max_duration") == 30
+            assert kwargs.get("max_tokens") == 10000
             assert kwargs.get("verifier_model") == "v-model"
             assert kwargs.get("subagents") is True
             assert kwargs.get("ascii") is False

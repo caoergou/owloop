@@ -155,6 +155,28 @@ class ConsoleReporter:
             c.print(f"[{_brand.CYAN}]{self._mark('info')} push skipped (--no-push); commits remain on {data['branch']}[/]")
         elif kind == "interrupted":
             c.print("\n[dim]owloop stopped[/]")
+        elif kind == "parallel_session_info":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} parallel session: {data.get('workers', 0)} workers[/]")
+        elif kind == "worker_start":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} worker {worker} started{f' on {spec}' if spec else ''}[/]")
+        elif kind == "round_start":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} parallel round {data.get('round', '?')} started[/]")
+        elif kind == "round_end":
+            c.print(f"[{_brand.CYAN}]{self._mark('info')} parallel round {data.get('round', '?')} ended[/]")
+        elif kind == "worker_merged":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            c.print(f"[{_brand.GREEN}]{self._mark('ok')} worker {worker} merged{f' ({spec})' if spec else ''}[/]")
+        elif kind == "worker_merge_conflict":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            c.print(f"[{_brand.RED}]{self._mark('fail')} worker {worker} merge conflict{f' ({spec})' if spec else ''}[/]")
+        elif kind == "worker_no_done":
+            worker = data.get("worker_id", "?")
+            spec = data.get("spec_name", "")
+            c.print(f"[{_brand.AMBER}]{self._mark('warn')} worker {worker} finished without done signal{f' ({spec})' if spec else ''}[/]")
 
     FAILED_REASONS = {"preflight_failed", "dirty_workspace_declined"}
 
@@ -176,7 +198,7 @@ class ConsoleReporter:
             f"git diff --stat HEAD~{iterations}..HEAD",
         ]
 
-    def print_summary(self, summary: RunSummary) -> None:
+    def print_summary(self, summary: RunSummary, report_path: str | None = None) -> None:
         c = self.console
         failed = summary.stopped_reason in self.FAILED_REASONS
 
@@ -226,6 +248,8 @@ class ConsoleReporter:
             iterations=summary.iterations,
             cwd=str(summary.cwd),
             main_repo_dir=str(summary.main_repo_dir),
+            stopped_reason=summary.stopped_reason,
+            report_path=report_path,
         )
 
         sections: list = [Align.center(facts)]
@@ -270,14 +294,30 @@ class ConsoleReporter:
             return
 
         # Headline honors the terminal state so "complete" is reserved for a
-        # genuine success — an exhausted or stalled run gets its own wording.
-        incomplete_states = {TerminalState.EXHAUSTED, TerminalState.STALLED}
-        if summary.state in incomplete_states:
-            headline = Text(f"{self._mark('warn')} owloop stopped without finishing", style=f"bold {_brand.RED}")
+        # genuine success.
+        if summary.state in (TerminalState.FAILED, TerminalState.TAMPERED, TerminalState.EXHAUSTED, TerminalState.STALLED):
             border = _brand.RED
-        else:
-            headline = Text(self._status("complete"), style=f"bold {_brand.AMBER}")
+            if summary.state == TerminalState.FAILED:
+                headline_text = f"{self._mark('fail')} owloop failed"
+            elif summary.state == TerminalState.TAMPERED:
+                headline_text = f"{self._mark('warn')} owloop stopped — spec tampering detected"
+            elif summary.state == TerminalState.EXHAUSTED:
+                headline_text = f"{self._mark('warn')} owloop stopped — budget exhausted, work not finished"
+            else:
+                headline_text = f"{self._mark('warn')} owloop stalled — no progress"
+            headline = Text(headline_text, style=f"bold {_brand.RED}")
+        elif summary.state in (TerminalState.BLOCKED, TerminalState.DECIDE, TerminalState.INTERRUPTED):
             border = _brand.AMBER
+            if summary.state == TerminalState.BLOCKED:
+                headline_text = f"{self._mark('warn')} owloop blocked — external blocker"
+            elif summary.state == TerminalState.DECIDE:
+                headline_text = f"{self._mark('warn')} owloop paused — decision needed"
+            else:
+                headline_text = f"{self._mark('warn')} owloop interrupted — resume with --resume"
+            headline = Text(headline_text, style=f"bold {_brand.AMBER}")
+        else:
+            border = _brand.AMBER
+            headline = Text(self._status("complete"), style=f"bold {_brand.AMBER}")
         owl.stylize(f"dim {_brand.AMBER}")
         body = Group(owl, Align.center(headline), *sections)
         c.print(Panel(body, border_style=border, padding=(1, 4), width=64))
